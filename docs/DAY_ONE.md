@@ -96,7 +96,7 @@ tools/tpfre/Cargo.toml`.
    - `makeWorldBuildProposalCmd`'s `playerInitiated`: whether the stock
      street tool sets it, and whether the hook sees it where the command is
      queued (HOOKS.md, the caller-RVA filter);
-   - whether `api.cmd.Debug.makeGamePerformSimulationStepsCmd` works in the
+   - whether `api.cmd.debug.makeGamePerformSimulationStepsCmd` works in the
      release build (REGRESSION.md, "With the real game");
    - the Epic/GOG build (40393) next to Steam's (40408): run steps 1 to 3 on
      both executables, since the hook needs a profile for each.

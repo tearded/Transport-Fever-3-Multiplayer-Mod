@@ -194,11 +194,11 @@ makeAnimalSetStateCmd(animalEntity: Engine.Entity, movementType: integer,
   from the on-disk `.d.tl` in TPF3_RECON_2026-09-29.md -- the web
   reference's order was wrong). It is overloaded: a second signature takes
   a `SimpleProposal`. The Mod Hub tools call it `(proposal, nil, true, true)`
-  (TF3_MODHUB_SCRIPT_MODS_2026-09-29.md), so the last defaults or is
-  omitted. It may be the flag that tells a player's build from a script's
-  replay -- the distinction the capture needs (HOOKS.md, "The command
-  pipeline"). Measure it: whether a value there marks the build, and
-  whether the game reads it.
+  (TF3_MODHUB_SCRIPT_MODS_2026-09-29.md), so they set it to true. It is
+  not the flag that tells a player's build from our replay: the game's
+  scripts read it (a town's reputation changes only for player-initiated
+  builds), so a replay must carry the original value
+  (TPF3_RECON_2026-09-29.md, "The scripts, data and log").
 - **`makeScriptingSendEventCmd(src, id, name, param)`**: the four
   arguments are named. Mods pass `src = ""` and use `id` as the channel
   (TF3_MODHUB_SCRIPT_MODS_2026-09-29.md).
@@ -382,7 +382,7 @@ Documented in the wiki's modding manual:
 - Run the API dump probe (`tools/probe/tf3`) and diff it against this
   reference, to find what the reference leaves out ("not yet complete")
   and what a build changed.
-- Whether `makeGamePerformSimulationStepsCmd` (under `api.cmd.Debug`)
+- Whether `makeGamePerformSimulationStepsCmd` (under `api.cmd.debug`)
   works in the release build: it would let the regression harness step a
   real game without drawing (REGRESSION.md).
 - Run the day-one steps on the Epic/GOG build too.

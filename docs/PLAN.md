@@ -58,10 +58,10 @@ before the rest ([DAY_ONE.md](DAY_ONE.md) §0).
   loaded, `SteamAppId` set, Steam running), the game runs signed in, with
   the Workshop, and does not restart itself through Steam (which would
   lose the hook). DAY_ONE.md §5.
-- [ ] **Anti-tamper.** `binary_survey.py`: packer sections, entropy, TLS
+- [x] **Anti-tamper.** `binary_survey.py`: packer sections, entropy, TLS
   callbacks. TPF2 had SteamStub only; Denuvo or a VM protector changes
   the native plan.
-- [ ] **Archive the build.** Steam build ID, depot manifests, executable
+- [x] **Archive the build.** Steam build ID, depot manifests, executable
   hashes, and a private copy of each executable (DAY_ONE.md §1).
 - [ ] **Patch duty.** Name one person who, on every game patch, reruns the
   naming, the build diff and the profile, and holds the release until the
@@ -83,18 +83,20 @@ are.
   state has a dump of its own. The TPF2 probes stay as the fallback.
 - [x] Before release day: a tool for each release-day check
   (`tools/dayone/dayone.py`, DAY_ONE.md "Release day, step by step").
-- [ ] Read the game's `.tl` sources and `.d.tl` API declarations before
+- [x] Read the game's `.tl` sources and `.d.tl` API declarations before
   running the probes; list every `api.cmd.make*Cmd` and the tool that
   sends it.
 
 Then:
 
-- [ ] `binary_survey.py`: the Lua version, whether RTTI and `__FUNCSIG__`
+- [x] `binary_survey.py`: the Lua version, whether RTTI and `__FUNCSIG__`
   strings are present. (*Changed:* no proxy DLL to find, D11.)
-- [ ] `tools/tpfre` (D14; `name_functions.py` to cross-check): TF3's
+- [x] `tools/tpfre` (D14; `name_functions.py` to cross-check): TF3's
   equivalents of TPF2's `GameSim::Step`, `CGame::Step`,
   `CommandList::Add`, save and load, into the recon log. TF3's names may
-  differ from TPF2's.
+  differ from TPF2's. *Added:* found for build 40408 from RTTI and the
+  assert names, and cross-checked by source file
+  ([TPF3_RECON_2026-09-29.md](../investigation/TPF3_RECON_2026-09-29.md)).
 - [ ] `script_api_dump`: both state dumps (game script and GUI); every
   `api.cmd.make.*` factory; whether `io`, `os`, `require` and `load`
   exist.
@@ -103,7 +105,7 @@ Then:
   differing step per lane.
 - [ ] A Windows save loaded on Linux and the reverse: does it load, do the
   lanes match.
-- [ ] Where the game writes its log and crash dumps, and where it loads
+- [x] Where the game writes its log and crash dumps, and where it loads
   mods from (DAY_ONE.md, release-day order 6 and 7).
 
 ## Part 2: the first playable room

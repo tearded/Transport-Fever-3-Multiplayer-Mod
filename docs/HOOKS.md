@@ -583,8 +583,11 @@ types, recorded in
 [investigation/TF3_OFFICIAL_API_2026-09-29.md](../investigation/TF3_OFFICIAL_API_2026-09-29.md).
 A TF3 profile's factory targets are found for that list, not ported name
 for name from TPF2's. Two entries change the design directly:
-`makeWorldBuildProposalCmd` takes a fifth `playerInitiated` argument (a
-possible player-vs-replay signal, see below), and companies are commands
+`makeWorldBuildProposalCmd` takes a fourth `playerInitiated` argument (not
+a player-vs-replay signal after all: the game's scripts act on it, so a
+replay must carry the original value; see "The scripts, data and log" in
+[TPF3_RECON_2026-09-29.md](../investigation/TPF3_RECON_2026-09-29.md)),
+and companies are commands
 (`makeGameAddPlayerCmd`, `makeEntitySetPlayerCmd`), so ownership changes go
 through this same pipeline rather than the native, assert-bypassed
 `setPlayer` binding TPF2 patched.
