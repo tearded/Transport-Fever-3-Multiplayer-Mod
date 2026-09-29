@@ -276,7 +276,12 @@ fn the_run_script_dump_runs_from_its_run_function() {
 /// changes between samples. `advance(n)` runs n steps.
 const WORLD: &str = r#"
 local CT = { GAME_TIME = 1, TRANSPORT_VEHICLE = 2, BASE_EDGE = 3, BASE_NODE = 4,
-             CONSTRUCTION = 5, TOWN = 6, PLAYER = 7, SIM_PERSON = 8 }
+             CONSTRUCTION = 5, TOWN = 6, PLAYER = 7, SIM_PERSON = 8, ACCOUNT = 9 }
+-- TF3's shape (release build 40408): edges carry position0/position1,
+-- money is each player's ACCOUNT, and util.finance has no balances.
+-- TPF2_SHAPE switches the stand-in back to TPF2's node positions and
+-- finance.getPlayersBalance.
+TPF2_SHAPE = false
 local world = { step = 1234 }
 -- Whether the game time carries the release API's updateCount.
 WITH_UPDATE_COUNT = false
@@ -291,7 +296,12 @@ api = {
     engine = {
         util = {
             getWorld = function() return 0 end,
-            finance = { getPlayersBalance = function() return { [21] = 5000000 - s() * 3, [22] = 4000000 } end },
+            finance = setmetatable({}, { __index = function(_, k)
+                if k == "getPlayersBalance" and TPF2_SHAPE then
+                    return function() return { [21] = 5000000 - s() * 3, [22] = 4000000 } end
+                end
+                return nil
+            end }),
         },
         system = {
             simPersonSystem = { getCount = function() return 900 + math.floor(s() / 50) end },
@@ -304,6 +314,7 @@ api = {
         getEntitiesWithComponent = function(comp)
             if comp == CT.TRANSPORT_VEHICLE then return { 12, 11 } end
             if comp == CT.BASE_EDGE then return { 41 } end
+            if comp == CT.PLAYER then return { 22, 21 } end
             if comp == CT.CONSTRUCTION then return { 51 } end
             if comp == CT.TOWN then return { 31 } end
             return {}
@@ -312,7 +323,13 @@ api = {
             if id == 0 and comp == CT.GAME_TIME then
                 return { gameTime = s() * 200, updateCount = WITH_UPDATE_COUNT and s() or nil }
             end
-            if id == 41 and comp == CT.BASE_EDGE then return { node0 = 42, node1 = 43 } end
+            if id == 41 and comp == CT.BASE_EDGE then
+                if TPF2_SHAPE then return { node0 = 42, node1 = 43 } end
+                return { node0 = 42, node1 = 43, position0 = { x = 0, y = 0, z = 0 },
+                         position1 = { x = s() / 1000, y = 1, z = 0 } }
+            end
+            if id == 21 and comp == CT.ACCOUNT then return { balance = 5000000 - s() * 3, loan = 0 } end
+            if id == 22 and comp == CT.ACCOUNT then return { balance = 4000000, loan = 0 } end
             if id == 42 and comp == CT.BASE_NODE then return { position = { x = 0, y = 0, z = 0 } } end
             if id == 43 and comp == CT.BASE_NODE then return { position = { x = s() / 1000, y = 1, z = 0 } } end
             if id == 51 and comp == CT.CONSTRUCTION then
@@ -332,6 +349,11 @@ fn determinism_run(frames: usize, steps_per_frame: f64) -> (BTreeMap<u64, String
     determinism_run_with(frames, steps_per_frame, false)
 }
 
+thread_local! {
+    /// Runs the stand-in in TPF2's shape: node positions, finance balances.
+    static TPF2_WORLD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// As [`determinism_run`], with the game time's `updateCount` or without.
 fn determinism_run_with(
     frames: usize,
@@ -339,8 +361,9 @@ fn determinism_run_with(
     update_count: bool,
 ) -> (BTreeMap<u64, String>, String) {
     let lua = gui("tpf3mp_detprobe_1", WORLD, None);
+    let tpf2 = TPF2_WORLD.with(|flag| flag.get());
     lua.load(format!(
-        "WITH_UPDATE_COUNT = {update_count}          local m = mount(loadPlugin('gui/tpf3mp_detprobe/detprobe.script.lua', 'Tpf3mpDetProbe')) \
+        "WITH_UPDATE_COUNT = {update_count} TPF2_SHAPE = {tpf2}          local m = mount(loadPlugin('gui/tpf3mp_detprobe/detprobe.script.lua', 'Tpf3mpDetProbe')) \
          local owed = 0 \
          for _ = 1, {frames} do \
              m.step() \
@@ -426,4 +449,13 @@ fn with_the_update_count_the_probe_samples_it_directly() {
     for step in common {
         assert_eq!(fast[step], skipping[step], "step {step}");
     }
+}
+
+#[test]
+fn the_lanes_read_tpf2s_shape_too() {
+    TPF2_WORLD.with(|flag| flag.set(true));
+    let (samples, log) = determinism_run(1000, 1.0);
+    TPF2_WORLD.with(|flag| flag.set(false));
+    let first = samples.values().next().unwrap_or_else(|| panic!("{log}"));
+    assert!(!first.contains("=err"), "{first}");
 }

@@ -349,6 +349,37 @@ read without starting the game:
 - **Scripts.** 6,041 script files, 5,356 of them packed in the `UG`
   archives; 311 places send commands (`5-scripts.md`).
 
+## Measured in the running game, 2026-09-29 evening
+
+The three probe mods, active in a new game on build 40408, logged to
+`stdout.txt` (`investigation/dayone-2026-09-29/probe/`):
+
+- **Lua 5.2**; no `io`, so a mod cannot write files (the probes fell back
+  to the log as designed); `os` has only `clock`, `date`, `difftime`,
+  `getenv` and `time`; `load` and `debug` exist, `loadstring`, `dofile`
+  and `collectgarbage` do not; `package.path` is nil.
+- **Floats print as in TPF2**: `%.0f` rounds ties to even.
+- **`math.random` is MT19937**: seeded with 1 it gives 0.41702199843712
+  first, the Mersenne Twister's value, so games that seed it alike draw
+  alike.
+- **`pairs` order** is stable within a state across repeated
+  constructions.
+- **The step counter works**: the determinism probe's header says
+  `stepTime=updateCount`, and it sampled every 100 updates, game time 200
+  per update (5 a second at 1x, as TPF2).
+- **Lanes**: vehicles and positions read; edges and money read `err`
+  with TPF2's calls. The probe now reads `BASE_EDGE.position0/position1`
+  and each player's `ACCOUNT.balance` (`fix/detprobe-tf3-lanes`).
+- **`CMenuUI::StartSavegame`**: its lambdas keep the name in RTTI, and
+  its log line, now "Game initialization is already active!", is used
+  only by `0x6a2880` (in `menuui.cpp`, with "Preparing to load game" and
+  "Starting Game..."): the load entry, to confirm with its callers.
+- **A crash while loading** a game with the probes active (16:49 UTC,
+  `crash_dump/b4b39727-…_0.txt`, last line an error naming
+  `WithComponentParams`, a stock UI recipe the log warns about from the
+  main menu on). The next game, with the same probes, ran past step 1,200.
+  Not attributed; watch for it again.
+
 ## The modding manual
 
 Documented in the wiki's modding manual:

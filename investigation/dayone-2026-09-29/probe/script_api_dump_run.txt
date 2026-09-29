@@ -1,0 +1,133 @@
+# TPF3-MP script_api_dump (TF3) -- state: run script
+## Sandbox
+_VERSION = Lua 5.2
+globals: io=nil os=table require=function package=table debug=table load=function loadstring=nil collectgarbage=nil debugPrint=function ug_require=function print=function dofile=nil loadfile=nil setmetatable=function getmetatable=function rawget=nil unpack=nil bit32=table utf8=nil game=table api=table
+dialect markers: table.unpack=function goto(compiles)=yes integer division(//)=no
+  os = { clock, date, difftime, getenv, time }
+  io = nil
+  string = { byte, char, ends, find, format, gmatch, gsub, interp, len, lower, makeMoneyString, makeReadableNumber, match, rep, reverse, split, starts, strip, sub, upper }
+  math = { abs, acos, asin, atan, atan2, ceil, clamp, cos, cosh, deg, equal, exp, floor, fmod, frexp, herp, herpPrime, huge, invLerp, ldexp, lerp, log, log2, map, mapClamp, max, min, modf, pi, pow, rad, randf, random, randomseed, round, sin, sinh, sqrt, tan, tanh }
+  table = { concat, insert, pack, remove, sort, unpack }
+  package = { config, loaded, searchers, searchpath }
+  debug = { getinfo, traceback }
+package.path = nil
+package.cpath = nil
+
+## Number formatting
+string.format('%.17g', 0.1)  = 0.10000000000000001
+string.format('%.17g', 1/3)  = 0.33333333333333331
+string.format('%.17g', 2^53) = 9007199254740992
+tie rounding %.0f: 0.5=0 1.5=2 2.5=2 3.5=4 (half-even => 0,2,2,4)
+math.type = nil, 7/2 = 3.5, 5%3 = 2
+
+## math.random
+after randomseed(1): math.random() x5   = 0.41702199843712, 0.99718480813317, 0.72032448928803, 0.93255736120045, 0.00011438108049333
+after randomseed(1): math.random(6) x10 = 3, 6, 5, 6, 1, 1, 2, 6, 1, 2
+
+## pairs() order for string keys
+order: oscar,delta,november,mike,zebra,echo,yankee,bravo,alpha,charlie
+stable across 5 constructions in this state: true
+
+## The global table
+  _G : table
+  _VERSION : str
+  __genOrderedIndex : fn
+  _currentModIdTr : str
+  _getTextNow : bool=false
+  _react : table
+  _reactDoExecuteDeferredSteps : fn
+  _reactDoExecuteJoins : fn
+  _reactDoReplaceRecipes : fn
+  _rootData : bool=false
+  _ug_filePathRequireStack : table
+  _ug_loadedModules : table
+  addFileFilter : fn
+  addModifier : fn
+  api : table
+  app : bool=false
+  applyFileFilters : fn
+  applyModifiers : fn
+  assert : fn
+  bit32 : table
+  clearFileFilter : fn
+  cmd_finish : bool=false
+  cmd_next : bool=false
+  cmd_step : bool=false
+  coroutine : table
+  data : fn
+  dataNotDefined : fn
+  debug : table
+  debugPrint : fn
+  debugUtil : table
+  error : fn
+  game : table
+  getBuildOS : fn
+  getBuildPrefix : fn
+  getBuildVersion : fn
+  getCurrentModId : fn
+  getStringForPlatform : fn
+  getTableSize : fn
+  getmetatable : fn
+  gui : bool=false
+  ipairs : fn
+  ipairs_native : fn
+  load : fn
+  loaderHelper : bool=false
+  log : table
+  mapIter : fn
+  math : table
+  menu : bool=false
+  nGetText : fn
+  nGetTextRes : fn
+  next : fn
+  npGetText : fn
+  npGetTextRes : fn
+  orderedNext : fn
+  orderedPairs : fn
+  os : table
+  pGetTextRes : fn
+  pGetTextResWithMod : fn
+  package : table
+  pairs : fn
+  pairs_native : fn
+  pcall : fn
+  print : fn
+  rawlen : fn
+  rawset : fn
+  recordDef : bool=false
+  require : fn
+  resolveutil : table
+  select : fn
+  serialize : fn
+  serializeStr : fn
+  setStrings : bool=false
+  setmetatable : fn
+  simpleSerializeStr : fn
+  string : table
+  table : table
+  toString : fn
+  toStringInline : fn
+  tonumber : fn
+  tostring : fn
+  translateModStr : bool=false
+  type : fn
+  ug : table
+  ug_require : fn
+  ug_require_cleanup : fn
+  vecIter : fn
+  xpcall : fn
+
+## api.* tree (depth 3)
+api : table(0 keys)
+
+## Command factories: api.cmd.make*Cmd, and TPF2's api.cmd.make.*
+api.cmd is nil
+
+## game.interface.* tree (depth 3)
+game.interface is absent
+
+## ug_require of the game's GUI modules
+  ::/gui/main/react.lua -> error: [string "::/gui/main/react.lua"]:298: table index is nil
+  ::/gui/main/builtin.lua -> error: [string "::/gui/main/react.lua"]:298: table index is nil
+  ::/gui/game_bar/game_bar_widgets.tl -> error: [string "::/gui/main/react.lua"]:298: table index is nil
+

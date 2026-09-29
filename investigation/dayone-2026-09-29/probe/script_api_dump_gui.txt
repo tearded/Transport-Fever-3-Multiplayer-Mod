@@ -1,0 +1,3200 @@
+# TPF3-MP script_api_dump (TF3) -- state: gui (in a game)
+## Sandbox
+_VERSION = Lua 5.2
+globals: io=nil os=table require=function package=table debug=table load=function loadstring=nil collectgarbage=nil debugPrint=function ug_require=function print=function dofile=nil loadfile=nil setmetatable=function getmetatable=function rawget=nil unpack=nil bit32=table utf8=nil game=table api=table
+dialect markers: table.unpack=function goto(compiles)=yes integer division(//)=no
+  os = { clock, date, difftime, getenv, time }
+  io = nil
+  string = { byte, char, ends, find, format, gmatch, gsub, interp, len, lower, makeMoneyString, makeReadableNumber, match, rep, reverse, split, starts, strip, sub, upper }
+  math = { abs, acos, asin, atan, atan2, ceil, clamp, cos, cosh, deg, equal, exp, floor, fmod, frexp, herp, herpPrime, huge, invLerp, ldexp, lerp, log, log2, map, mapClamp, max, min, modf, pi, pow, rad, randf, random, randomseed, round, sin, sinh, sqrt, tan, tanh }
+  table = { concat, insert, pack, remove, sort, unpack }
+  package = { config, loaded, searchers, searchpath }
+  debug = { getinfo, traceback }
+package.path = nil
+package.cpath = nil
+
+## Number formatting
+string.format('%.17g', 0.1)  = 0.10000000000000001
+string.format('%.17g', 1/3)  = 0.33333333333333331
+string.format('%.17g', 2^53) = 9007199254740992
+tie rounding %.0f: 0.5=0 1.5=2 2.5=2 3.5=4 (half-even => 0,2,2,4)
+math.type = nil, 7/2 = 3.5, 5%3 = 2
+
+## math.random
+after randomseed(1): math.random() x5   = 0.41702199843712, 0.99718480813317, 0.72032448928803, 0.93255736120045, 0.00011438108049333
+after randomseed(1): math.random(6) x10 = 3, 6, 5, 6, 1, 1, 2, 6, 1, 2
+
+## pairs() order for string keys
+order: mike,bravo,charlie,alpha,november,zebra,oscar,echo,delta,yankee
+stable across 5 constructions in this state: true
+
+## The global table
+  _G : table
+  _VERSION : str
+  __genOrderedIndex : fn
+  _currentModIdTr : str
+  _getTextNow : bool=true
+  _react : table
+  _reactDoExecuteDeferredSteps : fn
+  _reactDoExecuteJoins : fn
+  _reactDoReplaceRecipes : fn
+  _ug_filePathRequireStack : table
+  _ug_loadedModules : table
+  addFileFilter : fn
+  addModifier : fn
+  api : table
+  app : table
+  applyFileFilters : fn
+  applyModifiers : fn
+  assert : fn
+  bit32 : table
+  clearFileFilter : fn
+  cmd_finish : bool=false
+  cmd_next : bool=false
+  cmd_step : bool=false
+  coroutine : table
+  data : fn
+  dataNotDefined : fn
+  debug : table
+  debugPrint : fn
+  debugUtil : table
+  error : fn
+  game : table
+  getBuildOS : fn
+  getBuildPrefix : fn
+  getBuildVersion : fn
+  getCurrentModId : fn
+  getStringForPlatform : fn
+  getTableSize : fn
+  getmetatable : fn
+  gui : bool=false
+  ipairs : fn
+  ipairs_native : fn
+  load : fn
+  loaderHelper : ud
+  log : table
+  mapIter : fn
+  math : table
+  menu : bool=false
+  nGetText : fn
+  nGetTextRes : fn
+  next : fn
+  npGetText : fn
+  npGetTextRes : fn
+  orderedNext : fn
+  orderedPairs : fn
+  os : table
+  pGetTextRes : fn
+  pGetTextResWithMod : fn
+  package : table
+  pairs : fn
+  pairs_native : fn
+  pcall : fn
+  print : fn
+  rawlen : fn
+  rawset : fn
+  recordDef : bool=false
+  require : fn
+  resolveutil : table
+  select : fn
+  serialize : fn
+  serializeStr : fn
+  setStrings : bool=false
+  setmetatable : fn
+  simpleSerializeStr : fn
+  string : table
+  table : table
+  toString : fn
+  toStringInline : fn
+  tonumber : fn
+  tostring : fn
+  translateModStr : bool=false
+  type : fn
+  ug : table
+  ug_require : fn
+  ug_require_cleanup : fn
+  vecIter : fn
+  xpcall : fn
+
+## api.* tree (depth 3)
+api : table(7 keys)
+  cmd : table(62 keys)
+    __index : fn
+    __metatable : bool=false
+    __newindex : fn
+    debug : table(12 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      makeClearLogbooksCmd : table
+      makeComponentExchangeCmd : table
+      makeGamePerformSimulationStepsCmd : table
+      makeMaintenanceCostUpdateCmd : table
+      makeSimPersonSetHappiness : table
+      makeSimPersonSetStateCmd : table
+      makeStockSetCargoAmountCmd : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeAnimalSetStateCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeAnimalSpawnAtCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeCreateIndustryExtendProposalCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeCustomEntityCreateCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeCustomEntityDestroyCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeCustomEntityUpdateStateCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeCustomEntityUpdateTransformationCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeCustomVehicleCreateOrUpdateCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeEntitySetColorCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeEntitySetEmissionsCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeEntitySetNameCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeEntitySetPlayerCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeGameAddPlayerCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeGameSetCalendarSpeedCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeGameSetCloudCoverageCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeGameSetDateCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeGameSetSpeedCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeGameSetTimeOfDayCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeIndustrySetDespawnTimeCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeIndustrySetManualDevelopmentCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeJournalBookAssetCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeJournalClearAllCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeJournalLogEntryCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeLineCreateCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeLineDestroyCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeLineUpdateCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeScriptingSendEventCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeStockListDiscardCargoCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeStockListSetModifiersCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeStockListSetStocksCargoTypeCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeTownAutoDetectConnectionsCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeTownBuildingSetBlockedDevelopmentCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeTownConnectWithIndustriesCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeTownCreateCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeTownCustomDistributionWeightsCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeTownDestroyCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeTownDevelopAtCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeTownSetDevelopmentActiveCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeTownSetInitialLandUseCapacitiesCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeTownUpdateCargoNeedsCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeTownUpdateSizeCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeVehicleBuyCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeVehicleReplaceCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeVehicleReverseCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeVehicleSellCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeVehicleSendToDepotCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeVehicleSetLineCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeVehicleSetManualDepartureCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeVehicleSetModifiersCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeVehicleSetStoppedByUserCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeVehicleTryToDepartCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeWorldBuildProposalCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeWorldChangeWindCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeWorldReplaceTerrainCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    makeWorldSetBulldozableCmd : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    sendCommand : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    userdata: 00000000000005E7 : table(0 keys)
+    userdata: 00000000000006E7 : table(0 keys)
+  engine : table(16 keys)
+    __index : fn
+    __metatable : bool=false
+    __newindex : fn
+    config : table(7 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      getConfigDict : table
+      getModParams : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    entityExists : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    forEachEntity : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    forEachEntityWithComponent : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getComponent : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getEntitiesWithComponent : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getRevision : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    mapgen : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      createIndustries : table
+      createTowns : table
+      getDefaultTownConnections : table
+      getMinMaxValidNumIndustries : table
+      getMinMaxValidNumTowns : table
+      getMinMaxValidTerrainHeight : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    system : table(39 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      aircraftMoveSystem : table
+      animalMoveSystem : table
+      baseParallelStripSystem : table
+      carriageListSystem : table
+      catchmentAreaSystem : table
+      emissionGridSystem : table
+      gameScriptSystem : table
+      gridCollision : table
+      landVehicleMoveSystem : table
+      landmarkSystem : table
+      lineSystem : table
+      octreeSystem : table
+      parcelSystem : table
+      railRoadCrossingSystem : table
+      riverSystem : table
+      runwaySystem : table
+      shipMoveSystem : table
+      signalSystem : table
+      simEntityAtStockSystem : table
+      simEntityAtTerminalSystem : table
+      simEntityAtVehicleSystem : table
+      simPersonAtBuildingSystem : table
+      simPersonAtTerminalSystem : table
+      simPersonAtVehicleSystem : table
+      simPersonSystem : table
+      stationGroupSystem : table
+      stationSystem : table
+      streetConnectorSystem : table
+      streetSystem : table
+      townBuildingSystem : table
+      tpNetLinkSystem : table
+      transportNetworkSystem : table
+      transportVehicleSystem : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+      vehicleDepotSystem : table
+    terrain : table(16 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      ceilTerrainFragmentInTiles : table
+      getBaseHeightAt : table
+      getBaseResolution : table
+      getBoundingBox : table
+      getHeightAt : table
+      getHeightmapEntity : table
+      getHighResolution : table
+      getTerrainEntityRevisions : table
+      isOnWater : table
+      isValidCoordinate : table
+      makeMapFromGame : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    userdata: 00000000000005E7 : table(0 keys)
+    userdata: 00000000000006E7 : table(0 keys)
+    util : table(32 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      cargo : table
+      chart : table
+      construction : table
+      emission : table
+      finance : table
+      formatAge : table
+      getCalendarDate : table
+      getEntityName : table
+      getEntityNameStem : table
+      getPlayer : table
+      getWorld : table
+      getYear : table
+      hasStartedAsMission : table
+      headquarters : table
+      industry : table
+      line : table
+      logbook : table
+      maintenance : table
+      octree : table
+      parallelStrip : table
+      pathfinding : table
+      proposal : table
+      station : table
+      stock : table
+      town : table
+      transport : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+      vehicle : table
+  gui : table(39 keys)
+    DataTransferItem : table(1 keys)
+      new : fn
+    HighlightStyle : table(4 keys)
+      __index : table
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    NinePatch : table(1 keys)
+      new : fn
+    SelectionDetails : table(12 keys)
+      Line : table
+      Marker : table
+      Signal : table
+      Station : table
+      Stop : table
+      Town : table
+      TransportNetworkEdge : table
+      Type : table
+      Waypoint : table
+      World : table
+      __nested : table
+      new : fn
+    StyleSheet : table(1 keys)
+      new : fn
+    __index : fn
+    __metatable : bool=false
+    __nested : table(4 keys)
+      1 : str
+      2 : str
+      3 : str
+      4 : str
+    __newindex : fn
+    achievements : table(15 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      areStatsDisabled : table
+      getStatExtraData : table
+      getStatValue : table
+      isAchievementUnlockable : table
+      isAchievementUnlocked : table
+      setEarnedSFX : table
+      setStat : table
+      setStatExtraData : table
+      unlockAchievement : table
+      updateStat : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    backend : table(26 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      createAccount : table
+      createProfile : table
+      getAccountInfo : table
+      getCountries : table
+      getLegalDocument : table
+      getLegalDocuments : table
+      getProfile : table
+      getThirdPartyAutoLoginPromptState : table
+      getThirdPartyLinkState : table
+      hasLegalDocuments : table
+      isAccountLoggedIn : table
+      isInitialized : table
+      linkThirdPartyAccount : table
+      loginAccount : table
+      loginThirdPartyAccount : table
+      logoutAccount : table
+      markLegalDocumentViewed : table
+      renameProfile : table
+      setThirdPartyAutoLoginPromptState : table
+      supportsAccountLinking : table
+      unlinkThirdPartyAccount : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    benchMark : table(15 keys)
+      SimTime : table
+      __index : fn
+      __metatable : bool=false
+      __nested : table
+      __newindex : fn
+      getBeginFrameTimes : table
+      getCommandTimes : table
+      getCoreStepTimes : table
+      getEventTimes : table
+      getGameStepTimes : table
+      getRenderTimes : table
+      getReplicateTimes : table
+      getSwapTimes : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    byEntity : table(8 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      isLineEmptyOrVisible : table
+      isVehicleVisible : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    byId : table(13 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      getSize : table
+      isVisible : table
+      isVisibleRecursive : table
+      resetMovedWindowPosition : table
+      setEnabled : table
+      setHighlighted : table
+      setVisibilityByClass : table
+      setVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    camera : table(26 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      enterFollowCameraCockpit : table
+      focusEntity : table
+      focusPosition : table
+      followEntity : table
+      getCameraData : table
+      getCenter : table
+      getEye : table
+      getFollowEntity : table
+      getHeightAboveTerrain : table
+      getNearFar : table
+      getSize : table
+      isFreeCameraMouseAttached : table
+      leaveFollowCameraCockpit : table
+      screen2World : table
+      setCameraData : table
+      setManualCamera : table
+      takeScreenshot : table
+      toggleFreeCamera : table
+      toggleFreeCameraMouseAttachment : table
+      traceToTerrain : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+      world2Screen : table
+    closeAllWindows : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    construction : table(10 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      getBrushIcons : table
+      getRefundableEntities : table
+      provideDustWheneverPossible : table
+      setAngle : table
+      updateRefundableEntities : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    contextHelper : table(8 keys)
+      SubjectState : table
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      collectSubjectStates : table
+      getIdsOfActiveTool : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    debug : table(6 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      selectEntity : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    dnd : table(10 keys)
+      Event : table
+      __index : fn
+      __metatable : bool=false
+      __nested : table
+      __newindex : fn
+      addTransferData : table
+      getAllTransferData : table
+      setCursor : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    fireGuiScriptEvent : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    fireReactEvent : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    game : table(14 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      getDefaultSavegameId : table
+      getEnvironment : table
+      getEstimatedMaximumGameSpeed : table
+      getGuiSaveData : table
+      isMapEditor : table
+      isSavegameUIBlocked : table
+      setEnvironment : table
+      setGuiSaveData : table
+      setInGameMenuPause : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    genericRep : table(12 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getAllOfType : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    guide : table(13 keys)
+      FreeGuidePosition : table
+      GuidePosition : table
+      GuideTarget : table
+      __index : fn
+      __metatable : bool=false
+      __nested : table
+      __newindex : fn
+      completeGuideById : table
+      resetGuide : table
+      trySpawnGuideById : table
+      trySpawnGuideFree : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    inputAction : table(13 keys)
+      InputActionState : table
+      InvokeData : table
+      __index : fn
+      __metatable : bool=false
+      __nested : table
+      __newindex : fn
+      findDuplicatesOf : table
+      getFixedKeyCmdDefs : table
+      hasConflicts : table
+      modifierOnlyActionIsActive : table
+      resetModifierOnlyActionStates : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    key : table(9 keys)
+      Event : table
+      InputEvent : table
+      State : table
+      __index : fn
+      __metatable : bool=false
+      __nested : table
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    map : table(9 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      closeTerrainEditor : table
+      openTerrainEditor : table
+      reloadMaterialIndexManagerPipeline : table
+      setMapSeedText : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    mission : table(18 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      getCampaign : table
+      getCutsceneElapsedTime : table
+      getMission : table
+      isCutscenePlaying : table
+      playCutscene : table
+      removeMarker : table
+      removeMovePathVisualization : table
+      removeZone : table
+      setMarkerAtEntity : table
+      setMarkerAtPosition : table
+      setMovePathVisualizationAtEntity : table
+      setZone : table
+      setZoneCircle : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    mouse : table(9 keys)
+      Event : table
+      __index : fn
+      __metatable : bool=false
+      __nested : table
+      __newindex : fn
+      getTerrainPosition : table
+      hasTerrainPosition : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    musicPlayer : table(25 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      addTrackList : table
+      getArtist : table
+      getGain : table
+      getPlaylist : table
+      getPlaylistIndex : table
+      getTitle : table
+      getTrackElapsedTime : table
+      getTrackLength : table
+      goBack : table
+      goForward : table
+      hasPlaylist : table
+      isPlaying : table
+      playTrack : table
+      playTrackFile : table
+      setContextTag : table
+      setGain : table
+      setPlaylist : table
+      setTrackList : table
+      setTrackListFromPlayList : table
+      togglePause : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    react : table(12 keys)
+      NodeRef : table
+      WorkItemResult : table
+      __index : fn
+      __metatable : bool=false
+      __nested : table
+      __newindex : fn
+      detail : table
+      enqueueParallelWorkItem : table
+      fireEvent : table
+      params : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    rendering : table(9 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      getEnvironment : table
+      getFrameTime01 : table
+      setEnvironment : table
+      spawnDust : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    sound : table(7 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      letVehicleHorn : table
+      playRandomSoundEffect : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    spawnEphemeralHudImage : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    spawnEphemeralHudImageOnPath : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    userdata: 00000000000005E7 : table(0 keys)
+    userdata: 00000000000006E7 : table(0 keys)
+    voiceOverManager : table(10 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      getPlaying : table
+      isPlaying : table
+      isPlayingAny : table
+      play : table
+      stop : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+  modhub : table(46 keys)
+    __index : fn
+    __metatable : bool=false
+    __newindex : fn
+    authenticateUserEmailAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    authenticateUserExternalAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    exportValidatorResult : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    forceUninstallModAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getBackendIDs : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getBackendIdForSource : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getCapabilities : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getDescription : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getInstalledMods : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getModDetailsAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getModHubModIdForModId : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getModInfoForInstalledMod : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getModInfoForSubscribedMod : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getModInstallInfo : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getModInstallState : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getModManagementState : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getModMediaAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getModRatingAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getModSubscriptionState : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getModhubModIdForSavegame : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getSortAndFilterOptions : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getStorageInfo : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getTermsOfUseAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getUserInfo : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    isInitialized : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    listModsAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    logoutAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    openExternalModPage : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    openPath : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    refreshAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    requestEmailAuthCodeAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    restartModBackendAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    setModManagementMode : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    setModhubModIdForSavegame : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    shouldRetryInstall : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    specialRefreshModAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    stageSavegame : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    submitModRatingAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    submitModReportAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    subscribeModAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    unsubscribeModAsync : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    userdata: 00000000000005E7 : table(0 keys)
+    userdata: 00000000000006E7 : table(0 keys)
+  res : table(31 keys)
+    __index : fn
+    __metatable : bool=false
+    __newindex : fn
+    autoGroundTexRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    bridgeTypeRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    builderAudioSetRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    buildingTypeRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    cargoClassRep : table(13 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getCargoClassId : table
+      getName : table
+      hasCargoClass : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    cargoTypeRep : table(14 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      forEachCargoType : table
+      get : table
+      getAll : table
+      getName : table
+      getPassengerCargoTypeId : table
+      hasCargoType : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    climateRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    constructionRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    economyRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    edgeDecorationRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    environmentRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    gameScriptRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    genericRep : table(12 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getAllOfType : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getBaseConfig : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    groundTextureRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    metaConstructionRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    modelRep : table(12 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      forEachModelWithMetadata : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    moduleRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    multipleUnitRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    railroadCrossingTypeRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    soundSetRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    streetStyleRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    streetTemplateRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    terrainMaterialTypeRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    trafficLightTypeRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    tunnelTypeRep : table(11 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      find : table
+      findAndGet : table
+      get : table
+      getAll : table
+      getName : table
+      isVisible : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    userdata: 00000000000005E7 : table(0 keys)
+    userdata: 00000000000006E7 : table(0 keys)
+  type : table(583 keys)
+    Account : table(1 keys)
+      new : fn
+    AchievementDesc : table(0 keys)
+    AchievementRep : table(0 keys)
+    Aircraft : table(1 keys)
+      new : fn
+    AircraftInfo : table(1 keys)
+      new : fn
+    Animal : table(1 keys)
+      new : fn
+    AnimalSetState : table(1 keys)
+      new : fn
+    AnimalSpawnAt : table(1 keys)
+      new : fn
+    AppConfig : table(3 keys)
+      AudioEffectSettings : table
+      __nested : table
+      new : fn
+    AssetGroup : table(1 keys)
+      new : fn
+    AssetGroupAutoRemove : table(1 keys)
+      new : fn
+    Async_SavegameInfo : table(0 keys)
+    AtmosphereParams : table(1 keys)
+      new : fn
+    AudioEmitter : table(1 keys)
+      new : fn
+    AutoGroundTex : table(1 keys)
+      new : fn
+    BaseConfig : table(12 keys)
+      AdvancedOptions : table
+      Animal : table
+      Economy : table
+      Emission : table
+      Locations : table
+      NameList : table
+      Particles : table
+      Settings : table
+      Terrain : table
+      Water : table
+      __nested : table
+      new : fn
+    BaseEdge : table(1 keys)
+      new : fn
+    BaseEdgeStreet : table(1 keys)
+      new : fn
+    BaseNode : table(1 keys)
+      new : fn
+    BaseNodeConfig : table(1 keys)
+      new : fn
+    BaseNodeLaneConnectionAndEntity : table(1 keys)
+      new : fn
+    BaseNodeTrafficLight : table(1 keys)
+      new : fn
+    BaseParallelStrip : table(3 keys)
+      BaseEdgeRange : table
+      __nested : table
+      new : fn
+    BoundingInfo : table(1 keys)
+      new : fn
+    BoundingVolume : table(1 keys)
+      new : fn
+    Box2 : table(1 keys)
+      new : fn
+    Box3 : table(1 keys)
+      new : fn
+    Bridge : table(3 keys)
+      Interval : table
+      __nested : table
+      new : fn
+    BridgeType : table(1 keys)
+      new : fn
+    BuildCost : table(1 keys)
+      new : fn
+    BuilderAudioSet : table(1 keys)
+      new : fn
+    BuildingType : table(3 keys)
+      TownBuildingParams : table
+      __nested : table
+      new : fn
+    BulldozerInfo : table(1 keys)
+      new : fn
+    CampaignDesc : table(1 keys)
+      new : fn
+    CargoCategory : table(1 keys)
+      new : fn
+    CargoClass : table(1 keys)
+      new : fn
+    CargoQualityData : table(1 keys)
+      new : fn
+    CargoType : table(1 keys)
+      new : fn
+    CargoTypeSet : table(1 keys)
+      new : fn
+    Carriage : table(1 keys)
+      new : fn
+    CarriageList : table(1 keys)
+      new : fn
+    ChangeComponentDEBUG : table(1 keys)
+      new : fn
+    ChartConfig : table(1 keys)
+      new : fn
+    ChartResult : table(1 keys)
+      new : fn
+    ClearLogbooksDEBUG : table(1 keys)
+      new : fn
+    ClimateDesc : table(4 keys)
+      DataMap : table
+      TerrainData : table
+      __nested : table
+      new : fn
+    Clock : table(1 keys)
+      new : fn
+    Collider : table(6 keys)
+      Box : table
+      Cylinder : table
+      PointCloud : table
+      Type : table
+      __nested : table
+      new : fn
+    ColliderList : table(1 keys)
+      new : fn
+    CollisionInfo : table(4 keys)
+      CollisionData : table
+      EntityData : table
+      __nested : table
+      new : fn
+    Color : table(1 keys)
+      new : fn
+    Command : table(1 keys)
+      new : fn
+    CommandProgress : table(1 keys)
+      new : fn
+    CompanyValue : table(1 keys)
+      new : fn
+    ComponentType : table(4 keys)
+      __index : table
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    Connection : table(1 keys)
+      new : fn
+    Construction : table(1 keys)
+      new : fn
+    ConstructionDesc : table(3 keys)
+      EdgeObject : table
+      __nested : table
+      new : fn
+    ConstructionSlot : table(1 keys)
+      new : fn
+    ConstructionSlotConfig : table(1 keys)
+      new : fn
+    ConstructionTemplate : table(1 keys)
+      new : fn
+    Context : table(1 keys)
+      new : fn
+    CreateIndustryExtendProposal : table(1 keys)
+      new : fn
+    CustomEntityCreate : table(1 keys)
+      new : fn
+    CustomEntityDestroy : table(1 keys)
+      new : fn
+    CustomEntityUpdateState : table(1 keys)
+      new : fn
+    CustomEntityUpdateTransformation : table(1 keys)
+      new : fn
+    CustomState : table(1 keys)
+      new : fn
+    CustomVehicleCreate : table(1 keys)
+      new : fn
+    Date : table(4 keys)
+      fromString : fn
+      fromYear : fn
+      new : fn
+      now : fn
+    DestinationUseCount : table(1 keys)
+      new : fn
+    DynamicConstructionTemplate : table(1 keys)
+      new : fn
+    EconomyDesc : table(1 keys)
+      new : fn
+    Edge : table(1 keys)
+      new : fn
+    EdgeData : table(1 keys)
+      new : fn
+    EdgeDecoration : table(1 keys)
+      new : fn
+    EdgeGeometry : table(7 keys)
+      Arc : table
+      CubicOffsetSpline : table
+      CubicSpline : table
+      Straight : table
+      Type : table
+      __nested : table
+      new : fn
+    EdgeId : table(1 keys)
+      new : fn
+    EdgeIdDir : table(1 keys)
+      new : fn
+    EdgeIdDirAndLength : table(1 keys)
+      new : fn
+    EdgeIsect : table(2 keys)
+      Info : table
+      __nested : table
+    EdgeObject : table(1 keys)
+      new : fn
+    EdgePos : table(1 keys)
+      new : fn
+    EmissionEmitter : table(1 keys)
+      new : fn
+    EmissionGrid : table(2 keys)
+      Type : table
+      new : fn
+    EntitySetColor : table(1 keys)
+      new : fn
+    EntitySetEmissions : table(1 keys)
+      new : fn
+    EntitySetName : table(1 keys)
+      new : fn
+    EntitySetPlayer : table(1 keys)
+      new : fn
+    Environment : table(1 keys)
+      new : fn
+    ErrorState : table(1 keys)
+      new : fn
+    ExtPath : table(3 keys)
+      ExtPathEdge : table
+      __nested : table
+      new : fn
+    Extent : table(1 keys)
+      new : fn
+    Failure : table(2 keys)
+      Reason : table
+      new : fn
+    Field : table(1 keys)
+      new : fn
+    FinanceData : table(1 keys)
+      new : fn
+    FlatUnorderedMap_Entity_CollisionData : table(1 keys)
+      new : fn
+    FlatUnorderedMap_Entity_FlatUnorderedMap_String_Log : table(1 keys)
+      new : fn
+    FlatUnorderedMap_Entity_Int : table(1 keys)
+      new : fn
+    FlatUnorderedMap_Entity_Vector_NodeViewerData : table(1 keys)
+      new : fn
+    FlatUnorderedMap_Int_FlatUnorderedMap_String_Float : table(1 keys)
+      new : fn
+    FlatUnorderedMap_Int_FlatUnorderedMap_String_Int : table(1 keys)
+      new : fn
+    FlatUnorderedMap_Int_Float : table(1 keys)
+      new : fn
+    FlatUnorderedMap_Int_Vector_TownCargoLevelInfo : table(1 keys)
+      new : fn
+    FlatUnorderedMap_Pair_Entity_Int_Vector_String : table(1 keys)
+      new : fn
+    FlatUnorderedMap_String_Bool : table(1 keys)
+      new : fn
+    FlatUnorderedMap_String_FlatUnorderedMap_String_Float : table(1 keys)
+      new : fn
+    FlatUnorderedMap_String_FlatUnorderedMap_String_Vector_ResName : table(1 keys)
+      new : fn
+    FlatUnorderedMap_String_Float : table(1 keys)
+      new : fn
+    FlatUnorderedMap_String_HeightmapNew : table(1 keys)
+      new : fn
+    FlatUnorderedMap_String_Int : table(1 keys)
+      new : fn
+    FlatUnorderedMap_String_Log : table(1 keys)
+      new : fn
+    FlatUnorderedMap_String_Pair_Float_Float : table(1 keys)
+      new : fn
+    FlatUnorderedMap_String_PlacementParams : table(1 keys)
+      new : fn
+    FlatUnorderedMap_String_String : table(1 keys)
+      new : fn
+    FlatUnorderedMap_String_Vector_Entity : table(1 keys)
+      new : fn
+    FlatUnorderedMap_String_Vector_Pair_Entity_Int : table(1 keys)
+      new : fn
+    FlatUnorderedMap_String_Vector_ResName : table(1 keys)
+      new : fn
+    FlatUnorderedSet_Entity : table(1 keys)
+      new : fn
+    FlatUnorderedSet_ModId : table(1 keys)
+      new : fn
+    FlatUnorderedSet_String : table(1 keys)
+      new : fn
+    GPUCapabilities : table(1 keys)
+      new : fn
+    GameAddPlayer : table(1 keys)
+      new : fn
+    GameMetadata : table(1 keys)
+      new : fn
+    GamePerformSimulationStepsDEBUG : table(1 keys)
+      new : fn
+    GameSave : table(1 keys)
+      new : fn
+    GameScreenshot : table(1 keys)
+      new : fn
+    GameScript : table(1 keys)
+      new : fn
+    GameScriptDesc : table(1 keys)
+      new : fn
+    GameSetCalendarSpeed : table(1 keys)
+      new : fn
+    GameSetCloudCoverage : table(1 keys)
+      new : fn
+    GameSetDate : table(1 keys)
+      new : fn
+    GameSetSpeed : table(1 keys)
+      new : fn
+    GameSetTimeOfDay : table(1 keys)
+      new : fn
+    GameSpeed : table(1 keys)
+      new : fn
+    GameTime : table(1 keys)
+      new : fn
+    GenericGameRes : table(1 keys)
+      new : fn
+    GridCollisionSystem : table(0 keys)
+    GridVec2f : table(1 keys)
+      new : fn
+    Gridf : table(1 keys)
+      new : fn
+    GroundTexture : table(3 keys)
+      Data : table
+      __nested : table
+      new : fn
+    HeighmapGenerationMode : table(1 keys)
+      new : fn
+    HeightmapNew : table(1 keys)
+      new : fn
+    IHeightmap : table(1 keys)
+      new : fn
+    ImportBiomesMode : table(1 keys)
+      new : fn
+    ImportExportHeightmapMode : table(1 keys)
+      new : fn
+    Industry : table(1 keys)
+      new : fn
+    IndustryProductivityInfo : table(1 keys)
+      new : fn
+    IndustryResults : table(1 keys)
+      new : fn
+    IndustrySetDespawnTime : table(1 keys)
+      new : fn
+    IndustrySetManualDevelopment : table(1 keys)
+      new : fn
+    IndustyInfo : table(1 keys)
+      new : fn
+    InputActionDesc : table(1 keys)
+      new : fn
+    InputActionRep : table(1 keys)
+      new : fn
+    JournalBookAsset : table(1 keys)
+      new : fn
+    JournalClearAll : table(1 keys)
+      new : fn
+    JournalEntry : table(8 keys)
+      Carrier : table
+      Category : table
+      Construction : table
+      Maintenance : table
+      Other : table
+      Type : table
+      __nested : table
+      new : fn
+    JournalLogEntry : table(1 keys)
+      new : fn
+    KeyCombo : table(1 keys)
+      new : fn
+    KeyComboDef : table(1 keys)
+      new : fn
+    LandVehicle : table(3 keys)
+      DynState : table
+      __nested : table
+      new : fn
+    LandVehicleMoveInfo : table(1 keys)
+      new : fn
+    Landmark : table(1 keys)
+      new : fn
+    LaneConfig : table(1 keys)
+      new : fn
+    LaneConnection : table(1 keys)
+      new : fn
+    LangKey : table(1 keys)
+      new : fn
+    LanguageRep : table(0 keys)
+    LayerConfig : table(18 keys)
+      BuildingRenderableConfig : table
+      CargoEdgesRenderables : table
+      CargoFlowRenderableConfig : table
+      CatchmentAreaDisplaySettings : table
+      CatchmentAreaRenderableConfig : table
+      ColorPassFn : table
+      EmissionColorMap : table
+      PlotsRenderableConfig : table
+      SatisfactionEdgesRenderables : table
+      SignConfig : table
+      SpeedLimitsEdgesRenderables : table
+      TerrainColorMap : table
+      TerrainContours : table
+      TrafficEdgesRenderables : table
+      VoronoiRenderableConfig : table
+      WindRenderableConfig : table
+      __nested : table
+      new : fn
+    LayerGeneratorNode : table(1 keys)
+      new : fn
+    LayerGeneratorPort : table(1 keys)
+      new : fn
+    Line : table(5 keys)
+      LoadMode : table
+      Stop : table
+      StopConfig : table
+      __nested : table
+      new : fn
+    LineCapacityUsage : table(1 keys)
+      new : fn
+    LineCargoInfo : table(1 keys)
+      new : fn
+    LineCreate : table(1 keys)
+      new : fn
+    LineDestroy : table(1 keys)
+      new : fn
+    LineIssue : table(2 keys)
+      Type : table
+      new : fn
+    LineOrEdges : table(1 keys)
+      new : fn
+    LineUpdate : table(1 keys)
+      new : fn
+    LineVehicleInfo : table(1 keys)
+      new : fn
+    LoadConfig : table(1 keys)
+      new : fn
+    LoaderHelper : table(1 keys)
+      new : fn
+    LogBook : table(3 keys)
+      Log : table
+      __nested : table
+      new : fn
+    LotList : table(3 keys)
+      Lot : table
+      __nested : table
+      new : fn
+    LuaTable : table(1 keys)
+      new : fn
+    MaintenanceCost : table(1 keys)
+      new : fn
+    MaintenanceCostUpdate : table(1 keys)
+      new : fn
+    Map : table(8 keys)
+      Asset : table
+      Industry : table
+      MapAsset : table
+      MapTree : table
+      Town : table
+      Tree : table
+      __nested : table
+      new : fn
+    Mat4f : table(9 keys)
+      new : fn
+      rotX : fn
+      rotY : fn
+      rotZ : fn
+      rotZTransl : fn
+      rotZYTransl : fn
+      scale : fn
+      scaleRotZTransl : fn
+      scaleTransl : fn
+    MemoryStatistics : table(1 keys)
+      new : fn
+    MetaConstructionDesc : table(1 keys)
+      new : fn
+    MetadataMap : table(35 keys)
+      AirVehicle : table
+      Animal : table
+      AutoGroundTex : table
+      Availability : table
+      CameraConfig : table
+      Car : table
+      Category : table
+      CategoryList : table
+      ColorConfig : table
+      Cost : table
+      Description : table
+      DraftAnimalProvider : table
+      Emissions : table
+      LabelList : table
+      LabelListLabel : table
+      LandVehicle : table
+      LoadIndicator : table
+      Maintenance : table
+      MenuCategory : table
+      ParticleSystem : table
+      Person : table
+      RailVehicle : table
+      RoadVehicle : table
+      Rock : table
+      SeatProvider : table
+      SoundConfig : table
+      SoundSet : table
+      TransfOverride : table
+      Transformator : table
+      TransformatorConfig : table
+      TransportVehicle : table
+      Tree : table
+      VehicleEngine : table
+      WaterVehicle : table
+      __nested : table
+    MissionCampaign : table(1 keys)
+      new : fn
+    MissionCharacter : table(1 keys)
+      new : fn
+    MissionDesc : table(1 keys)
+      new : fn
+    MissionMedal : table(1 keys)
+      new : fn
+    MissionStar : table(1 keys)
+      new : fn
+    ModId : table(1 keys)
+      new : fn
+    ModRep : table(0 keys)
+    Model : table(0 keys)
+    ModelAsset : table(0 keys)
+    ModelInstance : table(1 keys)
+      new : fn
+    ModelInstanceList : table(1 keys)
+      new : fn
+    ModelPerson : table(1 keys)
+      new : fn
+    ModelPersonIdle : table(1 keys)
+      new : fn
+    Modifiers : table(1 keys)
+      new : fn
+    ModuleDesc : table(1 keys)
+      new : fn
+    MovePath : table(3 keys)
+      DynState : table
+      __nested : table
+      new : fn
+    MovePathAircraft : table(5 keys)
+      AircraftState : table
+      PathState : table
+      ShipState : table
+      __nested : table
+      new : fn
+    MultipleUnit : table(3 keys)
+      Vehicle : table
+      __nested : table
+      new : fn
+    Name : table(1 keys)
+      new : fn
+    NameDesc : table(1 keys)
+      new : fn
+    Node : table(1 keys)
+      new : fn
+    NodeAndEntity : table(1 keys)
+      new : fn
+    NodeData : table(3 keys)
+      Port : table
+      __nested : table
+      new : fn
+    NodeId : table(1 keys)
+      new : fn
+    NodeOrderedMap_Entity_NodeOrderedSet_Entity : table(1 keys)
+      new : fn
+    NodeOrderedMap_Entity_NodeOrderedSet_Pair_Int_Int : table(1 keys)
+      new : fn
+    NodeOrderedMap_Int_Vector_Long_Long : table(1 keys)
+      new : fn
+    NodeOrderedMap_String_CargoCategory : table(1 keys)
+      new : fn
+    NodeOrderedSet_Entity : table(1 keys)
+      new : fn
+    NodeOrderedSet_Pair_Int_Int : table(1 keys)
+      new : fn
+    NodeViewerData : table(1 keys)
+      new : fn
+    Parcel : table(4 keys)
+      CollisionType : table
+      Face : table
+      __nested : table
+      new : fn
+    ParcelData : table(1 keys)
+      new : fn
+    ParsedSavegameName : table(1 keys)
+      new : fn
+    ParticleParamCurveFloat : table(3 keys)
+      CurvePoint : table
+      __nested : table
+      new : fn
+    ParticleParamCurveVec2f : table(3 keys)
+      CurvePoint : table
+      __nested : table
+      new : fn
+    ParticleParamCurveVec3f : table(3 keys)
+      CurvePoint : table
+      __nested : table
+      new : fn
+    ParticleParamFloat : table(4 keys)
+      ComponentWiseMinMax : table
+      RandomMinMax : table
+      __nested : table
+      new : fn
+    ParticleParamVec2f : table(4 keys)
+      ComponentWiseMinMax : table
+      RandomMinMax : table
+      __nested : table
+      new : fn
+    Path : table(1 keys)
+      new : fn
+    PathFactoryInput : table(1 keys)
+      new : fn
+    PathFactoryOutput : table(3 keys)
+      LineSection : table
+      __nested : table
+      new : fn
+    PathPos : table(1 keys)
+      new : fn
+    PathPosData : table(1 keys)
+      new : fn
+    PathProblemLocation : table(1 keys)
+      new : fn
+    PdxAccountInfo : table(1 keys)
+      new : fn
+    PdxCountry : table(1 keys)
+      new : fn
+    PdxFuture_AccountInfo : table(0 keys)
+    PdxFuture_LegalDocument : table(0 keys)
+    PdxFuture_LoginResult : table(0 keys)
+    PdxFuture_ProfileResult : table(0 keys)
+    PdxFuture_Result : table(0 keys)
+    PdxFuture_ThirdPartyLinkState : table(0 keys)
+    PdxLegalDocument : table(1 keys)
+      new : fn
+    PdxLoginResult : table(1 keys)
+      new : fn
+    PdxProfileResult : table(1 keys)
+      new : fn
+    PdxResult : table(1 keys)
+      new : fn
+    PersonCapacity : table(3 keys)
+      PathfindingPreference : table
+      __nested : table
+      new : fn
+    PlacementParams : table(1 keys)
+      new : fn
+    PlatformDeviceSpec : table(1 keys)
+      new : fn
+    Player : table(1 keys)
+      new : fn
+    PlayerOwned : table(1 keys)
+      new : fn
+    PlayerStatDesc : table(1 keys)
+      new : fn
+    PlayerStatProgress : table(1 keys)
+      new : fn
+    PlayerStatRep : table(0 keys)
+    PlaylistDesc : table(1 keys)
+      new : fn
+    PlaylistTrack : table(1 keys)
+      new : fn
+    PortId : table(1 keys)
+      new : fn
+    PreviewColoring : table(1 keys)
+      new : fn
+    ProgressMonitor : table(0 keys)
+    Proposal : table(16 keys)
+      ConstructionEntity : table
+      ConstructionResult : table
+      Depot : table
+      Industry : table
+      LaneList : table
+      ProposalTerrain : table
+      Signal : table
+      Station : table
+      StationPool : table
+      StreetTerminal : table
+      Subconstruction : table
+      Terminal : table
+      TerminalCargoTransferSpeed : table
+      TransformedModel : table
+      __nested : table
+      new : fn
+    ProposalData : table(6 keys)
+      CatchmentArea : table
+      ConstructionData : table
+      ParallelStripProposal : table
+      SubconstructionData : table
+      __nested : table
+      new : fn
+    RailroadCrossing : table(2 keys)
+      RailroadCrossingState : table
+      new : fn
+    RailroadCrossingType : table(3 keys)
+      ConfigEntry : table
+      __nested : table
+      new : fn
+    Revision : table(1 keys)
+      new : fn
+    Runway : table(1 keys)
+      new : fn
+    RunwayList : table(1 keys)
+      new : fn
+    SaveGameData : table(1 keys)
+      new : fn
+    SaveGameDetails : table(1 keys)
+      new : fn
+    SaveGameInfo : table(1 keys)
+      new : fn
+    SavegameId : table(1 keys)
+      new : fn
+    Scaffold : table(2 keys)
+      Type : table
+      new : fn
+    ScriptParam : table(1 keys)
+      new : fn
+    ScriptRef : table(1 keys)
+      new : fn
+    ScriptingSendEvent : table(1 keys)
+      new : fn
+    SegmentAndEntity : table(1 keys)
+      new : fn
+    SetCargoAmountForStockDEBUG : table(1 keys)
+      new : fn
+    SetSimPersonStateDEBUG : table(1 keys)
+      new : fn
+    SetSimPersonStateHappinessDEBUG : table(1 keys)
+      new : fn
+    Shape : table(1 keys)
+      new : fn
+    ShapeList : table(1 keys)
+      new : fn
+    Ship : table(1 keys)
+      new : fn
+    ShipInfo : table(1 keys)
+      new : fn
+    Signal : table(2 keys)
+      Type : table
+      new : fn
+    SignalId : table(1 keys)
+      new : fn
+    SignalList : table(1 keys)
+      new : fn
+    SimCargo : table(3 keys)
+      PickupPoint : table
+      __nested : table
+      new : fn
+    SimEntityAtBuilding : table(1 keys)
+      new : fn
+    SimEntityAtStock : table(1 keys)
+      new : fn
+    SimEntityAtTerminal : table(1 keys)
+      new : fn
+    SimEntityAtVehicle : table(1 keys)
+      new : fn
+    SimEntityIdle : table(1 keys)
+      new : fn
+    SimEntityMoving : table(1 keys)
+      new : fn
+    SimEntityNeedsPath : table(1 keys)
+      new : fn
+    SimPerson : table(1 keys)
+      new : fn
+    SimPersonAtTerminal : table(1 keys)
+      new : fn
+    SimPersonAtVehicle : table(1 keys)
+      new : fn
+    SimpleProposal : table(3 keys)
+      ConstructionEntity : table
+      __nested : table
+      new : fn
+    SimpleStreetProposal : table(3 keys)
+      EdgeObject : table
+      __nested : table
+      new : fn
+    SoundAttributes : table(1 keys)
+      new : fn
+    SoundClip : table(1 keys)
+      new : fn
+    SoundClipList : table(1 keys)
+      new : fn
+    SoundSet : table(1 keys)
+      new : fn
+    StartGameParams : table(1 keys)
+      new : fn
+    Station : table(3 keys)
+      Pool : table
+      __nested : table
+      new : fn
+    StationGroup : table(1 keys)
+      new : fn
+    StationGroupCapacityUsage : table(1 keys)
+      new : fn
+    StationTerminal : table(1 keys)
+      new : fn
+    StationUsage : table(1 keys)
+      new : fn
+    StdUnorderedMap_Entity_Int : table(1 keys)
+      new : fn
+    StdUnorderedMap_Entity_TransportNetwork : table(1 keys)
+      new : fn
+    StdUnorderedMap_Int_ResName : table(1 keys)
+      new : fn
+    StdUnorderedMap_Int_Vector_Int : table(1 keys)
+      new : fn
+    StdUnorderedMap_Pair_Entity_Int_Pair_Revision_Int : table(1 keys)
+      new : fn
+    StdUnorderedMap_String_ConstructionSlotConfig : table(1 keys)
+      new : fn
+    StdUnorderedMap_String_Float : table(1 keys)
+      new : fn
+    StdUnorderedMap_String_LayerGeneratorPort : table(1 keys)
+      new : fn
+    StdUnorderedMap_String_LuaTable : table(1 keys)
+      new : fn
+    StdUnorderedMap_String_SoundClipList : table(1 keys)
+      new : fn
+    StdUnorderedMap_String_Vector_FilePath : table(1 keys)
+      new : fn
+    StdUnorderedMap_String_Vector_KeyComboDef : table(1 keys)
+      new : fn
+    StdUnorderedSet_Int : table(1 keys)
+      new : fn
+    StockList : table(8 keys)
+      CargoData : table
+      Modifiers : table
+      Rule : table
+      RuleData : table
+      Stock : table
+      StockData : table
+      __nested : table
+      new : fn
+    StockListDiscardCargo : table(1 keys)
+      new : fn
+    StockListSetModifiers : table(1 keys)
+      new : fn
+    StockListSetStocksCargoType : table(1 keys)
+      new : fn
+    StopState : table(1 keys)
+      new : fn
+    StreetGenerationMode : table(0 keys)
+    StreetProposal : table(3 keys)
+      EdgeObject : table
+      __nested : table
+      new : fn
+    StreetStyle : table(1 keys)
+      new : fn
+    StreetTemplate : table(3 keys)
+      Emissions : table
+      __nested : table
+      new : fn
+    StripInfo : table(1 keys)
+      new : fn
+    SubShape : table(1 keys)
+      new : fn
+    Subconstruction : table(1 keys)
+      new : fn
+    SummarizedCargoQualityData : table(1 keys)
+      new : fn
+    TargetData : table(1 keys)
+      new : fn
+    TargetDataEntry : table(1 keys)
+      new : fn
+    TargetsByLandUse : table(1 keys)
+      new : fn
+    Terminal : table(1 keys)
+      new : fn
+    TerminalCapacityUsage : table(1 keys)
+      new : fn
+    TerminalCargoTransferSpeed : table(1 keys)
+      new : fn
+    Terrain : table(1 keys)
+      new : fn
+    TerrainAlignment : table(1 keys)
+      new : fn
+    TerrainAlignmentList : table(1 keys)
+      new : fn
+    TerrainData : table(1 keys)
+      new : fn
+    TerrainGeneratorDesc : table(1 keys)
+      new : fn
+    TerrainMaterialType : table(1 keys)
+      new : fn
+    TerrainTile : table(1 keys)
+      new : fn
+    TerrainTileBrush : table(1 keys)
+      new : fn
+    TerrainTileHeightmap : table(1 keys)
+      new : fn
+    ThinModelInstance : table(1 keys)
+      new : fn
+    TickEpoch : table(1 keys)
+      new : fn
+    Town : table(1 keys)
+      new : fn
+    TownAutoDetectConnections : table(1 keys)
+      new : fn
+    TownBuilding : table(1 keys)
+      new : fn
+    TownBuildingParams : table(1 keys)
+      new : fn
+    TownBuildingSetBlockedDevelopment : table(1 keys)
+      new : fn
+    TownCapacityUsage : table(1 keys)
+      new : fn
+    TownCargoLevelInfo : table(1 keys)
+      new : fn
+    TownConnectWithIndustries : table(1 keys)
+      new : fn
+    TownConnection : table(1 keys)
+      new : fn
+    TownCreate : table(1 keys)
+      new : fn
+    TownCustomDistributionWeights : table(1 keys)
+      new : fn
+    TownDestroy : table(1 keys)
+      new : fn
+    TownDevelopAt : table(1 keys)
+      new : fn
+    TownEmission : table(1 keys)
+      new : fn
+    TownHappinessStats : table(3 keys)
+      ByResident : table
+      __nested : table
+      new : fn
+    TownIndustryGenerationMode : table(1 keys)
+      new : fn
+    TownInfo : table(1 keys)
+      new : fn
+    TownReachability : table(1 keys)
+      new : fn
+    TownResults : table(1 keys)
+      new : fn
+    TownSetDevelopmentActive : table(1 keys)
+      new : fn
+    TownSetInitialLandUseCapacities : table(1 keys)
+      new : fn
+    TownUpdateCargoNeeds : table(1 keys)
+      new : fn
+    TownUpdateSize : table(1 keys)
+      new : fn
+    TpNetData : table(1 keys)
+      new : fn
+    TpNetLink : table(1 keys)
+      new : fn
+    TpNetLinkProposal : table(3 keys)
+      Data : table
+      __nested : table
+      new : fn
+    TrafficLightConfig : table(1 keys)
+      new : fn
+    TrafficLightData : table(1 keys)
+      new : fn
+    TrafficLightState : table(1 keys)
+      new : fn
+    TrafficLightType : table(1 keys)
+      new : fn
+    Train : table(1 keys)
+      new : fn
+    TransportNetwork : table(1 keys)
+      new : fn
+    TransportNetworkNodes : table(1 keys)
+      new : fn
+    TransportVehicle : table(7 keys)
+      Config : table
+      LoadSpeedModifiers : table
+      LoadState : table
+      Modifiers : table
+      PendingIncomeParams : table
+      __nested : table
+      new : fn
+    TransportVehicleConfig : table(1 keys)
+      new : fn
+    TransportVehicleInfo : table(1 keys)
+      new : fn
+    TransportVehiclePart : table(1 keys)
+      new : fn
+    TransportationStats : table(1 keys)
+      new : fn
+    UserProfile : table(0 keys)
+    Vec2f : table(8 keys)
+      angle : fn
+      distance : fn
+      distance2 : fn
+      length : fn
+      lerp : fn
+      new : fn
+      normalize : fn
+      scale : fn
+    Vec2i : table(1 keys)
+      new : fn
+    Vec3f : table(10 keys)
+      angle : fn
+      distance : fn
+      distance2 : fn
+      distance2_2 : fn
+      distance_2 : fn
+      length : fn
+      lerp : fn
+      new : fn
+      normalize : fn
+      scale : fn
+    Vec4f : table(1 keys)
+      new : fn
+    Vec5f : table(1 keys)
+      new : fn
+    Vector_BaseEdgeRange : table(1 keys)
+      new : fn
+    Vector_BaseNodeLaneConnectionAndEntity : table(1 keys)
+      new : fn
+    Vector_BaseParallelStrip : table(1 keys)
+      new : fn
+    ... (183 more keys)
+  util : table(64 keys)
+    __index : fn
+    __metatable : bool=false
+    __newindex : fn
+    debug : table(6 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      draw : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    decibelToPower : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatAltitude : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatDate : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatDays : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatForce : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatGameTime : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatKMB : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatLength : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatMemory : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatMinutesSeconds : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatMoney : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatMoneyAlt : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatMoneyNumber : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatPosixTimestamp : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatPower : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatSeconds : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatSpeed : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatTime : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatTimestamp : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    formatWeight : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getAppConfig : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getApplicationTime : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getBuildVersion : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getBuildVersionString : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getDefaultDayDuration : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getDefaultMonthDuration : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getDefaultYearDuration : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getGamepadType : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getInputMode : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getKeyName : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getLanguage : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getLocalTime : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getLuaUsedMemory : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getMemoryStats : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getModMemoryLimitMB : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getMonthDuration : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getPlaformDeviceSpec : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getRainbowColors : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    getYearDuration : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    isBuildTypeRelease : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    isBuildTypeTesting : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    isConsoleMode : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    isControllerConnected : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    isKeyboardConnected : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    isMouseConnected : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    isPlatform : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    isVendor : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    lang : table(10 keys)
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      compareStrings : table
+      formatInt : table
+      formatIntWithWidth : table
+      formatNumber : table
+      stringContains : table
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    powerToDecibel : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    saveAppConfig : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    setAllowSharing : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    setAppConfig : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    setMusicVolume : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    splitSentences : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    string2Platform : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    string2Vendor : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    toStringPercent : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    toStringPercentPrecision : table(6 keys)
+      __call : fn
+      __index : fn
+      __metatable : bool=false
+      __newindex : fn
+      userdata: 00000000000005E7 : table
+      userdata: 00000000000006E7 : table
+    userdata: 00000000000005E7 : table(0 keys)
+    userdata: 00000000000006E7 : table(0 keys)
+
+## Command factories: api.cmd.make*Cmd, and TPF2's api.cmd.make.*
+  api.cmd.makeAnimalSetStateCmd : table
+  api.cmd.makeAnimalSpawnAtCmd : table
+  api.cmd.makeCreateIndustryExtendProposalCmd : table
+  api.cmd.makeCustomEntityCreateCmd : table
+  api.cmd.makeCustomEntityDestroyCmd : table
+  api.cmd.makeCustomEntityUpdateStateCmd : table
+  api.cmd.makeCustomEntityUpdateTransformationCmd : table
+  api.cmd.makeCustomVehicleCreateOrUpdateCmd : table
+  api.cmd.makeEntitySetColorCmd : table
+  api.cmd.makeEntitySetEmissionsCmd : table
+  api.cmd.makeEntitySetNameCmd : table
+  api.cmd.makeEntitySetPlayerCmd : table
+  api.cmd.makeGameAddPlayerCmd : table
+  api.cmd.makeGameSetCalendarSpeedCmd : table
+  api.cmd.makeGameSetCloudCoverageCmd : table
+  api.cmd.makeGameSetDateCmd : table
+  api.cmd.makeGameSetSpeedCmd : table
+  api.cmd.makeGameSetTimeOfDayCmd : table
+  api.cmd.makeIndustrySetDespawnTimeCmd : table
+  api.cmd.makeIndustrySetManualDevelopmentCmd : table
+  api.cmd.makeJournalBookAssetCmd : table
+  api.cmd.makeJournalClearAllCmd : table
+  api.cmd.makeJournalLogEntryCmd : table
+  api.cmd.makeLineCreateCmd : table
+  api.cmd.makeLineDestroyCmd : table
+  api.cmd.makeLineUpdateCmd : table
+  api.cmd.makeScriptingSendEventCmd : table
+  api.cmd.makeStockListDiscardCargoCmd : table
+  api.cmd.makeStockListSetModifiersCmd : table
+  api.cmd.makeStockListSetStocksCargoTypeCmd : table
+  api.cmd.makeTownAutoDetectConnectionsCmd : table
+  api.cmd.makeTownBuildingSetBlockedDevelopmentCmd : table
+  api.cmd.makeTownConnectWithIndustriesCmd : table
+  api.cmd.makeTownCreateCmd : table
+  api.cmd.makeTownCustomDistributionWeightsCmd : table
+  api.cmd.makeTownDestroyCmd : table
+  api.cmd.makeTownDevelopAtCmd : table
+  api.cmd.makeTownSetDevelopmentActiveCmd : table
+  api.cmd.makeTownSetInitialLandUseCapacitiesCmd : table
+  api.cmd.makeTownUpdateCargoNeedsCmd : table
+  api.cmd.makeTownUpdateSizeCmd : table
+  api.cmd.makeVehicleBuyCmd : table
+  api.cmd.makeVehicleReplaceCmd : table
+  api.cmd.makeVehicleReverseCmd : table
+  api.cmd.makeVehicleSellCmd : table
+  api.cmd.makeVehicleSendToDepotCmd : table
+  api.cmd.makeVehicleSetLineCmd : table
+  api.cmd.makeVehicleSetManualDepartureCmd : table
+  api.cmd.makeVehicleSetModifiersCmd : table
+  api.cmd.makeVehicleSetStoppedByUserCmd : table
+  api.cmd.makeVehicleTryToDepartCmd : table
+  api.cmd.makeWorldBuildProposalCmd : table
+  api.cmd.makeWorldChangeWindCmd : table
+  api.cmd.makeWorldReplaceTerrainCmd : table
+  api.cmd.makeWorldSetBulldozableCmd : table
+count=55
+
+## game.interface.* tree (depth 3)
+game.interface is absent
+
+## ug_require of the game's GUI modules
+  ::/gui/main/react.lua -> table
+  ::/gui/main/builtin.lua -> table
+  ::/gui/game_bar/game_bar_widgets.tl -> table
+

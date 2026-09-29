@@ -139,20 +139,35 @@ function data()
     return s
   end
 
+  local function vecKey(p)
+    return string.format("%s,%s,%s", q01(p.x or p[1]), q01(p.y or p[2]), q01(p.z or p[3] or 0))
+  end
+
+  -- Edge geometry: TF3's BASE_EDGE carries position0 and position1
+  -- (documented, api/tealdef/api/engine.d.tl); TPF2's needs its nodes. Each
+  -- edge is read on its own, so one unreadable edge is counted ("!N"), not
+  -- the whole lane lost.
   local function laneEdges()
     local list = entitiesWith(ct().BASE_EDGE, "BASE_EDGE")
-    if not list or #list == 0 then return nil end
-    local cache, geo = {}, {}
+    if not list then return nil end
+    local cache, geo, bad = {}, {}, 0
     for _, eid in ipairs(list) do
-      local c = getComp(eid, ct().BASE_EDGE)
-      if c and c.node0 ~= nil then
-        local a, b = nodePos(c.node0, cache), nodePos(c.node1, cache)
+      local ok, key = pcall(function()
+        local c = getComp(eid, ct().BASE_EDGE)
+        if not c then return nil end
+        local a, b
+        if c.position0 ~= nil and c.position1 ~= nil then
+          a, b = vecKey(c.position0), vecKey(c.position1)
+        else
+          a, b = nodePos(c.node0, cache), nodePos(c.node1, cache)
+        end
         if a > b then a, b = b, a end
-        geo[#geo + 1] = a .. ">" .. b
-      end
+        return a .. ">" .. b
+      end)
+      if ok and key then geo[#geo + 1] = key else bad = bad + 1 end
     end
     table.sort(geo)
-    return hashList(geo)
+    return #geo .. ":" .. hashList(geo) .. (bad > 0 and ("!" .. bad) or "")
   end
 
   local function laneConstructions()
@@ -188,6 +203,9 @@ function data()
     return hashList(rows)
   end
 
+  -- Money per player: TF3 keeps it in each player's ACCOUNT component, an
+  -- integer (documented); TPF2's finance.getPlayersBalance and
+  -- game.interface are the fallbacks.
   local function laneMoney()
     local rows = {}
     local ok, balances = pcall(function() return api().engine.util.finance.getPlayersBalance() end)
@@ -196,11 +214,17 @@ function data()
         rows[#rows + 1] = string.format("%s:%s", tostring(pid), tostring(math.floor((tonumber(bal) or 0) + 0.5)))
       end
     else
-      local players = entitiesWith(ct().PLAYER, "PLAYER")
-      if not players or #players == 0 then return nil end
+      local players = entitiesWith(ct().PLAYER, "PLAYER") or {}
+      if #players == 0 then
+        pcall(function() players = { api().engine.util.getPlayer() } end)
+      end
+      if #players == 0 then return nil end
       for _, pid in ipairs(players) do
         local bal = nil
-        pcall(function() bal = global("game").interface.getEntity(pid).balance end)
+        pcall(function() bal = getComp(pid, ct().ACCOUNT).balance end)
+        if bal == nil then
+          pcall(function() bal = global("game").interface.getEntity(pid).balance end)
+        end
         rows[#rows + 1] = string.format("%s:%s", tostring(pid), bal ~= nil and string.format("%d", bal) or "?")
       end
     end
