@@ -91,15 +91,19 @@ It prints each mod's class and every reason, `!` for those that make it
 shared, and a count at the end. `--installed` scans every mod this player
 has, from each place the game keeps them (`tpf3mp_modscan::roots`):
 
-- Mod Hub (mod.io) downloads: `%LOCALAPPDATA%\mod.io\10640\mods\<mod.io id>`,
-  whose `mod.json` names the mod (`celmi_timetables` in `...\6037864`) (SEEN
-  on Windows; Linux and macOS to confirm);
+- Mod Hub (mod.io) downloads: `%PUBLIC%\mod.io\10640\mods\<mod.io id>`,
+  then `%LOCALAPPDATA%\mod.io\10640\mods\<mod.io id>`, each `mod.json`
+  naming the mod (`revyn112_towns_de` in `...\6414521`) (SEEN on Windows:
+  58 mods under `%PUBLIC%` on one PC on 2026-10-03, while
+  `%LOCALAPPDATA%\mod.io\10640` held only its user's file; on 2026-09-30
+  they were found under `%LOCALAPPDATA%`. Linux and macOS to confirm);
 - local mods: `<Steam>\userdata\<account>\3493540\local\staging_area\<modId>`
   and `...\local\mods`;
 - the game's own: `<game>\mods` and `<game>\dlcs`.
 
-A mod is found by its `mod.json`'s `modId`, else its folder's name. Which of
-the two a save lists for a Mod Hub mod is to confirm (below).
+A mod is found by its `mod.json`'s `modId`, else its folder's name. A save
+lists a Mod Hub mod by its `modId`, the mod.io number only as its hub id
+(SEEN, below).
 
 ## At run time
 
@@ -269,7 +273,7 @@ shared mods only.
 Without `--mods`, the launcher (`crates/tpf3mp-agent/src/picker.rs`):
 
 - **finds every installed mod** by itself when it starts: Mod Hub's cache
-  (`%LOCALAPPDATA%\mod.io\10640\mods`), each Steam account's
+  (`mod.io\10640\mods` under `%PUBLIC%`, then `%LOCALAPPDATA%`), each Steam account's
   `staging_area` and `mods`, the game's `mods` and `dlcs` (the first of each
   id counts), scans each and keeps its class and first reason, its name
   (`_metadata/modinfo.json`) and its `revision`. Each goes to the launcher's
@@ -500,8 +504,9 @@ be personal, and the first three before personal GUI mods are relied on:
 1. **A save loads with the room's mods.** `app.loadGame(id, false, info)`
    with `info.mods` replaced loads the world with those mods active, from
    the main menu and in a world, and without a Start Game click.
-2. **A Mod Hub mod's name in a save.** Whether a save lists `celmi_timetables`
-   (the `modId`) or the mod.io id; the scan finds either.
+2. **A Mod Hub mod's name in a save.** SEEN (2026-10-03): a save lists the
+   `modId` (`revyn112_towns_de`), the mod.io id (`6414521`) only as its hub
+   id; the scan finds either.
 3. **Leftover `modParams`.** A dropped personal mod's parameters stay in
    `info.modParams`; the game ignores them (expected).
 4. **`debug.getinfo` in the simulation's Lua states**, and what a mod file's

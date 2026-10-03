@@ -1,16 +1,18 @@
 //! Where Transport Fever 3 keeps the mods a player can activate (build
 //! 40408, Windows; the other platforms' places are to confirm):
 //!
-//! - Mod Hub (mod.io) downloads: `%LOCALAPPDATA%\mod.io\10640\mods\<mod.io
-//!   id>`, whose `mod.json` names the mod (`celmi_timetables` in
-//!   `...\6037864`);
+//! - Mod Hub (mod.io) downloads: `%PUBLIC%\mod.io\10640\mods\<mod.io id>`
+//!   (58 mods on one PC, 2026-10-03, while `%LOCALAPPDATA%\mod.io\10640`
+//!   held only its user's file), and `%LOCALAPPDATA%\mod.io\10640\mods`,
+//!   where they were found on 2026-09-30; each `mod.json` names the mod
+//!   (`revyn112_towns_de` in `...\6414521`);
 //! - local mods: `<Steam>\userdata\<account>\3493540\local\staging_area\<modId>`
 //!   (investigation/TF3_MODS_2026-09-27.md), and `...\local\mods`;
 //! - the game's own: `<game>\mods` and `<game>\dlcs`.
 //!
 //! A mod is found by the id its `mod.json` gives, or else by its folder's
-//! name; which of the two a save lists for a Mod Hub mod is to confirm in
-//! the game (docs/MODS.md).
+//! name. A save lists a Mod Hub mod by the `modId` (`revyn112_towns_de`,
+//! its mod.io number `6414521` only as the hub id; docs/MODS.md).
 
 use std::{
     fs,
@@ -24,15 +26,11 @@ pub const STEAM_APP: u32 = 3_493_540;
 
 /// The folders mods are kept in, those that exist: the game's own (in
 /// `game`, its install folder), each Steam account's local ones (under
-/// each of `steam_roots`), and Mod Hub's downloads (under `local_data`,
-/// the per-user local data folder).
-pub fn roots(
-    game: Option<&Path>,
-    steam_roots: &[PathBuf],
-    local_data: Option<&Path>,
-) -> Vec<PathBuf> {
+/// each of `steam_roots`), and Mod Hub's downloads (under each of `data`,
+/// the folders that may hold a `mod.io` folder, in order).
+pub fn roots(game: Option<&Path>, steam_roots: &[PathBuf], data: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    if let Some(data) = local_data {
+    for data in data {
         out.push(
             data.join("mod.io")
                 .join(MODIO_GAME.to_string())
@@ -60,18 +58,39 @@ pub fn roots(
     out
 }
 
-/// This player's roots, as [`roots`] with the per-user local data folder.
+/// This player's roots, as [`roots`] with the folders mod.io keeps its
+/// downloads in.
 pub fn default_roots(game: Option<&Path>, steam_roots: &[PathBuf]) -> Vec<PathBuf> {
-    roots(game, steam_roots, dirs_local().as_deref())
+    roots(game, steam_roots, &modio_data())
 }
 
-fn dirs_local() -> Option<PathBuf> {
-    // %LOCALAPPDATA% on Windows; $XDG_DATA_HOME or ~/.local/share on Linux;
-    // ~/Library/Application Support on macOS.
+/// The folders that may hold mod.io's `mod.io` folder, the first copy of a
+/// mod counting: on Windows `%PUBLIC%` (the users' shared folder, where
+/// Mod Hub downloads its mods for every user of the PC), then
+/// `%LOCALAPPDATA%`; elsewhere the per-user local data folder.
+fn modio_data() -> Vec<PathBuf> {
     #[cfg(windows)]
-    let found = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    let found = windows_modio_data(|var| std::env::var_os(var));
     #[cfg(not(windows))]
-    let found = std::env::var_os("XDG_DATA_HOME")
+    let found = dirs_local().into_iter().collect();
+    found
+}
+
+/// [`modio_data`] on Windows, with `env` reading the environment: those of
+/// the two folders that are set.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_modio_data(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> Vec<PathBuf> {
+    ["PUBLIC", "LOCALAPPDATA"]
+        .into_iter()
+        .filter_map(|var| env(var).map(PathBuf::from))
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn dirs_local() -> Option<PathBuf> {
+    // $XDG_DATA_HOME or ~/.local/share on Linux; ~/Library/Application
+    // Support on macOS.
+    std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| {
             std::env::var_os("HOME").map(|home| {
@@ -82,8 +101,7 @@ fn dirs_local() -> Option<PathBuf> {
                     home.join(".local/share")
                 }
             })
-        });
-    found
+        })
 }
 
 /// One mod found in a root.
@@ -146,9 +164,14 @@ mod tests {
     #[test]
     fn mods_are_found_in_mod_hub_steam_and_the_game_folders() {
         let dir = tempfile::tempdir().unwrap();
+        let public = dir.path().join("public");
         let data = dir.path().join("data");
         let steam = dir.path().join("steam");
         let game = dir.path().join("game");
+        write(
+            &public.join("mod.io/10640/mods/6414521/mod.json"),
+            r#"{"modId": "revyn112_towns_de"}"#,
+        );
         write(
             &data.join("mod.io/10640/mods/6037864/mod.json"),
             r#"{"modId": "celmi_timetables"}"#,
@@ -164,13 +187,18 @@ mod tests {
         // Not a mod: no mod.json.
         fs::create_dir_all(game.join("mods/release")).unwrap();
 
-        let roots = roots(Some(&game), std::slice::from_ref(&steam), Some(&data));
-        assert_eq!(roots.len(), 4, "{roots:?}");
+        let roots = roots(
+            Some(&game),
+            std::slice::from_ref(&steam),
+            &[public, data, dir.path().join("none")],
+        );
+        assert_eq!(roots.len(), 5, "{roots:?}");
         let found = installed(&roots);
         let ids: Vec<&str> = found.iter().map(|f| f.id.as_str()).collect();
         assert_eq!(
             ids,
             [
+                "revyn112_towns_de",
                 "celmi_timetables",
                 "gw_big_city_1",
                 "urbangames_preorder_pack"
@@ -179,5 +207,28 @@ mod tests {
         assert_eq!(find(&found, "celmi_timetables").unwrap().folder, "6037864");
         assert_eq!(find(&found, "6037864").unwrap().id, "celmi_timetables");
         assert!(find(&found, "missing").is_none());
+    }
+
+    /// Mod Hub's downloads were missed on a PC that keeps them in the
+    /// users' shared folder, so a room's start save listed mods its owner
+    /// had as missing (2026-10-03).
+    #[test]
+    fn mod_hub_downloads_are_looked_for_in_the_shared_folder_first() {
+        let env = |public: bool, local: bool| {
+            move |var: &str| match var {
+                "PUBLIC" if public => Some(r"C:\Users\Public".into()),
+                "LOCALAPPDATA" if local => Some(r"C:\Users\p\AppData\Local".into()),
+                _ => None,
+            }
+        };
+        let public = PathBuf::from(r"C:\Users\Public");
+        let local = PathBuf::from(r"C:\Users\p\AppData\Local");
+        assert_eq!(
+            windows_modio_data(env(true, true)),
+            [public.clone(), local.clone()]
+        );
+        assert_eq!(windows_modio_data(env(false, true)), [local]);
+        assert_eq!(windows_modio_data(env(true, false)), [public]);
+        assert!(windows_modio_data(env(false, false)).is_empty());
     }
 }
