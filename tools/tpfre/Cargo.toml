@@ -21,8 +21,10 @@ regex = "1.13.1"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
-
-[dev-dependencies]
+tpf3mp-hookcore = { path = "../../crates/tpf3mp-hookcore" }
+serde = { version = "1.0.229", features = ["derive"] }
+flate2 = "1.1.10"
+crc32fast = "1.5.2"
 tempfile = "3.27.0"
 
 # As the main workspace's.

@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use crate::query::Query;
-use crate::{diff, index, matching, sig};
+use crate::{archive, audit, diff, index, matching, sig};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -22,6 +22,43 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
+    /// Snapshot executable, root libraries and script/API sources privately.
+    Archive {
+        #[arg(long)]
+        game: PathBuf,
+        /// A new directory outside Git and the game install; never overwritten.
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        build: String,
+        #[arg(long, default_value = "TransportFever3.exe")]
+        exe: String,
+        #[arg(long)]
+        steam_manifest: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Compare every old profile target and its function against a new build.
+    Audit {
+        /// Complete archive directory or explicit executable (no script diff).
+        old: PathBuf,
+        new: PathBuf,
+        #[arg(long)]
+        profiles: PathBuf,
+        /// SHA-keyed private index cache [default: OS temp/tpfre-audit].
+        #[arg(long)]
+        cache: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Strict identity, signature and prologue check of every profile target.
+    Verify {
+        binary: PathBuf,
+        #[arg(long)]
+        profiles: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Index a PE32+ x86-64 binary (read only) into a .tpfdb file.
     Index {
         /// The executable, or a raw memory dump of it (see --image-base).
@@ -235,6 +272,51 @@ where
 
 fn dispatch(cli: Cli, out: &mut dyn Write, err: &mut dyn Write) -> anyhow::Result<i32> {
     match cli.cmd {
+        Cmd::Archive {
+            game,
+            out: dest,
+            build,
+            exe,
+            steam_manifest,
+            json,
+        } => {
+            let m = archive::create(&archive::Options {
+                game: &game,
+                out: &dest,
+                build: &build,
+                executable: &exe,
+                steam_manifest: steam_manifest.as_deref(),
+            })?;
+            if json {
+                serde_json::to_writer_pretty(&mut *out, &m)?;
+                writeln!(out)?;
+            } else {
+                writeln!(
+                    out,
+                    "archived build {}: {} files from {} sources -> {}",
+                    m.build,
+                    m.files.len(),
+                    m.sources.len(),
+                    dest.display()
+                )?;
+            }
+            Ok(0)
+        }
+        Cmd::Audit {
+            old,
+            new,
+            profiles,
+            cache,
+            json,
+        } => {
+            let cache = cache.unwrap_or_else(|| std::env::temp_dir().join("tpfre-audit"));
+            audit::print(&audit::compare(&old, &new, &profiles, &cache)?, json, out)
+        }
+        Cmd::Verify {
+            binary,
+            profiles,
+            json,
+        } => audit::print(&audit::verify(&binary, &profiles)?, json, out),
         Cmd::Index {
             binary,
             out: db,

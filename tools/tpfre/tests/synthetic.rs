@@ -429,6 +429,172 @@ fn fixture() -> Fixture {
     fixture_with(false)
 }
 
+fn audit_profile(exe: &Path, targets: &str) -> PathBuf {
+    let dir = exe.parent().expect("parent").join("profiles");
+    std::fs::create_dir_all(&dir).expect("profiles");
+    let id = tpf3mp_hookcore::profile::BuildIdentity::of_file(exe).expect("identity");
+    std::fs::write(
+        dir.join("fixture.toml"),
+        format!(
+            "name = 'fixture'\nregion = '.text'\n[build]\nsha256 = '{}'\n{}",
+            id.sha256, targets
+        ),
+    )
+    .expect("profile");
+    dir
+}
+
+const MIDDLE_TARGET: &str = "\n[[target]]\nname = 'middle'\nsignature = '48 83 EC 28 B8 ?? ?? ?? ?? 48 83 C4 28 C3'\nprologue = '48 83 EC 28'\n";
+
+#[test]
+fn undecodable_body_is_reported_unknown_without_losing_other_targets() {
+    let f = fixture();
+    let alpha = functions(false)
+        .into_iter()
+        .find(|(r, _, _)| *r == F_ALPHA)
+        .expect("alpha")
+        .1;
+    let signature = alpha[..14]
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let targets = format!(
+        "{MIDDLE_TARGET}\n[[target]]\nname = 'alpha'\nsignature = '{signature}'\nprologue = '48 83 EC 28'\n"
+    );
+    let profiles = audit_profile(&f.exe, &targets);
+    let new = f.exe.with_file_name("invalid.exe");
+    let mut bytes = build_pe(false);
+    let at = HEADERS + (F_ALPHA - TEXT) as usize + 25;
+    bytes[at..at + 3].copy_from_slice(&[0x60, 0x61, 0x60]); // invalid PUSHA/POPA in x64
+    std::fs::write(&new, bytes).expect("new");
+    let report = tpfre::audit::compare(&f.exe, &new, &profiles, &f.exe.with_file_name("cache"))
+        .expect("audit still returns all targets");
+    assert_eq!(report.targets.len(), 2);
+    assert_eq!(report.targets[0].normalized_function_equal, Some(true));
+    assert_eq!(report.targets[1].status, "matched");
+    assert_eq!(report.targets[1].normalized_function_equal, None);
+    assert!(
+        report.targets[1]
+            .comparison_error
+            .as_deref()
+            .is_some_and(|s| s.contains("invalid instruction"))
+    );
+    assert!(report.review_required);
+}
+
+#[test]
+fn strict_verify_never_skips_unknown_missing_or_broken_targets() {
+    let f = fixture();
+    let targets = format!(
+        "{MIDDLE_TARGET}\n\
+        [[target]]\nname = 'optional_missing'\nrequired = false\nsignature = 'DE AD BE EF'\nprologue = 'DE'\n\
+        [[target]]\nname = 'twins'\nsignature = '48 83 EC 28 48 8B 41 10 48 8B 40 18'\nprologue = '48'\n\
+        [[target]]\nname = 'bad_prologue'\nsignature = '48 83 EC 28 B8 ?? ?? ?? ?? 48 83 C4 28 C3'\nprologue = '90'\n\
+        [[target]]\nname = 'bad_offset'\nsignature = '48 83 EC 28 B8 ?? ?? ?? ?? 48 83 C4 28 C3'\nprologue = '48'\noffset = -100000\n"
+    );
+    let profiles = audit_profile(&f.exe, &targets);
+    let (code, out, err) = run(&["verify", s(&f.exe), "--profiles", s(&profiles), "--json"]);
+    assert_eq!(code, 1, "{out}{err}");
+    let report: serde_json::Value = serde_json::from_str(&out).expect("json");
+    let statuses: Vec<_> = report["targets"]
+        .as_array()
+        .expect("targets")
+        .iter()
+        .map(|t| t["status"].as_str().expect("status"))
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            "matched",
+            "missing",
+            "ambiguous",
+            "prologue_changed",
+            "out_of_bounds"
+        ]
+    );
+    assert_eq!(report["runtime_verified"], false);
+
+    let missing = f.exe.with_file_name("missing.exe");
+    let (code, _, err) = run(&["verify", s(&missing), "--profiles", s(&profiles)]);
+    assert_eq!(code, 3);
+    has(&err, "missing executable");
+    std::fs::write(&f.exe, build_pe(true)).expect("unknown build");
+    let (code, _, err) = run(&["verify", s(&f.exe), "--profiles", s(&profiles)]);
+    assert_eq!(code, 3);
+    has(&err, "no profile matches");
+}
+
+#[test]
+fn audit_detects_body_change_behind_a_matching_signature_and_reuses_cache() {
+    let f = fixture();
+    let profiles = audit_profile(&f.exe, MIDDLE_TARGET);
+    let new = f.exe.with_file_name("new.exe");
+    let mut bytes = build_pe(false);
+    bytes[HEADERS + (F_MIDDLE - TEXT) as usize + 5] = 2;
+    std::fs::write(&new, bytes).expect("new binary");
+    let cache = f.exe.with_file_name("cache");
+    for _ in 0..2 {
+        let (code, out, err) = run(&[
+            "audit",
+            s(&f.exe),
+            s(&new),
+            "--profiles",
+            s(&profiles),
+            "--cache",
+            s(&cache),
+            "--json",
+        ]);
+        assert_eq!(code, 1, "{out}{err}");
+        let r: serde_json::Value = serde_json::from_str(&out).expect("json");
+        assert_eq!(r["targets"][0]["status"], "matched");
+        assert_eq!(r["targets"][0]["normalized_function_equal"], false);
+        assert_eq!(r["scripts"]["available"], false);
+        assert_eq!(r["review_required"], true);
+        assert_eq!(r["runtime_verified"], false);
+    }
+    assert_eq!(std::fs::read_dir(cache).expect("cache").count(), 2);
+}
+
+#[test]
+fn complete_archives_compare_scripts_and_cannot_bypass_hash_checks() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let game = tmp.path().join("game");
+    std::fs::create_dir(&game).expect("game");
+    let exe = game.join("game.exe");
+    std::fs::write(&exe, build_pe(false)).expect("exe");
+    let profiles = audit_profile(&exe, MIDDLE_TARGET);
+    std::fs::write(game.join("api.tl"), b"before").expect("script");
+    let old = tmp.path().join("old");
+    let new = tmp.path().join("new");
+    let snapshot = |out: &Path| {
+        tpfre::archive::create(&tpfre::archive::Options {
+            game: &game,
+            out,
+            build: "test",
+            executable: "game.exe",
+            steam_manifest: None,
+        })
+        .expect("archive")
+    };
+    snapshot(&old);
+    snapshot(&new);
+    let cache = tmp.path().join("cache");
+    let r = tpfre::audit::compare(&old, &new, &profiles, &cache).expect("compare");
+    assert!(!r.review_required);
+    assert!(r.scripts.available);
+    std::fs::write(game.join("api.tl"), b"after").expect("script");
+    std::fs::write(game.join("added.lua"), b"return 1").expect("new script");
+    let changed = tmp.path().join("changed");
+    snapshot(&changed);
+    let r = tpfre::audit::compare(&old, &changed, &profiles, &cache).expect("compare");
+    assert!(r.review_required);
+    assert_eq!(r.scripts.changed, ["files/api.tl"]);
+    assert_eq!(r.scripts.added, ["files/added.lua"]);
+    std::fs::write(changed.join("files/api.tl"), b"tampered").expect("tamper");
+    assert!(tpfre::audit::compare(&old, &changed, &profiles, &cache).is_err());
+}
+
 fn s(p: &Path) -> &str {
     p.to_str().expect("utf8 path")
 }

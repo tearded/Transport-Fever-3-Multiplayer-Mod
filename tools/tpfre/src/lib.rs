@@ -5,6 +5,8 @@
 //! short, greppable lines; `tpfre diff` compares two builds; `tpfre match`
 //! carries names from one build to another that lacks them. See README.md.
 
+pub mod archive;
+pub mod audit;
 pub mod cli;
 pub mod db;
 pub mod diff;

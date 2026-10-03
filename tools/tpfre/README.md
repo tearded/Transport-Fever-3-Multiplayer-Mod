@@ -29,6 +29,67 @@ The database is written to the current directory (`<stem>.tpfdb`) unless
 `-o` says otherwise, never next to the game. It is written under a temporary
 name and renamed when complete.
 
+## Game update workflow (Windows PE builds)
+
+Run from `tools/tpfre`; keep archives and caches private, outside Git. Before
+Steam replaces a supported build, snapshot its install. After the update,
+snapshot again under a new directory and compare:
+
+```powershell
+$tpfre = './target/release/tpfre.exe'
+& $tpfre archive --game 'D:/SteamLibrary/steamapps/common/Transport Fever 3' --build 25686323 --out "$env:USERPROFILE/TPF3-MP-builds/25686323-sources"
+& $tpfre audit "$env:USERPROFILE/TPF3-MP-builds/25533170-sources" "$env:USERPROFILE/TPF3-MP-builds/25686323-sources" --profiles ../../profiles --cache "$env:USERPROFILE/TPF3-MP-builds/indexes" --json > audit.json
+# After manual investigation and a profile for the exact new executable:
+& $tpfre verify "$env:USERPROFILE/TPF3-MP-builds/25686323-sources" --profiles ../../profiles --json > verification.json
+```
+
+`archive` copies the chosen root executable (`--exe` overrides the name),
+root EXE/DLL/SO/dylib files, loose `.tl`/`.lua`/`.json`/`.gs` sources and
+those sources extracted from ZIP containers. It supports stored/deflated ZIP
+and TF3's `UG` local headers. It records SHA-256 and sizes of archived files.
+For loose inputs `sources.hash_scope` is `file`; for ZIPs it is
+`script_entries`, the hash of the sorted JSON array of `(entry name, size,
+content SHA-256)` tuples, excluding unrelated textures/audio and compression.
+The Steam manifest is copied when found beside `common`
+(`--steam-manifest` overrides discovery); its build ID must match `--build`.
+It retains depot IDs and the branch, when present. Without that manifest,
+the build label is supplied by the operator; it is not independently verified.
+Assets such as textures and audio are omitted. ZIP64, encrypted entries,
+linked inputs, unsafe paths and excessive script sizes are refused.
+
+A destination must be new and outside both the install and Git worktrees.
+The install is read only; selected contents are hashed again and the complete
+file inventory (paths, sizes, modification times) is checked before completion
+to catch updates during copying. Failure leaves `.incomplete`; consumers refuse it.
+`build.json` is written last. Archive input is checked against every recorded
+file's hash and size, including scripts and libraries.
+
+`audit` uses the hookcore profile parser/scanner for every target in every
+profile matching the old executable's exact identity. It reports missing or
+ambiguous signatures, invalid offsets, changed prologues, old/new RVAs and
+normalized containing-function differences. Normalization excludes address
+operands, retaining field offsets and other constants. Equality does **not**
+prove callee/data equivalence or ABI compatibility. Matcher suggestions are
+investigation hints, never automatically accepted targets. SHA-keyed indexes
+are cached without modifying profiles or executables.
+
+An undecodable function body (for example embedded data) is reported with
+`normalized_function_equal: null` and `comparison_error`; it requires manual
+review, while the remaining targets are still checked.
+
+Two complete archives also produce added/removed/changed script lists.
+An explicit EXE path is accepted for older EXE-only archives, but reports the
+script comparison as unavailable and requires review. `verify` checks the
+exact new identity and **all** profile targets, including optional ones; absent
+executables or unknown builds are errors, never skipped tests.
+
+Exit codes: `0` = no static differences requiring review (`audit`) or all
+profile bytes verified (`verify`); `1` = review required/target failure;
+`2` = CLI usage error; `3` = invalid input or incomplete analysis. Reports
+always say `runtime_verified: false`. These commands never activate hooks,
+approve a build or replace real-game acceptance. Keep the existing
+feature → dev → acceptance → main release gates.
+
 ## What the index holds
 
 | table | what |
