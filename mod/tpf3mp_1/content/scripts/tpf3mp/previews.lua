@@ -25,7 +25,9 @@
 --   `builtin.ProposalViewer` cannot: build 40408 allows it only inside a
 --   tool's ActionDescriptor and fails fatally anywhere else
 --   (`!IsTransformWithContext`). Each member's first preview, the first
---   drawn, and why one does not show are said in the log.
+--   drawn, and why one does not show are said in the log, and what this
+--   game says of a member's preview each time that changes (`verdict`): a
+--   preview drawn red is one this game calls critical or finds errors in.
 --
 -- Ported from TpF2 Multiplayer's shared build previews (mp/previews.lua in
 -- tpf2-multiplayer), on the room's own action schema.
@@ -63,6 +65,10 @@ local made = 0
 -- Previews this game could not make, said in the log, at most.
 local MAX_UNMADE = 20
 local unmade = 0
+-- What this game said of each member's preview last (`verdict`), by player
+-- id, and how many such lines the log has had, at most MAX_VERDICTS.
+local MAX_VERDICTS = 40
+local verdicts, verdictsSaid = {}, 0
 -- What the log said of the active tools' list, once.
 local toldTools = false
 -- When the previews not drawn yet were last tried again.
@@ -133,6 +139,91 @@ function previews.tick(link, api)
 	end
 end
 
+-- What an entity a preview collides with is, where the game says: its
+-- kind of component, or nil.
+local KINDS = { { "BASE_EDGE", "edge" }, { "BASE_NODE", "node" }, { "CONSTRUCTION", "construction" },
+	{ "TOWN_BUILDING", "town building" } }
+local function kindOf(entity)
+	if type(api) ~= "table" then return nil end
+	for _, k in ipairs(KINDS) do
+		local ok, found = pcall(function()
+			return api.engine.getComponent(entity, api.type.ComponentType[k[1]]) ~= nil
+		end)
+		if ok and found then return k[2] end
+	end
+	return nil
+end
+
+-- What the game says of a proposal, from the ProposalData it made for it:
+-- "critical" where it would refuse it outright, its error messages and
+-- warnings, and the entities it collides with, by kind; "fine" for none;
+-- nil where there is no ProposalData to read.
+function previews.verdict(data)
+	if data == nil then return nil end
+	local function list(t)
+		local out = {}
+		local ok = pcall(function()
+			for _, v in ipairs(t or {}) do out[#out + 1] = tostring(v) end
+		end)
+		return ok and out or {}
+	end
+	local parts = {}
+	local critical, messages, warnings, colliding = false, {}, {}, {}
+	pcall(function()
+		local state = data.errorState
+		if state then
+			critical = state.critical == true
+			messages = list(state.messages)
+			warnings = list(state.warnings)
+		end
+	end)
+	pcall(function()
+		for _, e in ipairs(data.collisionInfo and data.collisionInfo.collisionEntities or {}) do
+			-- An EntityData: userdata in the game, a table in the tests.
+			local ok, entity = pcall(function() return e.entity end)
+			if not ok or entity == nil then entity = e end
+			colliding[#colliding + 1] = entity
+		end
+	end)
+	if critical then parts[#parts + 1] = "critical" end
+	if #messages > 0 then parts[#parts + 1] = "errors " .. table.concat(messages, "; ") end
+	if #warnings > 0 then parts[#parts + 1] = "warnings " .. table.concat(warnings, "; ") end
+	if #colliding > 0 then
+		-- Each kind's count and its first few entities.
+		local kinds, order = {}, {}
+		for _, entity in ipairs(colliding) do
+			local kind = kindOf(entity) or "entity"
+			if kinds[kind] == nil then
+				kinds[kind] = { n = 0, ids = {} }
+				order[#order + 1] = kind
+			end
+			local k = kinds[kind]
+			k.n = k.n + 1
+			if #k.ids < 4 then k.ids[#k.ids + 1] = tostring(entity) end
+		end
+		local said = {}
+		for _, kind in ipairs(order) do
+			local k = kinds[kind]
+			said[#said + 1] = k.n .. " " .. kind .. " (" .. table.concat(k.ids, ",")
+				.. (k.n > #k.ids and ",..." or "") .. ")"
+		end
+		parts[#parts + 1] = "collides with " .. table.concat(said, ", ")
+	end
+	if #parts == 0 then return "fine" end
+	return table.concat(parts, ", ")
+end
+
+-- What this game says of member `from`'s `kind` preview, in the log when
+-- it changed, a few dozen times.
+local function judged(link, from, kind, data)
+	local verdict = previews.verdict(data)
+	if verdict == nil or verdicts[from] == verdict then return end
+	verdicts[from] = verdict
+	if verdictsSaid >= MAX_VERDICTS then return end
+	verdictsSaid = verdictsSaid + 1
+	link:log("another member's " .. tostring(kind) .. " preview, as this game sees it: " .. verdict)
+end
+
 -- A preview that does not show here, said in the log a few dozen times.
 local function unshown(link, kind, why)
 	if unmade >= MAX_UNMADE then return end
@@ -171,6 +262,7 @@ function previews.take(link, make, draw)
 						local called, drawn, why = pcall(draw, from, kept)
 						if called and drawn then
 							kept.undrawn = nil
+							judged(link, from, kind, why)
 							if not drawnSaid[from] then
 								drawnSaid[from] = true
 								link:log("drawing another member's build preview: " .. tostring(kind)
@@ -197,8 +289,11 @@ function previews.take(link, make, draw)
 			retriedAt = t
 			for from, kept in pairs(remote) do
 				if kept.undrawn then
-					local called, drawn = pcall(draw, from, kept)
-					if called and drawn then kept.undrawn = nil end
+					local called, drawn, data = pcall(draw, from, kept)
+					if called and drawn then
+						kept.undrawn = nil
+						judged(link, from, kept.kind, data)
+					end
 				end
 			end
 		end
@@ -216,6 +311,7 @@ function previews.reset()
 	showing, lookedAt, remote, said, saidCount, toldTools = nil, nil, {}, {}, 0, false
 	retriedAt = nil
 	made, unmade, drawnSaid = 0, 0, {}
+	verdicts, verdictsSaid = {}, 0
 end
 
 return previews

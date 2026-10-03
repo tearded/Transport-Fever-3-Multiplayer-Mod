@@ -488,6 +488,11 @@ pub struct Bridge<L> {
     hook_ready: bool,
     begun: bool,
     world: World,
+    /// Every load sent to the hook still awaiting its answer, in send order.
+    /// A server restart can replace a load before its answer arrives.
+    sent_loads: VecDeque<(u64, u64)>,
+    /// Identifies the latest load order even if it starts at the same step.
+    load_generation: u64,
     /// Whether the game has loaded a world since the last load was ordered.
     loaded: bool,
     /// The room's speed as the hook was last told it; none before the
@@ -581,6 +586,8 @@ impl<L: HookLink> Bridge<L> {
             hook_ready: false,
             begun: false,
             world: World::Ready,
+            sent_loads: VecDeque::new(),
+            load_generation: 0,
             loaded: false,
             speed: None,
             commands: 0,
@@ -853,17 +860,10 @@ impl<L: HookLink> Bridge<L> {
                     });
                 }
                 ToAgent::Loaded { next_step } => {
-                    let World::Loading {
-                        next_step: expected,
-                    } = self.world
-                    else {
-                        return Err(BridgeFault::Unexpected("a world nobody ordered"));
-                    };
-                    if next_step != expected {
-                        return Err(BridgeFault::LoadedElsewhere {
-                            expected,
-                            got: next_step,
-                        });
+                    // The hook finishes loads in order. A previous world's
+                    // answer may arrive after rejoining ordered a replacement.
+                    if !self.current_load_ack(next_step)? {
+                        continue;
                     }
                     self.world = World::Ready;
                     self.status(|status| status.world = WorldStatus::Playing);
@@ -1733,6 +1733,7 @@ impl<L: HookLink> Bridge<L> {
     fn order_load(&mut self, file: Option<&Path>, next_step: u64) -> Result<(), BridgeFault> {
         let file = file.map(path_text).transpose()?;
         self.void_world();
+        self.load_generation += 1;
         self.outbox.push_back(ToHook::Load { file, next_step });
         self.world = World::Loading { next_step };
         self.status(|status| status.world = WorldStatus::Loading);
@@ -1840,6 +1841,24 @@ impl<L: HookLink> Bridge<L> {
         self.loaded = false;
     }
 
+    /// Consumes the next sent load's answer. Only the latest ordered world
+    /// can become playable; an older one may finish while its replacement is
+    /// being fetched or loaded, even when both begin at the same step.
+    fn current_load_ack(&mut self, next_step: u64) -> Result<bool, BridgeFault> {
+        let (expected, generation) = self
+            .sent_loads
+            .pop_front()
+            .ok_or(BridgeFault::Unexpected("a world nobody ordered"))?;
+        if next_step != expected {
+            return Err(BridgeFault::LoadedElsewhere {
+                expected,
+                got: next_step,
+            });
+        }
+        Ok(generation == self.load_generation
+            && matches!(self.world, World::Loading { next_step: step } if step == next_step))
+    }
+
     /// Uploads a save the room asked for.
     fn upload(&mut self, event: u64, snapshot: SnapshotId, client: &Client) {
         let Some(worlds) = self.options.worlds.clone() else {
@@ -1919,6 +1938,10 @@ impl<L: HookLink> Bridge<L> {
             let bytes = encode(message)?;
             if !self.link.send(&bytes)? {
                 break;
+            }
+            if let ToHook::Load { next_step, .. } = message {
+                self.sent_loads
+                    .push_back((*next_step, self.load_generation));
             }
             self.outbox.pop_front();
         }
@@ -2508,6 +2531,81 @@ mod tests {
     use tpf3mp_proto::{FixedBytes, MAX_PAYLOAD, Payload, RoomId, Turn, TurnStart};
 
     use super::*;
+
+    struct AcceptingLink;
+
+    impl HookLink for AcceptingLink {
+        fn send(&mut self, _: &[u8]) -> Result<bool, BridgeFault> {
+            Ok(true)
+        }
+
+        fn recv(&mut self, _: &mut Vec<u8>) -> Result<bool, BridgeFault> {
+            Ok(false)
+        }
+
+        fn heartbeat(&mut self) {}
+
+        fn peer_heartbeat(&self) -> u64 {
+            0
+        }
+    }
+
+    #[test]
+    fn an_old_load_answer_cannot_complete_its_replacement_at_the_same_step() {
+        let mut bridge = Bridge::new(AcceptingLink, BridgeOptions::default()).greeted("test");
+        bridge.order_load(None, 1).unwrap();
+        bridge.flush().unwrap();
+        bridge.order_load(None, 1).unwrap();
+        bridge.flush().unwrap();
+
+        assert!(!bridge.current_load_ack(1).unwrap());
+        assert_eq!(bridge.world, World::Loading { next_step: 1 });
+        assert!(bridge.current_load_ack(1).unwrap());
+    }
+
+    #[test]
+    fn a_replaced_load_answer_during_rejoin_is_ignored() {
+        let mut bridge = Bridge::new(AcceptingLink, BridgeOptions::default()).greeted("test");
+        bridge.order_load(None, 1).unwrap();
+        bridge.flush().unwrap();
+        bridge.void_world();
+        bridge.world = World::Ready;
+
+        assert!(!bridge.current_load_ack(1).unwrap());
+        assert!(matches!(
+            bridge.current_load_ack(1),
+            Err(BridgeFault::Unexpected("a world nobody ordered"))
+        ));
+    }
+
+    #[test]
+    fn an_unsent_replaced_load_needs_no_answer() {
+        let mut bridge = Bridge::new(AcceptingLink, BridgeOptions::default()).greeted("test");
+        bridge.order_load(None, 1).unwrap();
+        bridge.order_load(None, 1).unwrap();
+        bridge.flush().unwrap();
+
+        assert!(bridge.current_load_ack(1).unwrap());
+        assert!(matches!(
+            bridge.current_load_ack(1),
+            Err(BridgeFault::Unexpected("a world nobody ordered"))
+        ));
+    }
+
+    #[test]
+    fn a_load_answer_for_the_wrong_step_is_still_a_protocol_error() {
+        let mut bridge = Bridge::new(AcceptingLink, BridgeOptions::default()).greeted("test");
+        bridge.order_load(None, 5).unwrap();
+        bridge.flush().unwrap();
+
+        assert!(matches!(
+            bridge.current_load_ack(4),
+            Err(BridgeFault::LoadedElsewhere {
+                expected: 5,
+                got: 4
+            })
+        ));
+    }
 
     #[test]
     fn a_world_without_tpf3mps_mod_is_not_loaded() {

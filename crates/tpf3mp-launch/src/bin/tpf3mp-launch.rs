@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use tpf3mp_launch::{Launch, start};
+use tpf3mp_launch::{HOOK_READY_WAIT, Launch, start};
 
 const USAGE: &str = "\
 usage: tpf3mp-launch --exe <game exe> --hook <library> [--env NAME=VALUE]... [--arg ARG]...
@@ -61,6 +61,7 @@ fn main() -> ExitCode {
         args,
         hook,
         env,
+        ready_wait: HOOK_READY_WAIT,
     }) {
         Ok(started) => {
             println!("started pid {}", started.pid);

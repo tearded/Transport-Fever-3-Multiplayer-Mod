@@ -1112,7 +1112,8 @@ function data()
 	end
 
 	-- Has the hook draw another member's preview `kept` (its proposal and
-	-- context), or with nil clear it (tpf3mp/previews.lua).
+	-- context), or with nil clear it (tpf3mp/previews.lua). Answers true and
+	-- the game's ProposalData for it, or nil and why.
 	local function drawPreview(from, kept)
 		if kept == nil then
 			link:undrawPreview(from)

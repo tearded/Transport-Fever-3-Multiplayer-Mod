@@ -5,26 +5,59 @@
 #![allow(clippy::unwrap_used)]
 
 use std::{
-    io::Read,
+    io::{BufRead, BufReader, Read},
     path::Path,
     process::{Command, ExitStatus, Stdio},
+    sync::{Arc, Mutex, mpsc},
     time::{Duration, Instant},
 };
 
+/// How long the rig may run before the test ends it.
 const LIMIT: Duration = Duration::from_secs(180);
+/// The rig's own limit, inside the test's with room for a game still
+/// starting (its hook may take 30 s to load), so that the rig stops what
+/// it started itself.
+const RIG_TIME_LIMIT: &str = "120";
+/// How long the rig's output may stay open after it exited: a game it
+/// left running would hold it open.
+const OUTPUT_GRACE: Duration = Duration::from_secs(10);
+
+/// How a run of the rig ended.
+struct Run {
+    status: ExitStatus,
+    /// What it printed, then its errors.
+    output: String,
+    /// Whether its output closed: nothing it started outlived it.
+    closed: bool,
+}
 
 /// Runs the rig with `args` and returns its output, failing if it fails.
 fn rig(data_root: &Path, args: &[&str]) -> String {
-    let (status, output) = run_rig(data_root, args);
-    assert!(status.success(), "the rig failed ({status}):\n{output}");
-    output
+    let run = run_rig(data_root, args);
+    assert!(
+        run.status.success(),
+        "the rig failed ({}):\n{}",
+        run.status,
+        run.output
+    );
+    assert!(
+        run.closed,
+        "something the rig started outlived it:\n{}",
+        run.output
+    );
+    run.output
 }
 
-/// Runs the rig with `args`; returns how it ended and its output, what it
-/// printed and then its errors.
-fn run_rig(data_root: &Path, args: &[&str]) -> (ExitStatus, String) {
+/// Runs the rig with `args`.
+fn run_rig(data_root: &Path, args: &[&str]) -> Run {
+    run_rig_within(data_root, args, RIG_TIME_LIMIT)
+}
+
+/// Runs the rig with `args`, given `time_limit` seconds.
+fn run_rig_within(data_root: &Path, args: &[&str], time_limit: &str) -> Run {
     let mut child = Command::new(env!("CARGO_BIN_EXE_tpf3mp-rig"))
-        .args(["--server", "local", "--step-rate", "50", "--data-root"])
+        .args(["--server", "local", "--step-rate", "50"])
+        .args(["--time-limit", time_limit, "--data-root"])
         .arg(data_root)
         .args(args)
         .stdin(Stdio::null())
@@ -32,15 +65,8 @@ fn run_rig(data_root: &Path, args: &[&str]) -> (ExitStatus, String) {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let read_all = |mut stream: Box<dyn Read + Send>| {
-        std::thread::spawn(move || {
-            let mut text = String::new();
-            stream.read_to_string(&mut text).unwrap();
-            text
-        })
-    };
-    let stdout = read_all(Box::new(child.stdout.take().unwrap()));
-    let stderr = read_all(Box::new(child.stderr.take().unwrap()));
+    let stdout = Collected::start(child.stdout.take().unwrap());
+    let stderr = Collected::start(child.stderr.take().unwrap());
     let started = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait().unwrap() {
@@ -49,12 +75,68 @@ fn run_rig(data_root: &Path, args: &[&str]) -> (ExitStatus, String) {
         if started.elapsed() > LIMIT {
             let _ = child.kill();
             let _ = child.wait();
-            panic!("the rig ran past {LIMIT:?}");
+            let (output, _) = Collected::gather(stdout, stderr);
+            panic!("the rig ran past {LIMIT:?}:\n{output}");
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    let output = stdout.join().unwrap() + &stderr.join().unwrap();
-    (status, output)
+    let (output, closed) = Collected::gather(stdout, stderr);
+    Run {
+        status,
+        output,
+        closed,
+    }
+}
+
+/// A stream read line by line as it comes, so that what came can be taken
+/// while something still holds the stream open.
+struct Collected {
+    text: Arc<Mutex<String>>,
+    /// Sent once the stream ended: `true` at its end, `false` when reading
+    /// it failed.
+    ended: mpsc::Receiver<bool>,
+}
+
+impl Collected {
+    fn start(stream: impl Read + Send + 'static) -> Self {
+        let text = Arc::new(Mutex::new(String::new()));
+        let (tx, ended) = mpsc::channel();
+        let into = Arc::clone(&text);
+        std::thread::spawn(move || {
+            let mut stream = BufReader::new(stream);
+            let mut line = Vec::new();
+            let closed = loop {
+                line.clear();
+                match stream.read_until(b'\n', &mut line) {
+                    Ok(0) => break true,
+                    Ok(_) => into
+                        .lock()
+                        .unwrap()
+                        .push_str(&String::from_utf8_lossy(&line)),
+                    Err(error) => {
+                        into.lock()
+                            .unwrap()
+                            .push_str(&format!("[reading the output failed: {error}]\n"));
+                        break false;
+                    }
+                }
+            };
+            let _ = tx.send(closed);
+        });
+        Self { text, ended }
+    }
+
+    /// Both streams' text, waiting at most [`OUTPUT_GRACE`] for them to
+    /// close, and whether they did.
+    fn gather(stdout: Self, stderr: Self) -> (String, bool) {
+        let deadline = Instant::now() + OUTPUT_GRACE;
+        let closed = [&stdout, &stderr].iter().all(|stream| {
+            let left = deadline.saturating_duration_since(Instant::now());
+            stream.ended.recv_timeout(left) == Ok(true)
+        });
+        let text = |stream: &Self| stream.text.lock().unwrap().clone();
+        (text(&stdout) + &text(&stderr), closed)
+    }
 }
 
 /// The lane digest lines `player`'s game printed.
@@ -151,7 +233,10 @@ fn without_snapshots_every_game_loads_its_own_world_once_all_attached() {
     let second = output
         .find("rig: p2 plays on link")
         .unwrap_or_else(|| panic!("{output}"));
-    assert!(waited < second && second < started, "{output}");
+    // p2's game may start before or after the rig begins to wait (setting
+    // up the room can take longer than the stagger); the room's game starts
+    // only after both.
+    assert!(waited < started && second < started, "{output}");
     assert!(
         output.contains("rig: all 2 games ended on the same lane digests"),
         "{output}"
@@ -207,17 +292,21 @@ fn a_game_by_path_starts_with_the_hook_and_finds_its_link() {
         "--steps",
         "--game-arg",
         "60",
+        // The stand-in never says it is ready.
+        "--hook-ready-wait",
+        "0",
     ];
     if let Some(hook) = &hook {
         args.extend(["--hook", hook]);
     }
     if cfg!(target_os = "macos") {
         // No game gets the hook on macOS yet; the rig says so and stops.
-        let (status, output) = run_rig(root.path(), &args);
-        assert!(!status.success(), "{output}");
+        let run = run_rig(root.path(), &args);
+        assert!(!run.status.success(), "{}", run.output);
         assert!(
-            output.contains("not possible on this system yet"),
-            "{output}"
+            run.output.contains("not possible on this system yet"),
+            "{}",
+            run.output
         );
         return;
     }
@@ -238,4 +327,81 @@ fn a_game_by_path_starts_with_the_hook_and_finds_its_link() {
     // Both games ran to their last step and exited cleanly: a game that
     // fails fails the rig.
     assert!(!output.contains("game failed"), "{output}");
+}
+
+/// A rig out of time ends the games it started and fails. A game by path
+/// writes to the rig's own output: one left running would hold a test's
+/// pipe open for as long as it runs.
+#[test]
+fn a_rig_out_of_time_ends_what_it_started_and_fails() {
+    if cfg!(target_os = "macos") {
+        // No game by path starts on macOS yet.
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let fakegame = env!("CARGO_BIN_EXE_tpf3mp-fakegame");
+    let hook = stand_in_hook().expect("a library to stand in for the hook");
+    // Without --steps the fake game plays on until it is ended.
+    let args = [
+        "--players",
+        "1",
+        "--game",
+        fakegame,
+        "--hook",
+        &hook,
+        "--hook-ready-wait",
+        "0",
+    ];
+    let run = run_rig_within(root.path(), &args, "5");
+    assert!(!run.status.success(), "{}", run.output);
+    assert!(
+        run.output.contains("rig: p1 plays on link"),
+        "{}",
+        run.output
+    );
+    assert!(
+        run.output.contains("the run took longer than its 5 s"),
+        "{}",
+        run.output
+    );
+    assert!(run.closed, "the game outlived the rig:\n{}", run.output);
+}
+
+/// Out of time while a game is still starting (on Windows, suspended for
+/// a hook that never says it is ready), the rig still ends that game once
+/// its start returns.
+#[test]
+fn a_rig_out_of_time_ends_a_game_still_starting() {
+    if !cfg!(windows) {
+        // Only Windows holds a game for its hook.
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let fakegame = env!("CARGO_BIN_EXE_tpf3mp-fakegame");
+    let hook = stand_in_hook().expect("a library to stand in for the hook");
+    let args = [
+        "--players",
+        "1",
+        "--game",
+        fakegame,
+        "--hook",
+        &hook,
+        "--hook-ready-wait",
+        "10",
+    ];
+    let started = Instant::now();
+    let run = run_rig_within(root.path(), &args, "2");
+    assert!(!run.status.success(), "{}", run.output);
+    assert!(
+        run.output.contains("the run took longer than its 2 s"),
+        "{}",
+        run.output
+    );
+    assert!(run.closed, "the game outlived the rig:\n{}", run.output);
+    assert!(
+        started.elapsed() < Duration::from_secs(60),
+        "{:?}:\n{}",
+        started.elapsed(),
+        run.output
+    );
 }

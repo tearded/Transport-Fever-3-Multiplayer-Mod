@@ -256,10 +256,15 @@ cargo run -p tpf3mp-testkit --bin tpf3mp-rig -- --players 3 --server 127.0.0.1:2
 
 Each game's output is printed under its player's name. The rig runs until
 every game has exited, then checks that they all ended on the same lane
-digests (failing if not); Ctrl-C stops everything it started. `--game`
-takes the path of a game executable instead of the fake game, with
-`--game-arg` for its arguments. The rig starts each game with the hook in
-it, as the launcher does (the hook built next to the rig, or `--hook`).
+digests (failing if not); Ctrl-C stops everything it started, and so does
+the end of `--time-limit <seconds>`, which then fails the run (a real
+game still starting is ended once its start returns). `--game` takes the
+path of a game executable instead of the fake game, with `--game-arg` for
+its arguments. The rig starts each game with the hook in it, as the
+launcher does (the hook built next to the rig, or `--hook`). On Windows
+each game stays suspended until its hook says it is ready, for at most
+`--hook-ready-wait` seconds (30 by default); the rig's tests load a
+system library in the hook's place, which never says so, and give 0.
 It tells each game its link, data folder and starter through
 `TPF3MP_GAME_LINK`, `TPF3MP_DATA_DIR` and `TPF3MP_LAUNCHER_PID`, which the
 hook reads (see "Several games on one PC" in [docs/HOOKS.md](HOOKS.md)).

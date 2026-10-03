@@ -2794,6 +2794,54 @@ fn a_preview_the_hook_could_not_draw_is_drawn_once_a_renderer_frees() {
 }
 
 #[test]
+fn what_this_game_says_of_a_preview_goes_to_the_log_as_it_changes() {
+    let (lua, _script) = engine();
+    // The hook drew each one and answered the game's ProposalData: a track
+    // the game calls critical, the same again, a depot colliding with a
+    // street, then one with nothing to say.
+    let logged: Vec<String> = lua
+        .load(
+            "local previews = ug_require('tpf3mp_1::/scripts/tpf3mp/previews.lua') \
+             previews.reset() \
+             local logged, incoming = {}, {} \
+             local link = { previews = function() local c = incoming incoming = {} return c end, \
+                            log = function(_, line) logged[#logged + 1] = line end } \
+             local data \
+             local function make() return {}, {}, 1 end \
+             local function draw(from, kept) return true, data end \
+             local from = string.rep('ab', 32) \
+             local function show(action, d) \
+                 data = d \
+                 incoming = { { from = from, action = action } } \
+                 previews.take(link, make, draw) \
+             end \
+             local critical = { errorState = { critical = true, messages = { 'Construction not possible' }, \
+                                               warnings = {} } } \
+             show({ BuildTrack = { n = 1 } }, critical) \
+             show({ BuildTrack = { n = 2 } }, critical) \
+             show({ BuildConstruction = {} }, { errorState = { critical = false, messages = { 'Collision' } }, \
+                 collisionInfo = { collisionEntities = { { entity = 39949 } } } }) \
+             show({ BuildConstruction = { n = 2 } }, {}) \
+             local said = {} \
+             for _, line in ipairs(logged) do \
+                 if line:find('as this game sees it', 1, true) then said[#said + 1] = line end \
+             end \
+             return said",
+        )
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(
+        logged,
+        [
+            "another member's BuildTrack preview, as this game sees it: critical, errors Construction not possible",
+            "another member's BuildConstruction preview, as this game sees it: errors Collision, collides with 1 entity (39949)",
+            "another member's BuildConstruction preview, as this game sees it: fine",
+        ],
+        "said when it changes, not again for the same"
+    );
+}
+
+#[test]
 fn a_dry_run_makes_a_builds_proposal_and_sends_nothing() {
     let (lua, _script) = engine();
     lua.load(FAKE_STATION).exec().unwrap();

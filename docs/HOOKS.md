@@ -600,7 +600,20 @@ connection (D11): the window is only another front end of the launcher's
   hello, sends the lobby whenever it changes and carries out the window's
   actions. A room session's bridge takes the link over already greeted
   (`Bridge::greeted`), passes the lobby both ways (`BridgeOptions::lobby`)
-  and gives the link back when it ends (`Bridge::into_link`).
+  and gives the link back when it ends (`Bridge::into_link`). Before it
+  starts a game or begins a room, the launcher opens the link anew unless
+  a game is on it: the one it started, while it runs, or any whose hook
+  attached and whose process is still there, such as a game it took over
+  (`launcher::renew_unused_link`; a process the system cannot be asked
+  about counts as there). A game that closed never read what was sent
+  last (the room's end, the lobby's updates); the next game's hook,
+  finding that before the launcher's hello, would refuse the link and say
+  the game has no link to the launcher. The link is renewed then, not when
+  a game closes, because the launcher does not always see that: a game it
+  took over may only have fallen silent. Such a game counts as closed once
+  its hook fell silent and its process is gone; until then, and while a
+  room's session still lets go of a game that closed in it, the launcher
+  starts no other game.
 - **Reading the link at the menu.** At the main menu no step of the game
   runs, so nothing else reads the link. The window asks the hook for the
   lobby a few times a second; each request exchanges it through the step
@@ -2904,6 +2917,12 @@ and `native/src/preview_plugin.cpp` in tpf2-multiplayer).
   "variant-tracks", never by the event's id, so the list changing is the
   tool closing or another opening; where the game gives no list, the
   preview hides on its next proposal or click only).
+  A right-click abort can keep that tool list unchanged. On build 40408,
+  the hook also withdraws the street/track preview when the native
+  `StreetBuilder::ResetProposal` runs, before calling the game's original
+  reset. Both road and track tools use that builder. The target is checked
+  by the profile; without it this additional withdrawal is unavailable and
+  said in the hook log. A new proposal can publish a fresh preview.
   The hook converts it with the schema, refuses one over
   `tpf3mp_proto::MAX_PREVIEW` (16 KiB) and keeps the latest
   (`crate::previews`); the step driver sends it (`Session::preview`) at
@@ -2950,12 +2969,22 @@ and `native/src/preview_plugin.cpp` in tpf2-multiplayer).
   ProposalViewer does (`ModelData` from `CGameUI+0x538`, no offset, an
   empty entity map, no catchment-area job). Every other call of the
   binding, the mod's own game script's included, is the game's alone. A
-  proposal the game did not evaluate (`ProposalData+0x570`) clears it
-  instead. `undraw(from)` clears a member's renderer when their tool shows
+  proposal the game calls critical ("Construction Not Possible",
+  `errorState.critical`, `ProposalData+0x570`) is drawn too, as the
+  game's own street, track and construction builders draw theirs:
+  `AddToRenderer` draws that state itself (`0x5e3357`); only the
+  ProposalViewer skips it (`0x2aa39d5`), and the hook once did, so a track
+  dragged through a road showed nothing to the others.
+  `undraw(from)` clears a member's renderer when their tool shows
   nothing. `~CGameUI` is detoured: its renderers are cleared, leave its main
   component and are destroyed before the game's own destructor runs.
-  The tint is this game's verdict, blue, or red where this game would
-  refuse the build.
+  The tint is this game's verdict, blue, or red where this game finds
+  errors in the build (a collision) or calls it critical. `drawPreview`
+  answers the game's `ProposalData`, and the log says what this game says
+  of each member's preview whenever that changes ("another member's
+  BuildTrack preview, as this game sees it: critical, errors Construction
+  Not Possible"; the entities it collides with by kind, edge, node,
+  construction or town building, and their ids).
 - **Their terrain**, composed as TpF2 Multiplayer composed it. A preview's
   cuts and embankments are terrain heights its renderer uploads into the
   one view terrain every renderer shares: `EndHeightMod` (`0x7bbae0`)

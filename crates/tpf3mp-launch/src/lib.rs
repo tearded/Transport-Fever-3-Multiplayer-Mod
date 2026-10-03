@@ -20,9 +20,12 @@
 //! game can start at all: the launcher, like TPF2MP's, starts it only while
 //! Steam runs.
 
-use std::path::{Path, PathBuf};
 #[cfg(all(unix, not(target_os = "macos")))]
 use std::process::Command;
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use thiserror::Error;
 
@@ -41,6 +44,10 @@ pub const HOOK_FILE: &str = if cfg!(windows) {
     "libtpf3mp_hook.so"
 };
 
+/// How long a game started on Windows stays suspended for TPF3-MP's hook
+/// to say it is ready, before it is let run anyway.
+pub const HOOK_READY_WAIT: Duration = Duration::from_secs(30);
+
 /// A game to start, and the hook to start it with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Launch {
@@ -51,6 +58,10 @@ pub struct Launch {
     pub hook: PathBuf,
     /// Variables for the game's environment, on top of the launcher's own.
     pub env: Vec<(String, String)>,
+    /// How long the game stays suspended for the hook to say it is ready
+    /// (Windows): [`HOOK_READY_WAIT`] for TPF3-MP's hook. Test rigs that
+    /// load a stand-in library, which never says so, give it less.
+    pub ready_wait: Duration,
 }
 
 /// Whether this system can start the game with the hook in it.
@@ -179,6 +190,31 @@ fn process_path_on_this_system(pid: u32) -> Option<PathBuf> {
 #[cfg(target_os = "macos")]
 fn process_path_on_this_system(_pid: u32) -> Option<PathBuf> {
     None
+}
+
+/// Whether process `pid` may still run. Fails closed: a process the system
+/// cannot be asked about is taken as running.
+pub fn process_runs(pid: u32) -> bool {
+    process_runs_on_this_system(pid)
+}
+
+#[cfg(windows)]
+fn process_runs_on_this_system(pid: u32) -> bool {
+    windows::process_runs(pid)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn process_runs_on_this_system(pid: u32) -> bool {
+    // Only "no such entry" says it is gone.
+    std::fs::metadata(format!("/proc/{pid}")).map_or_else(
+        |error| error.kind() != std::io::ErrorKind::NotFound,
+        |_| true,
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn process_runs_on_this_system(_pid: u32) -> bool {
+    true
 }
 
 /// Steam's client, by the file name of its program in lower case.
@@ -364,6 +400,7 @@ mod tests {
             args: Vec::new(),
             hook: dir.path().join(HOOK_FILE),
             env: Vec::new(),
+            ready_wait: HOOK_READY_WAIT,
         };
         assert!(matches!(start(&launch), Err(LaunchError::NoGame(_))));
         let exe = dir.path().join("game");
@@ -393,9 +430,28 @@ mod tests {
             args: Vec::new(),
             hook: PathBuf::from("hook"),
             env: vec![("TPF3MP_GAME_LINK".into(), "tpf3mp.default".into())],
+            ready_wait: HOOK_READY_WAIT,
         };
         let env = environment(&launch);
         assert!(env.contains(&("SteamAppId".into(), STEAM_APP_ID.into())));
         assert!(env.contains(&("TPF3MP_GAME_LINK".into(), "tpf3mp.default".into())));
+    }
+
+    #[test]
+    fn a_process_that_exited_no_longer_runs() {
+        assert!(process_runs(std::process::id()));
+        let mut child = if cfg!(windows) {
+            std::process::Command::new("cmd")
+                .args(["/C", "exit"])
+                .spawn()
+        } else {
+            std::process::Command::new("true").spawn()
+        }
+        .unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        // Reaped and its handle closed: gone, unless macOS cannot tell.
+        drop(child);
+        assert_eq!(process_runs(pid), cfg!(target_os = "macos"));
     }
 }

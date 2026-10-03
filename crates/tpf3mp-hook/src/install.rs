@@ -805,6 +805,9 @@ fn install_inner(profile: &Profile, link_name: &str) -> Result<u64, String> {
     // without every target, nobody's is.
     // SAFETY: as above.
     log_line(&unsafe { crate::drawing::install(&at, detour_forever) });
+    // The street/track tool may abort its proposal while remaining open.
+    // SAFETY: the profile checked the reset, and no tool runs yet.
+    log_line(&unsafe { crate::previewcancel::install(&at, detour_forever) });
     // The seeds and the order fixes (docs/HOOKS.md, "Seeds, as built" and
     // "The order fixes, as built") take the targets at their addresses in
     // this process; each piece installs, and fails closed, on its own, and

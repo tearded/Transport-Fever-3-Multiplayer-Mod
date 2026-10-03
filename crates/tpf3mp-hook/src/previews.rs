@@ -210,6 +210,21 @@ pub fn show(preview: Option<Payload>) {
     previews().out.set(preview);
 }
 
+/// The street/track builder reset its proposal. An inactive network tool
+/// must not withdraw a construction tool's current preview.
+pub fn withdraw_network() {
+    let mut previews = previews();
+    let network = previews
+        .out
+        .shown
+        .as_ref()
+        .and_then(|payload| Action::from_payload(payload).ok())
+        .is_some_and(|action| matches!(action, Action::BuildRoad(_) | Action::BuildTrack(_)));
+    if network {
+        previews.out.set(None);
+    }
+}
+
 /// The player's preview to send now, if any ([`Out::take`]).
 pub fn take_out(now: Instant) -> Option<Option<Payload>> {
     previews().out.take(now)

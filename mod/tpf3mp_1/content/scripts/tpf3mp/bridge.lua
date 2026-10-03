@@ -405,8 +405,9 @@ end
 -- In the GUI: draws member `from`'s preview, the proposal `proposal` with
 -- `context`, in the hook's renderer for them (docs/HOOKS.md, "Build
 -- previews"): the hook draws what the game evaluates for it with `evaluate`
--- (api.engine.util.proposal.makeProposalData). True, or nil and why; nil
--- from a hook that cannot draw (`draw` is optional).
+-- (api.engine.util.proposal.makeProposalData). True and what `evaluate`
+-- answered (the ProposalData), or nil and why; nil from a hook that cannot
+-- draw (`draw` is optional).
 function Link:drawPreview(from, proposal, context, evaluate)
 	local native = self.native
 	if type(native.draw) ~= "function" or type(native.drawn) ~= "function" then
@@ -421,7 +422,7 @@ function Link:drawPreview(from, proposal, context, evaluate)
 	if not okDrawn then return nil, tostring(drawn) end
 	if drawn == nil then return nil, "the game made nothing to draw" end
 	if drawn ~= true then return nil, tostring(whyNot or "not drawn") end
-	return true
+	return true, err
 end
 
 -- In the GUI: member `from`'s preview goes.

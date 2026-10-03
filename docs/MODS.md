@@ -311,11 +311,19 @@ this player has each (`yes`, `no`, `other_version`).
 A save is a zstd frame; near its start, after the `tf**` magic and a few
 settings, is its list of mods as the game writes it (`GameSaveCommandData`'s
 `modDescs`): a `u32` count, then per mod five `u32`-length strings (id,
-source, hub id as `<source>,<id>`, name, url) and an `i32` severity. SEEN in
-build 40408's saves (the DLCs, `DLC`; TPF3-MP, `StagingArea`). The reader
-tries each offset in the first 64 KiB and takes the first whole list that
-holds together; a save where none does is refused. `tpf3mp-modscan --save
-<file>` prints it.
+source, hub id, name, url) and an `i32` severity. The hub id is
+`<source>,<id>`, or for a mod.io mod its mod.io number (`6414521`). SEEN in
+build 40408's saves (the DLCs, `DLC`; TPF3-MP and local mods,
+`StagingArea`; `mod.io` mods; lists of over a hundred mods). The reader
+tries each offset in the first 64 KiB and takes the first whole list whose
+every entry holds together (a mod id, the hub id as above, a severity of 0
+to 2); the list may run on for up to 4 MiB. Where the real list does not
+hold together, its tail does (an entry's severity of 1 reads as a count of
+one): a save listing a mod.io mod once read as the Pre-Order Pack alone, so
+the launcher refused it for lacking TPF3-MP (2026-10-03). So a list found
+right behind something shaped like an entry, an id and four more strings
+matched by their lengths, is taken for such a tail and the save is
+refused. `tpf3mp-modscan --save <file>` prints it.
 
 ## The save's mod list
 

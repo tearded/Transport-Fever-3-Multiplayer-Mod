@@ -76,9 +76,10 @@ const SAVES_TICK: Duration = Duration::from_secs(5);
 /// another launcher's heartbeat, before taking it.
 const LINK_HELD_WAIT: Duration = Duration::from_millis(350);
 /// How long the hook of a game this launcher did not start may fall silent
-/// before the game counts as closed: a game that followed the link from a
-/// launcher that closed ([`instance`]), whose process this one cannot
-/// watch. Long enough for a save to load at the menu.
+/// before the game counts as closed, once its process is gone too: a game
+/// that followed the link from a launcher that closed ([`instance`]), which
+/// this one did not start and cannot wait on. Long enough for a save to
+/// load at the menu.
 const ADOPTED_GAME_QUIET: Duration = Duration::from_secs(60);
 
 /// What a launcher needs.
@@ -384,6 +385,9 @@ struct Session {
     controls: mpsc::Sender<Control>,
     task: JoinHandle<SessionEnded>,
     options: ConnectOptions,
+    /// Its game closed after its hook attached: the session is ending, and
+    /// gives the link back once it has.
+    game_closed: bool,
 }
 
 /// How a room session ended, and the game's link it gives back, with the
@@ -403,23 +407,62 @@ type Idle = Option<IdleLink<tpf3mp_ipc::Link>>;
 
 /// Opens the link the game's hook attaches to (D11: the launcher names it in
 /// the game's environment), as a new generation.
-fn open_link(config: &LauncherConfig) -> Result<IdleLink<tpf3mp_ipc::Link>, String> {
+fn open_link(name: &str) -> Result<IdleLink<tpf3mp_ipc::Link>, String> {
     // Another launcher running with the same link would lose its game to
     // this one, and each game would show the other launcher's lobby.
-    if let Some(pid) = tpf3mp_ipc::Link::held_by_another_agent(&config.link, LINK_HELD_WAIT) {
+    if let Some(pid) = tpf3mp_ipc::Link::held_by_another_agent(name, LINK_HELD_WAIT) {
         let message = format!(
-            "another TPF3-MP launcher (process {pid}) uses the game link {}: start this launcher with its own --game-link, or close the other",
-            config.link
+            "another TPF3-MP launcher (process {pid}) uses the game link {name}: start this launcher with its own --game-link, or close the other"
         );
         warn!(%message);
         return Err(message);
     }
-    tpf3mp_ipc::Link::create(
-        &tpf3mp_ipc::Config::new(&config.link),
-        tpf3mp_ipc::Role::Agent,
-    )
-    .map(IdleLink::new)
-    .map_err(|error| format!("cannot open the link to the game: {error}"))
+    tpf3mp_ipc::Link::create(&tpf3mp_ipc::Config::new(name), tpf3mp_ipc::Role::Agent)
+        .map(IdleLink::new)
+        .map_err(|error| format!("cannot open the link to the game: {error}"))
+}
+
+/// Whether a game is on the link: the one this launcher started, while it
+/// runs, or else any game whose hook attached to it and whose process is
+/// still there (one it took over, even if it fell silent).
+fn game_on_link(game: &mut Option<tpf3mp_launch::Started>, link: &tpf3mp_ipc::Link) -> bool {
+    match game {
+        Some(started) => started.is_running(),
+        None => hook_process_runs(link),
+    }
+}
+
+/// Whether the process of the hook that last attached to the link may still
+/// run. A process id used again by another program keeps the link as it
+/// was: the next game may then find it taken, never a game cut off.
+fn hook_process_runs(link: &tpf3mp_ipc::Link) -> bool {
+    let pid = link.peer_pid();
+    pid != 0 && tpf3mp_launch::process_runs(pid)
+}
+
+/// Opens the link anew, empty, unless a game is on it ([`game_on_link`]).
+/// A game that closed never read what was sent last on its link (a room's
+/// end, the lobby's updates); the next game's hook, finding that before
+/// the launcher's hello, would refuse the link, and the game would say it
+/// has no link to the launcher until the launcher restarted. Renewed only
+/// when the link is about to serve again, not when a game closes: the
+/// launcher does not always see that (a game it took over).
+fn renew_unused_link(
+    name: &str,
+    game: &mut Option<tpf3mp_launch::Started>,
+    idle: &mut Idle,
+) -> Result<(), String> {
+    if idle
+        .as_ref()
+        .is_some_and(|link| game_on_link(game, link.link()))
+    {
+        return Ok(());
+    }
+    // The old mapping goes first: on Unix its owner removes the name when
+    // dropped, and would take the new one with it.
+    *idle = None;
+    *idle = Some(open_link(name)?);
+    Ok(())
 }
 
 /// Ends a task when dropped.
@@ -471,7 +514,7 @@ async fn control(
     // The game's link, for as long as the launcher runs: the game can start
     // before a room is chosen, and its menu's window talks to the launcher
     // over it (D17).
-    let mut idle: Idle = open_link(&config)
+    let mut idle: Idle = open_link(&config.link)
         .inspect_err(|error| {
             warn!(%error, "the game's link opens with the first room instead");
             // Said in the window too: two launchers on one link cross.
@@ -536,13 +579,14 @@ async fn control(
                     None => Vec::new(),
                 };
                 // A game this launcher did not start: one that followed the
-                // link from a launcher that closed for this one. Only its
-                // hook falling silent says it closed.
+                // link from a launcher that closed for this one. Its hook
+                // falling silent and its process gone say it closed.
                 if session.is_none()
                     && game.is_none()
                     && idle.as_ref().is_some_and(|link| {
                         link.build().is_some()
                             && link.hook_quiet(std::time::Instant::now()) > ADOPTED_GAME_QUIET
+                            && !hook_process_runs(link.link())
                     })
                 {
                     info!("the game another launcher started stopped answering; it counts as closed");
@@ -563,17 +607,17 @@ async fn control(
             ended = session_end(&mut session) => {
                 let finished = session.take();
                 let (ended, link) = match ended {
-                    Ok((ended, link, build)) => (
-                        ended,
-                        Some(IdleLink::given_back(link, build, game.is_some())),
-                    ),
+                    Ok((ended, link, build)) => {
+                        let game_runs = game_on_link(&mut game, &link);
+                        (ended, Some(IdleLink::given_back(link, build, game_runs)))
+                    }
                     // Ended by Leave when the session would not take it.
                     Err(error) if error.is_cancelled() => (Ok(BridgeEnd::Left), None),
                     Err(error) => (Err(bridge::BridgeFault::Rejoin(error.to_string())), None),
                 };
                 // The game keeps its link for the next room; a session that
                 // failed outright left none, so a new one is opened.
-                idle = link.or_else(|| open_link(&config).ok());
+                idle = link.or_else(|| open_link(&config.link).ok());
                 // Losing the room for good is said as it is, in both windows.
                 let room_lost = room_lost(&ended);
                 let message = match (&ended, &room_lost) {
@@ -617,8 +661,9 @@ async fn control(
                 // player can start the game again at once.
                 game = None;
                 info!("Transport Fever 3 closed");
-                match &session {
+                match &mut session {
                     Some(session) => {
+                        session.game_closed = shared.status().game.is_some();
                         let _ = session.controls.send(Control::GameClosed).await;
                     }
                     // Outside a room the launcher's own link held its hook.
@@ -717,6 +762,7 @@ async fn act(
             connect_to(shared, config, connected, &server, name).await?;
             match passed {
                 Some(passed) => {
+                    renew_unused_link(&config.link, game, idle)?;
                     join(
                         shared,
                         config,
@@ -736,14 +782,17 @@ async fn act(
                 let _ = session.controls.try_send(Control::Leave);
                 let mut task = session.task;
                 match tokio::time::timeout(DISCONNECT_WAIT, &mut task).await {
-                    Ok(Ok((_, link, build))) => *idle = Some(IdleLink::resumed(link, build)),
+                    Ok(Ok((_, link, build))) => {
+                        let game_runs = game_on_link(game, &link);
+                        *idle = Some(IdleLink::given_back(link, build, game_runs));
+                    }
                     // Stuck: stopped, and its link with it; a new one opens.
                     Err(_) => {
                         task.abort();
                         let _ = task.await;
-                        *idle = open_link(config).ok();
+                        *idle = open_link(&config.link).ok();
                     }
-                    Ok(Err(_)) => *idle = open_link(config).ok(),
+                    Ok(Err(_)) => *idle = open_link(&config.link).ok(),
                 }
             }
             if let Some(connected) = connected.take() {
@@ -835,6 +884,7 @@ async fn act(
                 // Offered first next time.
                 shared.view().start_save = Some(picked.trim().to_owned());
             }
+            renew_unused_link(&config.link, game, idle)?;
             begin_session(
                 shared,
                 config,
@@ -869,6 +919,7 @@ async fn act(
                 let name = current.options.name.clone();
                 connect_to(shared, config, connected, &server, name).await?;
             }
+            renew_unused_link(&config.link, game, idle)?;
             join(
                 shared,
                 config,
@@ -1013,8 +1064,24 @@ fn launch_game(
             "Transport Fever 3 is already running from here; it joins once it has loaded".into(),
         );
     }
-    // A game started by a launcher this one took over from, linked here.
-    if game.is_none() && idle.as_ref().is_some_and(|link| link.build().is_some()) {
+    // The room still lets go of the game that closed; its link comes back
+    // once it has, and is renewed for the next.
+    // A game that exited before the launcher handled it counts as closing.
+    if session.as_ref().is_some_and(|session| session.game_closed)
+        || session.is_some() && game.as_mut().is_some_and(|started| !started.is_running())
+    {
+        return Err(
+            "the room is still letting go of the game that closed: start it again in a moment"
+                .into(),
+        );
+    }
+    // A game started by a launcher this one took over from, linked here,
+    // silent or not.
+    if game.is_none()
+        && idle
+            .as_ref()
+            .is_some_and(|link| link.build().is_some() || hook_process_runs(link.link()))
+    {
         return Err(
             "Transport Fever 3 is already running with TPF3-MP, linked to this launcher: use its \
             Multiplayer window"
@@ -1046,9 +1113,9 @@ fn launch_game(
         .clone()
         .ok_or("this TPF3-MP has no hook library for the game")?;
     // The link the game's hook attaches to: the room session's, or the
-    // launcher's own.
-    if session.is_none() && idle.is_none() {
-        *idle = Some(open_link(config)?);
+    // launcher's own, empty.
+    if session.is_none() {
+        renew_unused_link(&config.link, game, idle)?;
     }
     let started = tpf3mp_launch::start(&tpf3mp_launch::Launch {
         exe,
@@ -1064,6 +1131,7 @@ fn launch_game(
         .into_iter()
         .chain(config.game_env.iter().cloned())
         .collect(),
+        ready_wait: tpf3mp_launch::HOOK_READY_WAIT,
     })
     .map_err(|error| error.to_string())?;
     info!(pid = started.pid, "started the game with the hook");
@@ -1203,7 +1271,7 @@ fn begin_session(
     // takes it over and gives it back when it ends.
     let (link, build) = match idle.take() {
         Some(link) => link.into_parts(),
-        None => open_link(config)?.into_parts(),
+        None => open_link(&config.link)?.into_parts(),
     };
     let (controls, controls_rx) = mpsc::channel(ACTION_QUEUE);
     // A fresh status for the new session, with the room already known.
@@ -1265,6 +1333,7 @@ fn begin_session(
         controls,
         task,
         options,
+        game_closed: false,
     });
     Ok(())
 }
@@ -2170,5 +2239,53 @@ mod tests {
             Ok("play.example.net:29470".into())
         );
         assert!(connect(None, code).is_err(), "an invite needs its server");
+    }
+
+    /// A game started again after the first one closed: the hook of the
+    /// next attaches although the first never read the room's end.
+    #[test]
+    fn a_game_started_again_attaches_past_what_the_closed_one_left() {
+        use crate::bridge::HookLink;
+
+        let name = format!("test.launcher.restart.{}", std::process::id());
+        let (mut link, _) = open_link(&name).unwrap().into_parts();
+        HookLink::heartbeat(&mut link);
+        // The room ended while the closed game's hook no longer read it.
+        let end = tpf3mp_bridge::ToHook::End {
+            reason: Text::new("the room ended").unwrap(),
+        };
+        assert!(HookLink::send(&mut link, &tpf3mp_bridge::encode(&end).unwrap()).unwrap());
+        let mut idle = Some(IdleLink::new(link));
+        renew_unused_link(&name, &mut None, &mut idle).unwrap();
+        let mut idle = idle.expect("a new link");
+
+        let hook = std::thread::spawn({
+            let name = name.clone();
+            move || tpf3mp_bridge::Session::attach(&name, "40408", Duration::from_secs(10))
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !hook.is_finished() && std::time::Instant::now() < deadline {
+            idle.pump(&LobbyView::default()).unwrap();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let attached = hook.join().unwrap();
+        assert!(attached.is_ok(), "{:?}", attached.err());
+        assert_eq!(idle.build(), Some("40408"), "the launcher greeted it");
+    }
+
+    /// A game this launcher took over keeps its link while its process
+    /// runs, silent or not.
+    #[test]
+    fn a_link_with_a_game_on_it_is_kept() {
+        let name = format!("test.launcher.kept.{}", std::process::id());
+        let (link, _) = open_link(&name).unwrap().into_parts();
+        let generation = link.session();
+        // Its hook, in a process that runs: this one.
+        let _hook = tpf3mp_ipc::Link::open(&name, tpf3mp_ipc::Role::Hook).unwrap();
+        let mut idle = Some(IdleLink::resumed(link, Some("40408".into())));
+        renew_unused_link(&name, &mut None, &mut idle).unwrap();
+        let (link, build) = idle.unwrap().into_parts();
+        assert_eq!(link.session(), generation, "the same link");
+        assert_eq!(build.as_deref(), Some("40408"));
     }
 }

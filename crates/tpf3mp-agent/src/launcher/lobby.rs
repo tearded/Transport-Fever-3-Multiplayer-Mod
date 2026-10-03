@@ -371,6 +371,11 @@ impl<L: HookLink> IdleLink<L> {
         Self::new(self.link)
     }
 
+    /// The link itself.
+    pub(crate) fn link(&self) -> &L {
+        &self.link
+    }
+
     /// The link and the game's build, for a room session to take over.
     pub(crate) fn into_parts(self) -> (L, Option<String>) {
         (self.link, self.build)

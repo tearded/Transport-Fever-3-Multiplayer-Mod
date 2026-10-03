@@ -37,9 +37,6 @@ use crate::{Launch, LaunchError, Started, folder_of};
 
 /// How long loading the hook may take.
 const LOAD_TIMEOUT_MS: u32 = 30_000;
-/// How long the game waits, suspended, for the hook to be ready. The tests
-/// load a system library that never says so.
-const READY_TIMEOUT_MS: u32 = if cfg!(test) { 300 } else { 30_000 };
 
 /// The event the hook sets once it is ready (`tpf3mp_ipc::hook_ready_event`).
 struct ReadyEvent(HANDLE);
@@ -144,7 +141,7 @@ pub(crate) fn start(launch: &Launch, env: &[(String, String)]) -> Result<Started
     // the game's own. A hook that never says so lets the game run anyway,
     // after the wait.
     if let Some(ready) = &ready {
-        ready.wait(READY_TIMEOUT_MS);
+        ready.wait(millis(launch.ready_wait));
     }
     // SAFETY: the main thread's handle, from CreateProcessW.
     if unsafe { ResumeThread(process.info.hThread) } == u32::MAX {
@@ -424,6 +421,35 @@ pub(crate) fn process_path(pid: u32) -> Option<std::path::PathBuf> {
     }
 }
 
+/// `wait` in milliseconds for a wait call, short of `INFINITE`.
+fn millis(wait: std::time::Duration) -> u32 {
+    u32::try_from(wait.as_millis()).map_or(u32::MAX - 1, |ms| ms.min(u32::MAX - 1))
+}
+
+/// Whether process `pid` may still run: it exists and has no exit code.
+/// A process that exited may still be there while another program holds a
+/// handle to it. Fails closed: one that cannot be asked about (access
+/// denied) is taken as running. As the hook's `worlds::running`.
+pub(crate) fn process_runs(pid: u32) -> bool {
+    use windows_sys::Win32::{
+        Foundation::{ERROR_INVALID_PARAMETER, GetLastError},
+        System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+    };
+    /// The exit code of a process still running.
+    const STILL_ACTIVE: u32 = 259;
+    // SAFETY: a handle opened for querying only, closed once.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return GetLastError() != ERROR_INVALID_PARAMETER;
+        }
+        let mut code = 0u32;
+        let asked = GetExitCodeProcess(handle, &raw mut code);
+        CloseHandle(handle);
+        asked == 0 || code == STILL_ACTIVE
+    }
+}
+
 fn wide(text: &std::ffi::OsStr) -> Vec<u16> {
     text.encode_wide().chain(std::iter::once(0)).collect()
 }
@@ -437,6 +463,10 @@ mod tests {
     };
 
     use super::*;
+
+    /// How long the tests' games wait for a stand-in hook, which never says
+    /// it is ready.
+    const STAND_IN_READY_WAIT: std::time::Duration = std::time::Duration::from_millis(300);
 
     fn system(name: &str) -> PathBuf {
         let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
@@ -499,6 +529,7 @@ mod tests {
                 args: args.split(' ').map(str::to_owned).collect(),
                 hook: system("version.dll"),
                 env: vec![("TPF3MP_GAME_LINK".into(), "test".into())],
+                ready_wait: STAND_IN_READY_WAIT,
             },
             &[],
         )
@@ -519,6 +550,7 @@ mod tests {
                 args: args.split(' ').map(str::to_owned).collect(),
                 hook: system("version.dll"),
                 env: Vec::new(),
+                ready_wait: STAND_IN_READY_WAIT,
             },
             &[],
         )
@@ -526,6 +558,34 @@ mod tests {
         assert!(started.is_running());
         started.kill();
         assert!(!started.is_running(), "ended at once");
+    }
+
+    #[test]
+    fn the_game_stays_suspended_for_as_long_as_the_launch_says() {
+        let wait = std::time::Duration::from_secs(2);
+        let begun = std::time::Instant::now();
+        let started = start(
+            &Launch {
+                exe: system("cmd.exe"),
+                args: vec!["/c".into(), "exit".into(), "0".into()],
+                hook: system("version.dll"),
+                env: Vec::new(),
+                ready_wait: wait,
+            },
+            &[],
+        )
+        .unwrap();
+        assert!(begun.elapsed() >= wait, "held for the wait it was given");
+        assert_eq!(wait_for_exit(started.pid), Some(0));
+    }
+
+    #[test]
+    fn a_wait_is_never_infinite() {
+        use windows_sys::Win32::System::Threading::INFINITE;
+        assert_eq!(millis(std::time::Duration::ZERO), 0);
+        assert_eq!(millis(std::time::Duration::from_secs(30)), 30_000);
+        assert!(millis(std::time::Duration::MAX) < INFINITE);
+        assert!(millis(std::time::Duration::from_millis(u64::from(INFINITE))) < INFINITE);
     }
 
     #[test]
@@ -539,6 +599,7 @@ mod tests {
                 args: vec!["/c".into(), "exit".into(), "0".into()],
                 hook: not_a_library,
                 env: Vec::new(),
+                ready_wait: STAND_IN_READY_WAIT,
             },
             &[],
         );
@@ -555,6 +616,7 @@ mod tests {
             args: vec!["-window".into(), "a b".into()],
             hook: PathBuf::new(),
             env: Vec::new(),
+            ready_wait: crate::HOOK_READY_WAIT,
         };
         assert_eq!(
             command_line(&launch),

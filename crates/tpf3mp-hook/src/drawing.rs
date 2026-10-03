@@ -27,7 +27,8 @@
 //!   main component and are destroyed ([`teardown`]).
 //!
 //! The renderer's tint is this game's verdict on the proposal, blue, or red
-//! where this game would refuse it.
+//! where this game finds errors in it or calls it critical; a critical one
+//! is drawn too, as the game's own builders draw theirs.
 //!
 //! **Terrain.** A preview's cuts and embankments are terrain heights its
 //! renderer uploads into the one view terrain every renderer shares
@@ -90,7 +91,6 @@ pub const MAIN_VIEW_FIELD: (&str, &[u8]) = (
     &[0x49, 0x89, 0x8C, 0x24],
 );
 pub const MODEL_DATA_FIELD: (&str, &[u8]) = ("ProposalViewer/ModelData read", &[0x48, 0x8B, 0x89]);
-pub const EVALUATED_FIELD: (&str, &[u8]) = ("ProposalViewer/evaluated test", &[0x41, 0x80, 0xBF]);
 pub const UPLOAD_FIELD: (&str, &[u8]) =
     ("BuilderRenderer::EndHeightMod/upload flag", &[0x80, 0xB9]);
 
@@ -122,8 +122,6 @@ pub struct Layout {
     pub main_view: usize,
     /// `CGameUI` -> its `ModelData*`.
     pub model_data: usize,
-    /// `ProposalData` -> its "not evaluated" flag (a byte).
-    pub evaluated: usize,
     /// `BuilderRenderer` -> its terrain upload flag (a byte).
     pub upload: usize,
 }
@@ -141,7 +139,6 @@ impl Layout {
             factory: field(FACTORY_FIELD)?,
             main_view: field(MAIN_VIEW_FIELD)?,
             model_data: field(MODEL_DATA_FIELD)?,
-            evaluated: field(EVALUATED_FIELD)?,
             upload: field(UPLOAD_FIELD)?,
         })
     }
@@ -697,13 +694,11 @@ unsafe fn draw_made(
     if ui == 0 {
         return Err("no world's GUI".into());
     }
-    // SAFETY: the ProposalData the game just made; the flag the game's own
-    // ProposalViewer tests before it fills a renderer.
-    let unevaluated = unsafe { std::ptr::read_volatile((data + layout.evaluated) as *const u8) };
-    if unevaluated != 0 {
-        table().hide(game, from, ui);
-        return Err("the game did not evaluate the proposal".into());
-    }
+    // A proposal the game calls critical ("Construction not possible") is
+    // drawn too, as the game's own tools draw theirs: the street, track and
+    // construction builders fill their renderer from it whatever its
+    // `errorState.critical` (`ProposalData+0x570`), and AddToRenderer draws
+    // that state itself (0x5e3357). Only the ProposalViewer skips it.
     // SAFETY: the live CGameUI's fields its own CreateUI set.
     let (factory, view, models) = unsafe {
         (
@@ -960,13 +955,8 @@ pub unsafe fn install(
     );
     ARMABLE.store(1, Ordering::Release);
     format!(
-        "the others' build previews are drawn, {terrain}: a renderer each, CGameUI +{:#x} (factory +{:#x}, main view +{:#x}, model data +{:#x}), ProposalData +{:#x}, renderer +{:#x}",
-        layout.game_ui,
-        layout.factory,
-        layout.main_view,
-        layout.model_data,
-        layout.evaluated,
-        layout.upload
+        "the others' build previews are drawn, {terrain}: a renderer each, CGameUI +{:#x} (factory +{:#x}, main view +{:#x}, model data +{:#x}), renderer +{:#x}",
+        layout.game_ui, layout.factory, layout.main_view, layout.model_data, layout.upload
     )
 }
 
@@ -1023,7 +1013,7 @@ mod tests {
     #[test]
     fn each_anchor_gives_the_offset_its_instruction_uses() {
         // The build 40408 instructions (the profile's anchors).
-        let anchors: [(&str, &[u8], usize); 6] = [
+        let anchors: [(&str, &[u8], usize); 5] = [
             (
                 GAME_UI_FIELD.0,
                 &[0x48, 0x89, 0x83, 0xB8, 0x06, 0x00, 0x00],
@@ -1045,11 +1035,6 @@ mod tests {
                 0x538,
             ),
             (
-                EVALUATED_FIELD.0,
-                &[0x41, 0x80, 0xBF, 0x70, 0x05, 0x00, 0x00, 0x00],
-                0x570,
-            ),
-            (
                 UPLOAD_FIELD.0,
                 &[0x80, 0xB9, 0xF0, 0x00, 0x00, 0x00, 0x00],
                 0xf0,
@@ -1069,7 +1054,6 @@ mod tests {
                 factory: 0x588,
                 main_view: 0xbf0,
                 model_data: 0x538,
-                evaluated: 0x570,
                 upload: 0xf0,
             }
         );

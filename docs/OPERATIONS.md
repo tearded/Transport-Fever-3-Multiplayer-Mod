@@ -258,7 +258,9 @@ What happens during the restart:
    logged turn by turn. The new server restores those games at start.
 3. Players reconnect with the same identity and resume after the last turn
    they applied. The event log continues without a gap. Lobbies that had not
-   started are not kept.
+   started are not kept. If the restored room sends a replacement world while
+   the game finishes an earlier load, the launcher waits for the replacement
+   to finish before reporting that the game is ready.
 4. A restored game that nobody reconnects to within 10 minutes closes and
    its log is deleted, like any running game whose players all disconnected
    (see [Room lifetime](#room-lifetime)). `--abandon-after-mins` sets both:

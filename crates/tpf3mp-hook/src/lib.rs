@@ -52,6 +52,7 @@ pub mod order;
 pub mod perf;
 pub mod persons;
 mod platform;
+pub mod previewcancel;
 pub mod previews;
 pub mod probe;
 pub mod roadtrace;

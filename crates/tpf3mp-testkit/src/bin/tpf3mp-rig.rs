@@ -8,8 +8,8 @@
 //! hook reads (`TPF3MP_GAME_LINK`, `TPF3MP_DATA_DIR`,
 //! `TPF3MP_LAUNCHER_PID`).
 //!
-//! It runs until every game has exited, or Ctrl-C, which stops everything
-//! it started. When the games print their lane digests, as the fake game
+//! It runs until every game has exited, or Ctrl-C or the end of its
+//! --time-limit, which stop everything it started. When the games print their lane digests, as the fake game
 //! does, it checks that all of them ended in the same world.
 
 use std::{
@@ -21,13 +21,14 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
     process::Command,
     sync::oneshot,
     task::JoinHandle,
+    time::Instant,
 };
 use tpf3mp_agent::{
     Worlds, content,
@@ -87,6 +88,19 @@ struct Args {
     /// one next to this program.
     #[arg(long)]
     hook: Option<PathBuf>,
+
+    /// With a real game: seconds it stays suspended for its hook to say it
+    /// is ready. TPF3-MP's hook says so at once; a stand-in library never
+    /// does, so tests that load one give 0.
+    #[arg(long, default_value_t = tpf3mp_launch::HOOK_READY_WAIT.as_secs())]
+    hook_ready_wait: u64,
+
+    /// Seconds the whole run may take: past them the rig stops everything
+    /// it started and fails. A real game still starting then ends once its
+    /// start returns: after its hook loaded (at most 30 s) and the
+    /// --hook-ready-wait.
+    #[arg(long)]
+    time_limit: Option<u64>,
 
     /// Where each player's folder goes (`p1`, `p2`, ...: identity, worlds,
     /// and the game hook's log and profiles). Kept between runs, so the
@@ -207,6 +221,9 @@ async fn run(args: Args) -> Result<ExitCode> {
         Some(root) => root.clone(),
         None => std::env::temp_dir().join("tpf3mp-rig"),
     };
+    let deadline = args
+        .time_limit
+        .map(|limit| Instant::now() + Duration::from_secs(limit));
     fs::create_dir_all(&root).with_context(|| format!("creating {}", root.display()))?;
     let game = GameCommand::new(&args)?;
 
@@ -281,39 +298,30 @@ async fn run(args: Args) -> Result<ExitCode> {
 
     let game = Arc::new(game);
     let mut games = Vec::new();
-    for (index, player) in players.iter().enumerate() {
-        let delay = Duration::from_secs(args.stagger.saturating_mul(index as u64));
-        if delay.is_zero() {
-            games.push(game.spawn(&player.seat(), index)?);
-            continue;
+    let time_up = async {
+        match deadline {
+            Some(deadline) => tokio::time::sleep_until(deadline).await,
+            None => std::future::pending().await,
         }
-        // A later game starts on its own while the room is set up: the
-        // players' links must be there before any game's hook gives up on
-        // them.
-        println!(
-            "rig: starting {}'s game in {} s",
-            player.name,
-            delay.as_secs()
-        );
-        let (game, seat) = (Arc::clone(&game), player.seat());
-        games.push(tokio::spawn(async move {
-            tokio::time::sleep(delay).await;
-            let mut started = AbortOnDrop(game.spawn(&seat, index)?);
-            (&mut started.0).await.context("a game's task failed")?
-        }));
-    }
-
+    };
     let outcome = tokio::select! {
-        outcome = play(&args, &server, &players, &mut games) => outcome,
+        outcome = async {
+            start_games(&args, &game, &players, &mut games).await?;
+            play(&args, &server, &players, &mut games).await
+        } => outcome,
         _ = tokio::signal::ctrl_c() => {
             println!("rig: stopped");
             Ok(ExitCode::from(130))
         }
+        () = time_up => Err(anyhow!(
+            "stopped: the run took longer than its {} s",
+            args.time_limit.unwrap_or_default()
+        )),
     };
-    // Aborting the games' tasks kills the games that still run.
-    for game in &games {
-        game.abort();
-    }
+    // Aborting the games' tasks kills the games that still run. A game
+    // still starting is ended as soon as its start returns: its guard is
+    // dropped with the start's result.
+    drop(games);
     for player in &players {
         let _ = tokio::time::timeout(
             Duration::from_secs(2),
@@ -328,12 +336,53 @@ async fn run(args: Args) -> Result<ExitCode> {
     outcome
 }
 
+/// Starts every player's game: the first ones now, one after another, and
+/// each later one after its --stagger delay, on its own while the room is
+/// set up (the players' links must be there before any game's hook gives
+/// up on them).
+async fn start_games(
+    args: &Args,
+    game: &Arc<GameCommand>,
+    players: &[Player],
+    games: &mut Vec<AbortOnDrop>,
+) -> Result<()> {
+    for (index, player) in players.iter().enumerate() {
+        let delay = Duration::from_secs(args.stagger.saturating_mul(index as u64));
+        let (game, seat) = (Arc::clone(game), player.seat());
+        // Starting a real game blocks while its hook loads. The guard comes
+        // back with the start, so a start nobody waits for any more ends
+        // its game.
+        let start = move || game.spawn(&seat, index).map(AbortOnDrop);
+        if delay.is_zero() {
+            games.push(
+                tokio::task::spawn_blocking(start)
+                    .await
+                    .context("starting a game failed")??,
+            );
+            continue;
+        }
+        println!(
+            "rig: starting {}'s game in {} s",
+            player.name,
+            delay.as_secs()
+        );
+        games.push(AbortOnDrop(tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            let mut started = tokio::task::spawn_blocking(start)
+                .await
+                .context("starting a game failed")??;
+            (&mut started.0).await.context("a game's task failed")?
+        })));
+    }
+    Ok(())
+}
+
 /// Sets up the room, then follows it until every game has exited.
 async fn play(
     args: &Args,
     server: &str,
     players: &[Player],
-    games: &mut [JoinHandle<Result<GameEnd>>],
+    games: &mut [AbortOnDrop],
 ) -> Result<ExitCode> {
     let watch = tokio::spawn(watch(
         players
@@ -360,7 +409,7 @@ async fn play(
 
     let mut ends = Vec::new();
     for game in games {
-        ends.push(game.await.context("a game's task failed")??);
+        ends.push((&mut game.0).await.context("a game's task failed")??);
     }
     watch.abort();
     Ok(report(&ends))
@@ -553,6 +602,8 @@ struct GameCommand {
     profiles: Option<PathBuf>,
     /// The hook loaded into a real game; `None` for the fake game.
     hook: Option<PathBuf>,
+    /// How long a real game waits, suspended, for its hook to be ready.
+    ready_wait: Duration,
 }
 
 /// A real game started with the hook, ended when dropped: the rig stops
@@ -619,6 +670,7 @@ impl GameCommand {
             args: args.game_args.clone(),
             profiles,
             hook,
+            ready_wait: Duration::from_secs(args.hook_ready_wait),
         })
     }
 
@@ -696,6 +748,7 @@ impl GameCommand {
                 (DATA_DIR_ENV.to_owned(), dir.to_owned()),
                 (LAUNCHER_PID_ENV.to_owned(), std::process::id().to_string()),
             ],
+            ready_wait: self.ready_wait,
         })
         .with_context(|| format!("starting {}", self.program.display()))?;
         println!(
