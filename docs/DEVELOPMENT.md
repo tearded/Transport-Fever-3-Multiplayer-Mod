@@ -183,11 +183,15 @@ not needed to verify an archived supported build.
 The local build uses the machine's `quiet-cargo` wrapper automatically when
 installed, so its build shares the queue and CPU cap with other sessions.
 
-The `release` workflow requires the same `verify-build` check before any
-package job, on pushes to `main` and on manual runs. Set up:
+The `release` workflow runs the same `verify-build` check on pushes to `dev`,
+`acceptance` and `main`, and on manual runs. Packages are built on `main` or
+manual runs with `verify_only` left off; a failed check blocks every package.
+For a feature branch, run it manually with `verify_only` enabled. Set up:
 
 - a dedicated private Windows GitHub Actions runner labelled
-  `tpf3mp-game-builds`, with Git, the pinned Rust toolchain and PowerShell 7;
+  `tpf3mp-game-builds`, with Git, the pinned Rust toolchain, Windows PowerShell
+  and the machine's `quiet-cargo` wrapper under the runner account's
+  `.claude/tools/quiet-cargo/quiet-cargo.cmd`;
 - the repository variable `TPF3MP_GAME_ARCHIVE`, an absolute path to the
   complete source archive readable by that runner, outside its checkout.
 
@@ -200,6 +204,18 @@ the private check. A failed target check retains its static report as an
 artifact for investigation while packaging stays blocked. An unavailable
 runner holds packaging until the runner is
 available. Ordinary CI compilation/testing needs no private game inputs.
+The private job is never triggered by pull requests. Register it only in the
+trusted repository that holds the release workflow. Run `run.cmd` under its
+configured Windows account; it must be online for checks to finish. On a
+non-admin machine it can start hidden at that account's Windows login instead
+of being installed as a service. Keep runner credentials and archives outside
+Git, and use the Release archive until a reviewed Preview bundle is selected.
+
+To verify a pushed feature branch without building or drafting a release:
+
+```powershell
+gh workflow run release.yml --repo OWNER/REPO --ref feat/my-update -f verify_only=true
+```
 
 Static success certifies profile bytes only. Native ABI review, real-game
 acceptance and the feature → dev → acceptance → main gates still apply; no
