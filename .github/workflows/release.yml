@@ -37,7 +37,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [dev, acceptance, main]
+    branches: [dev, acceptance, main, 'feat/game-update-*']
 
 permissions:
   contents: read

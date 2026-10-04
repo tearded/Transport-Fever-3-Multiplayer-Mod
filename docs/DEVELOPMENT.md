@@ -183,10 +183,11 @@ not needed to verify an archived supported build.
 The local build uses the machine's `quiet-cargo` wrapper automatically when
 installed, so its build shares the queue and CPU cap with other sessions.
 
-The `release` workflow runs the same `verify-build` check on pushes to `dev`,
-`acceptance` and `main`, and on manual runs. Packages are built on `main` or
+The `release` workflow runs the same `verify-build` check on pushes to
+`feat/game-update-*`, `dev`, `acceptance` and `main`, and on manual runs.
+Packages are built on `main` or
 manual runs with `verify_only` left off; a failed check blocks every package.
-For a feature branch, run it manually with `verify_only` enabled. Set up:
+Other feature branches can run it manually with `verify_only` enabled. Set up:
 
 - a dedicated private Windows GitHub Actions runner labelled
   `tpf3mp-game-builds`, with Git, the pinned Rust toolchain, Windows PowerShell
