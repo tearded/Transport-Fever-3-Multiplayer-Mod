@@ -110,6 +110,10 @@ update the script's lists and run it again.
   - once the game is out: a real game on each platform
     ([docs/DAY_ONE.md](docs/DAY_ONE.md)).
 - **`release`** (`.github/workflows/release.yml`) runs on pushes to `main`.
+  Before packaging (also on manual runs), `tpfre verify-build` checks the
+  selected native bundle against the private archive on the dedicated
+  `tpf3mp-game-builds` runner. Missing inputs or failed checks stop packaging;
+  setup is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#game-update-builds).
   It builds the packages for every platform and attaches them to a draft
   release `v<version>`, the version in `Cargo.toml`. A person reviews the
   draft and publishes it, which creates the tag. Once a version is

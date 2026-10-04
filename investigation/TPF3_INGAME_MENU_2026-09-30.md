@@ -28,7 +28,7 @@ the game; **UNKNOWN** = open.
   it does not collide with `feat/join-from-menu`'s `menu.rs`) and the mod's
   `gui/menu/main_page.tl` and `gui/menu/lobby.lua`.
 - **CONFIRMED-static.** The entry's targets are now in the built-in
-  profile (`profiles/tf3_build40408_steam_windows.toml`, optional there),
+  profile (`profiles/tf3_build40408_steam_windows/hooks.toml`, optional there),
   not a separate profile file to copy: `lua_loadfile` at `0x2fa1d50`,
   `lua_load` at `0x2fbdf70`, `lua_pcallk` at `0x2fbe0c0`, each unique in
   the installed game's `.text` with its prologue

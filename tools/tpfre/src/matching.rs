@@ -360,7 +360,7 @@ fn fill_file_gaps(
     found
 }
 
-fn load(conn: &Connection) -> Result<Build> {
+pub(crate) fn load(conn: &Connection) -> Result<Build> {
     let mut b = Build::default();
     let mut st = conn.prepare("SELECT rva, ninsn FROM functions")?;
     for row in st.query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, u32>(1)?)))? {

@@ -429,6 +429,422 @@ fn fixture() -> Fixture {
     fixture_with(false)
 }
 
+fn audit_profile(exe: &Path, targets: &str) -> PathBuf {
+    let dir = exe.parent().expect("parent").join("profiles");
+    std::fs::create_dir_all(&dir).expect("profiles");
+    let id = tpf3mp_hookcore::profile::BuildIdentity::of_file(exe).expect("identity");
+    std::fs::write(
+        dir.join("fixture.toml"),
+        format!(
+            "name = 'fixture'\nregion = '.text'\n[build]\nsha256 = '{}'\n{}",
+            id.sha256, targets
+        ),
+    )
+    .expect("profile");
+    dir
+}
+
+const MIDDLE_TARGET: &str = "\n[[target]]\nname = 'middle'\nsignature = '48 83 EC 28 B8 ?? ?? ?? ?? 48 83 C4 28 C3'\nprologue = '48 83 EC 28'\n";
+
+struct UpdateBuild {
+    _root: tempfile::TempDir,
+    repository: PathBuf,
+    archive: PathBuf,
+    bundle: PathBuf,
+}
+
+fn update_build(targets: &str) -> UpdateBuild {
+    let root = tempfile::Builder::new()
+        .prefix("update build with spaces ")
+        .tempdir()
+        .expect("tempdir");
+    let game = root.path().join("game");
+    let repository = root.path().join("repository");
+    let bundle = repository.join("profiles/fixture-build");
+    std::fs::create_dir(&game).expect("game");
+    std::fs::create_dir_all(&bundle).expect("bundle");
+    let bytes = build_pe(false);
+    let id = tpf3mp_hookcore::profile::BuildIdentity::of_bytes(&bytes);
+    std::fs::write(game.join("game.exe"), bytes).expect("game exe");
+    std::fs::write(repository.join("Cargo.toml"), "[workspace]\nmembers = []\n")
+        .expect("workspace");
+    std::fs::write(
+        repository.join("profiles/native-build.txt"),
+        "fixture-build\n",
+    )
+    .expect("selection");
+    std::fs::write(bundle.join("native.rs"), "pub const BUILD: u32 = 1;\n").expect("native data");
+    std::fs::write(bundle.join("hooks.toml"), format!(
+        "name = 'fixture'\nregion = '.text'\n[build]\nsha256 = '{}'\nsize = {}\npe_timestamp = {}\n{}",
+        id.sha256, id.size.expect("size"), id.pe_timestamp.expect("PE timestamp"), targets,
+    )).expect("profile");
+    let archive = root.path().join("archive");
+    tpfre::archive::create(&tpfre::archive::Options {
+        game: &game,
+        out: &archive,
+        build: "fixture",
+        executable: "game.exe",
+        steam_manifest: None,
+    })
+    .expect("complete archive");
+    UpdateBuild {
+        _root: root,
+        repository,
+        archive,
+        bundle,
+    }
+}
+
+#[test]
+fn build_gate_reports_the_exact_selected_profile_without_private_paths() {
+    let f = update_build(MIDDLE_TARGET);
+    let (code, out, err) = run(&[
+        "verify-build",
+        "--archive",
+        s(&f.archive),
+        "--repo",
+        s(&f.repository),
+        "--json",
+    ]);
+    assert_eq!(code, 0, "{out}{err}");
+    let report: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(report["bundle"], "fixture-build");
+    assert_eq!(report["kind"], "selected_build_verification");
+    assert_eq!(report["targets"][0]["status"], "matched");
+    assert_eq!(report["runtime_verified"], false);
+    assert_eq!(report["review_required"], false);
+    assert_eq!(report["bundle_files"].as_array().expect("files").len(), 2);
+    assert!(!out.contains(s(f._root.path())));
+    let selected = tpf3mp_hookcore::bundle::Bundle::selected(&f.repository.join("profiles"))
+        .expect("selection");
+    let module = selected.rust_module().expect("module");
+    assert!(module.contains("fixture-build/hooks.toml"));
+    assert!(module.contains("pub mod native;"));
+}
+
+#[test]
+fn a_matching_custom_profile_cannot_bypass_the_compiled_build_gate() {
+    let f = update_build(MIDDLE_TARGET);
+    let hooks = std::fs::read_to_string(f.bundle.join("hooks.toml")).expect("hooks");
+    let matching = tpf3mp_hookcore::profile::Profile::from_toml(&hooks).expect("profile");
+    std::fs::write(f.repository.join("profiles/custom.toml"), &hooks).expect("custom profile");
+    std::fs::write(
+        f.bundle.join("hooks.toml"),
+        hooks.replace(&matching.build.sha256, &"00".repeat(32)),
+    )
+    .expect("other selected build");
+    assert!(
+        !tpfre::audit::verify(&f.archive, &f.repository.join("profiles"))
+            .expect("generic verification finds custom profile")
+            .review_required
+    );
+    let result =
+        tpfre::build_gate::build_with(&f.archive, &f.repository, None, &mut Vec::new(), |_, _| {
+            panic!("must not start Cargo")
+        });
+    assert!(result.is_err(), "the selected native build must match");
+}
+
+#[test]
+fn broken_optional_hooks_stop_the_build_even_with_an_old_success_report() {
+    let targets = format!(
+        "{MIDDLE_TARGET}\n[[target]]\nname = 'missing'\nrequired = false\nsignature = 'DE AD BE EF'\nprologue = 'DE'\n"
+    );
+    let f = update_build(&targets);
+    std::fs::write(
+        f.repository.join("verification.json"),
+        "{\"review_required\":false}",
+    )
+    .expect("old report");
+    let code =
+        tpfre::build_gate::build_with(&f.archive, &f.repository, None, &mut Vec::new(), |_, _| {
+            panic!("must not start Cargo")
+        })
+        .expect("target refusal report");
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn missing_incomplete_corrupt_or_exe_only_inputs_never_start_the_build() {
+    let f = update_build(MIDDLE_TARGET);
+    let manifest: tpfre::archive::Manifest =
+        serde_json::from_slice(&std::fs::read(f.archive.join("build.json")).expect("manifest"))
+            .expect("JSON");
+    for input in [
+        f.archive.join("absent"),
+        f.archive.join(&manifest.executable),
+    ] {
+        assert!(
+            tpfre::build_gate::build_with(
+                &input,
+                &f.repository,
+                None,
+                &mut Vec::new(),
+                |_, _| panic!("must not start Cargo")
+            )
+            .is_err()
+        );
+    }
+    std::fs::write(f.archive.join(".incomplete"), "incomplete").expect("marker");
+    assert!(tpfre::build_gate::verify(&f.archive, &f.repository).is_err());
+    std::fs::remove_file(f.archive.join(".incomplete")).expect("remove marker");
+    std::fs::write(f.archive.join(&manifest.executable), "changed").expect("corruption");
+    assert!(
+        tpfre::build_gate::build_with(
+            &f.archive,
+            &f.repository,
+            None,
+            &mut Vec::new(),
+            |_, _| panic!("must not start Cargo")
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn build_gate_requires_a_valid_bundle_selection_and_complete_identity() {
+    let f = update_build(MIDDLE_TARGET);
+    let selection = f.repository.join("profiles/native-build.txt");
+    for invalid in [
+        "",
+        "../fixture-build",
+        "fixture-build/hooks.toml",
+        "fixture-build\nother",
+        "absent",
+    ] {
+        std::fs::write(&selection, invalid).expect("selection");
+        assert!(
+            tpfre::build_gate::verify(&f.archive, &f.repository).is_err(),
+            "{invalid:?}"
+        );
+    }
+    std::fs::write(&selection, "fixture-build").expect("restore selection");
+    let hooks = std::fs::read_to_string(f.bundle.join("hooks.toml")).expect("hooks");
+    let without_metadata = hooks
+        .lines()
+        .filter(|line| !line.starts_with("size = ") && !line.starts_with("pe_timestamp = "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(f.bundle.join("hooks.toml"), without_metadata).expect("incomplete identity");
+    assert!(tpfre::build_gate::verify(&f.archive, &f.repository).is_err());
+    std::fs::write(f.bundle.join("hooks.toml"), hooks).expect("restore profile");
+    std::fs::remove_file(f.bundle.join("native.rs")).expect("remove native bundle");
+    assert!(tpfre::build_gate::verify(&f.archive, &f.repository).is_err());
+}
+
+#[test]
+fn a_verified_build_runs_the_release_packages_and_propagates_cargo_failure() {
+    let f = update_build(MIDDLE_TARGET);
+    let mut called = false;
+    let code = tpfre::build_gate::build_with(
+        &f.archive,
+        &f.repository,
+        std::num::NonZeroUsize::new(2),
+        &mut Vec::new(),
+        |repo, args| {
+            called = true;
+            assert_eq!(repo, f.repository.canonicalize().expect("repository"));
+            assert_eq!(
+                args,
+                [
+                    "build",
+                    "--release",
+                    "--locked",
+                    "-p",
+                    "tpf3mp-launcher",
+                    "-p",
+                    "tpf3mp-agent",
+                    "-p",
+                    "tpf3mp-server",
+                    "-p",
+                    "tpf3mp-hook",
+                    "--jobs",
+                    "2"
+                ]
+            );
+            Ok(1)
+        },
+    )
+    .expect("verified build");
+    assert!(called);
+    assert_eq!(code, 1, "a Cargo failure is still a failed build");
+    let (code, _, _) = run(&[
+        "build",
+        "--archive",
+        s(&f.archive),
+        "--repo",
+        s(&f.repository),
+        "--jobs",
+        "0",
+    ]);
+    assert_eq!(code, 2, "zero parallel jobs is a usage error");
+}
+
+#[test]
+fn verification_discovers_per_build_bundles_without_parsing_their_other_metadata() {
+    let f = fixture();
+    let profiles = audit_profile(&f.exe, MIDDLE_TARGET);
+    let bundle = profiles.join("steam-build");
+    std::fs::create_dir(&bundle).expect("bundle");
+    std::fs::rename(profiles.join("fixture.toml"), bundle.join("hooks.toml"))
+        .expect("profile move");
+    std::fs::write(bundle.join("metadata.toml"), "not a hook profile").expect("metadata");
+    let (code, out, err) = run(&["verify", s(&f.exe), "--profiles", s(&profiles), "--json"]);
+    assert_eq!(code, 0, "{out}{err}");
+    let r: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(r["targets"].as_array().expect("targets").len(), 1);
+    assert_eq!(r["targets"][0]["status"], "matched");
+}
+
+#[test]
+fn undecodable_body_is_reported_unknown_without_losing_other_targets() {
+    let f = fixture();
+    let alpha = functions(false)
+        .into_iter()
+        .find(|(r, _, _)| *r == F_ALPHA)
+        .expect("alpha")
+        .1;
+    let signature = alpha[..14]
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let targets = format!(
+        "{MIDDLE_TARGET}\n[[target]]\nname = 'alpha'\nsignature = '{signature}'\nprologue = '48 83 EC 28'\n"
+    );
+    let profiles = audit_profile(&f.exe, &targets);
+    let new = f.exe.with_file_name("invalid.exe");
+    let mut bytes = build_pe(false);
+    let at = HEADERS + (F_ALPHA - TEXT) as usize + 25;
+    bytes[at..at + 3].copy_from_slice(&[0x60, 0x61, 0x60]); // invalid PUSHA/POPA in x64
+    std::fs::write(&new, bytes).expect("new");
+    let report = tpfre::audit::compare(&f.exe, &new, &profiles, &f.exe.with_file_name("cache"))
+        .expect("audit still returns all targets");
+    assert_eq!(report.targets.len(), 2);
+    assert_eq!(report.targets[0].normalized_function_equal, Some(true));
+    assert_eq!(report.targets[1].status, "matched");
+    assert_eq!(report.targets[1].normalized_function_equal, None);
+    assert!(
+        report.targets[1]
+            .comparison_error
+            .as_deref()
+            .is_some_and(|s| s.contains("invalid instruction"))
+    );
+    assert!(report.review_required);
+}
+
+#[test]
+fn strict_verify_never_skips_unknown_missing_or_broken_targets() {
+    let f = fixture();
+    let targets = format!(
+        "{MIDDLE_TARGET}\n\
+        [[target]]\nname = 'optional_missing'\nrequired = false\nsignature = 'DE AD BE EF'\nprologue = 'DE'\n\
+        [[target]]\nname = 'twins'\nsignature = '48 83 EC 28 48 8B 41 10 48 8B 40 18'\nprologue = '48'\n\
+        [[target]]\nname = 'bad_prologue'\nsignature = '48 83 EC 28 B8 ?? ?? ?? ?? 48 83 C4 28 C3'\nprologue = '90'\n\
+        [[target]]\nname = 'bad_offset'\nsignature = '48 83 EC 28 B8 ?? ?? ?? ?? 48 83 C4 28 C3'\nprologue = '48'\noffset = -100000\n"
+    );
+    let profiles = audit_profile(&f.exe, &targets);
+    let (code, out, err) = run(&["verify", s(&f.exe), "--profiles", s(&profiles), "--json"]);
+    assert_eq!(code, 1, "{out}{err}");
+    let report: serde_json::Value = serde_json::from_str(&out).expect("json");
+    let statuses: Vec<_> = report["targets"]
+        .as_array()
+        .expect("targets")
+        .iter()
+        .map(|t| t["status"].as_str().expect("status"))
+        .collect();
+    assert_eq!(
+        statuses,
+        [
+            "matched",
+            "missing",
+            "ambiguous",
+            "prologue_changed",
+            "out_of_bounds"
+        ]
+    );
+    assert_eq!(report["runtime_verified"], false);
+
+    let missing = f.exe.with_file_name("missing.exe");
+    let (code, _, err) = run(&["verify", s(&missing), "--profiles", s(&profiles)]);
+    assert_eq!(code, 3);
+    has(&err, "missing executable");
+    std::fs::write(&f.exe, build_pe(true)).expect("unknown build");
+    let (code, _, err) = run(&["verify", s(&f.exe), "--profiles", s(&profiles)]);
+    assert_eq!(code, 3);
+    has(&err, "no profile matches");
+}
+
+#[test]
+fn audit_detects_body_change_behind_a_matching_signature_and_reuses_cache() {
+    let f = fixture();
+    let profiles = audit_profile(&f.exe, MIDDLE_TARGET);
+    let new = f.exe.with_file_name("new.exe");
+    let mut bytes = build_pe(false);
+    bytes[HEADERS + (F_MIDDLE - TEXT) as usize + 5] = 2;
+    std::fs::write(&new, bytes).expect("new binary");
+    let cache = f.exe.with_file_name("cache");
+    for _ in 0..2 {
+        let (code, out, err) = run(&[
+            "audit",
+            s(&f.exe),
+            s(&new),
+            "--profiles",
+            s(&profiles),
+            "--cache",
+            s(&cache),
+            "--json",
+        ]);
+        assert_eq!(code, 1, "{out}{err}");
+        let r: serde_json::Value = serde_json::from_str(&out).expect("json");
+        assert_eq!(r["targets"][0]["status"], "matched");
+        assert_eq!(r["targets"][0]["normalized_function_equal"], false);
+        assert_eq!(r["scripts"]["available"], false);
+        assert_eq!(r["review_required"], true);
+        assert_eq!(r["runtime_verified"], false);
+    }
+    assert_eq!(std::fs::read_dir(cache).expect("cache").count(), 2);
+}
+
+#[test]
+fn complete_archives_compare_scripts_and_cannot_bypass_hash_checks() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let game = tmp.path().join("game");
+    std::fs::create_dir(&game).expect("game");
+    let exe = game.join("game.exe");
+    std::fs::write(&exe, build_pe(false)).expect("exe");
+    let profiles = audit_profile(&exe, MIDDLE_TARGET);
+    std::fs::write(game.join("api.tl"), b"before").expect("script");
+    let old = tmp.path().join("old");
+    let new = tmp.path().join("new");
+    let snapshot = |out: &Path| {
+        tpfre::archive::create(&tpfre::archive::Options {
+            game: &game,
+            out,
+            build: "test",
+            executable: "game.exe",
+            steam_manifest: None,
+        })
+        .expect("archive")
+    };
+    snapshot(&old);
+    snapshot(&new);
+    let cache = tmp.path().join("cache");
+    let r = tpfre::audit::compare(&old, &new, &profiles, &cache).expect("compare");
+    assert!(!r.review_required);
+    assert!(r.scripts.available);
+    std::fs::write(game.join("api.tl"), b"after").expect("script");
+    std::fs::write(game.join("added.lua"), b"return 1").expect("new script");
+    let changed = tmp.path().join("changed");
+    snapshot(&changed);
+    let r = tpfre::audit::compare(&old, &changed, &profiles, &cache).expect("compare");
+    assert!(r.review_required);
+    assert_eq!(r.scripts.changed, ["files/api.tl"]);
+    assert_eq!(r.scripts.added, ["files/added.lua"]);
+    std::fs::write(changed.join("files/api.tl"), b"tampered").expect("tamper");
+    assert!(tpfre::audit::compare(&old, &changed, &profiles, &cache).is_err());
+}
+
 fn s(p: &Path) -> &str {
     p.to_str().expect("utf8 path")
 }
@@ -743,4 +1159,347 @@ fn diff_reports_what_changed_between_builds() {
         &out,
         "resized Beta::Run game\\alpha.cpp 0x1040->0x1040 size 27->28",
     );
+}
+
+fn update_options<'a>(f: &'a UpdateBuild, output: &'a Path) -> tpfre::update::Options<'a> {
+    tpfre::update::Options {
+        old: &f.archive,
+        input: tpfre::update::Input::Archive(&f.archive),
+        repository: &f.repository,
+        output,
+        cache: None,
+        jobs: std::num::NonZeroUsize::new(2),
+        check_only: false,
+    }
+}
+
+fn update_summary(output: &Path) -> serde_json::Value {
+    serde_json::from_slice(&std::fs::read(output.join("summary.json")).expect("summary"))
+        .expect("summary JSON")
+}
+
+#[test]
+fn one_update_run_snapshots_the_install_then_checks_tests_and_builds_in_order() {
+    let f = update_build(MIDDLE_TARGET);
+    let output = f._root.path().join("update run with spaces");
+    let game = f._root.path().join("game");
+    let before = std::fs::read(game.join("game.exe")).expect("original game");
+    let mut options = update_options(&f, &output);
+    options.input = tpfre::update::Input::Install {
+        game: &game,
+        build: "fixture",
+        executable: "game.exe",
+        steam_manifest: None,
+    };
+    let mut commands = Vec::new();
+    let code = tpfre::update::run_with(&options, &mut Vec::new(), |repo, args, log| {
+        assert_eq!(repo, f.repository.canonicalize().expect("repo"));
+        assert!(log.starts_with(output.canonicalize().expect("output")));
+        commands.push(args.to_vec());
+        Ok(0)
+    })
+    .expect("pipeline");
+    assert_eq!(code, 0);
+    assert_eq!(
+        commands
+            .iter()
+            .map(|args| args[0].as_str())
+            .collect::<Vec<_>>(),
+        ["fmt", "clippy", "test", "build"]
+    );
+    assert!(commands[1].ends_with(&["--".into(), "-D".into(), "warnings".into()]));
+    assert!(commands[2].contains(&"--locked".into()));
+    assert!(commands[2].contains(&"--no-fail-fast".into()));
+    assert!(commands[3].contains(&"--release".into()));
+    assert!(tpfre::archive::verify(&output.join("archive")).is_ok());
+    assert_eq!(
+        std::fs::read(game.join("game.exe")).expect("unchanged game"),
+        before
+    );
+    let summary = update_summary(&output);
+    assert_eq!(summary["status"], "built");
+    assert_eq!(summary["runtime_verified"], false);
+    assert_eq!(summary["candidate_targets"], 1);
+    assert!(output.join("audit.json").is_file());
+    assert!(output.join("native-bundle.json").is_file());
+}
+
+#[test]
+fn a_matching_candidate_keeps_an_unreviewed_update_out_of_cargo() {
+    let f = update_build(MIDDLE_TARGET);
+    let game = f._root.path().join("game");
+    let mut bytes = std::fs::read(game.join("game.exe")).expect("game");
+    // Identity changes while .text (and its old signature) remains unchanged.
+    bytes[0x88..0x8c].copy_from_slice(&12345u32.to_le_bytes());
+    std::fs::write(game.join("game.exe"), &bytes).expect("updated game");
+    let snapshot = f._root.path().join("updated archive");
+    tpfre::archive::create(&tpfre::archive::Options {
+        game: &game,
+        out: &snapshot,
+        build: "next",
+        executable: "game.exe",
+        steam_manifest: None,
+    })
+    .expect("new archive");
+    let old_id =
+        tpf3mp_hookcore::profile::BuildIdentity::of_file(&f.archive.join("files/game.exe"))
+            .expect("old id");
+    let new_id = tpf3mp_hookcore::profile::BuildIdentity::of_bytes(&bytes);
+    let candidate = std::fs::read_to_string(f.bundle.join("hooks.toml"))
+        .expect("old profile")
+        .replace(&old_id.sha256, &new_id.sha256)
+        .replace(
+            &format!("pe_timestamp = {}", old_id.pe_timestamp.expect("timestamp")),
+            &format!("pe_timestamp = {}", new_id.pe_timestamp.expect("timestamp")),
+        );
+    std::fs::write(f.repository.join("profiles/candidate.toml"), candidate).expect("candidate");
+    let output = f._root.path().join("unreviewed run");
+    let mut options = update_options(&f, &output);
+    options.input = tpfre::update::Input::Archive(&snapshot);
+    assert_eq!(
+        tpfre::update::run_with(&options, &mut Vec::new(), |_, _, _| {
+            panic!("a candidate cannot start Cargo")
+        })
+        .expect("diagnostic run"),
+        1
+    );
+    let summary = update_summary(&output);
+    assert_eq!(summary["status"], "blocked");
+    assert_eq!(summary["stage"], "native-bundle");
+    assert_eq!(summary["candidate_targets"], 1);
+    assert!(output.join("audit.json").is_file());
+    assert!(output.join("signatures.json").is_file());
+    assert_eq!(
+        std::fs::read_to_string(f.repository.join("profiles/native-build.txt")).expect("selection"),
+        "fixture-build\n"
+    );
+}
+
+#[test]
+fn failed_tests_stop_the_update_before_a_release_build() {
+    let f = update_build(MIDDLE_TARGET);
+    let output = f._root.path().join("failed tests");
+    let mut commands = Vec::new();
+    let code = tpfre::update::run_with(
+        &update_options(&f, &output),
+        &mut Vec::new(),
+        |_, args, _| {
+            commands.push(args[0].clone());
+            Ok(i32::from(args[0] == "test"))
+        },
+    )
+    .expect("pipeline");
+    assert_eq!(code, 1);
+    assert_eq!(commands, ["fmt", "clippy", "test"]);
+    assert_eq!(update_summary(&output)["stage"], "tests");
+    assert!(
+        update_summary(&output)["reason"]
+            .as_str()
+            .expect("reason")
+            .contains("tests.log")
+    );
+}
+
+#[test]
+fn native_data_changed_during_tests_stops_the_update_build() {
+    let f = update_build(MIDDLE_TARGET);
+    let output = f._root.path().join("changing native data");
+    let code = tpfre::update::run_with(
+        &update_options(&f, &output),
+        &mut Vec::new(),
+        |_, args, _| {
+            assert_ne!(args[0], "build", "changed native data must never compile");
+            if args[0] == "test" {
+                std::fs::write(f.bundle.join("native.rs"), "pub const BUILD: u32 = 2;\n")?;
+            }
+            Ok(0)
+        },
+    )
+    .expect("pipeline");
+    assert_eq!(code, 1);
+    assert!(
+        update_summary(&output)["reason"]
+            .as_str()
+            .expect("reason")
+            .contains("changed during")
+    );
+}
+
+#[test]
+fn an_unchanged_exe_does_not_auto_approve_changed_scripts_or_libraries() {
+    for (name, data) in [
+        ("game.lua", "return 2"),
+        ("dependency.dll", "updated library"),
+    ] {
+        let f = update_build(MIDDLE_TARGET);
+        let output = f._root.path().join("changed payload run");
+        let game = f._root.path().join("game");
+        std::fs::write(game.join(name), data).expect("changed game input");
+        let mut options = update_options(&f, &output);
+        options.input = tpfre::update::Input::Install {
+            game: &game,
+            build: "next",
+            executable: "game.exe",
+            steam_manifest: None,
+        };
+        assert_eq!(
+            tpfre::update::run_with(&options, &mut Vec::new(), |_, _, _| panic!(
+                "changed payload requires review"
+            ))
+            .expect("pipeline"),
+            1
+        );
+        let summary = update_summary(&output);
+        assert!(
+            summary["problems"]
+                .as_array()
+                .expect("problems")
+                .iter()
+                .any(|problem| problem["reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("scripts/libraries changed")))
+        );
+        let files: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(output.join("files.json")).expect("file diff"))
+                .expect("file report");
+        assert!(
+            files["added"]
+                .as_array()
+                .expect("added")
+                .iter()
+                .any(|path| path.as_str().is_some_and(|path| path.ends_with(name)))
+        );
+        assert_eq!(summary["runtime_verified"], false);
+    }
+}
+
+#[test]
+fn update_outputs_never_overwrite_previous_runs_or_write_in_the_game() {
+    let f = update_build(MIDDLE_TARGET);
+    let output = f._root.path().join("existing run");
+    std::fs::create_dir(&output).expect("run");
+    std::fs::write(output.join("keep"), "previous result").expect("sentinel");
+    assert!(
+        tpfre::update::run_with(
+            &update_options(&f, &output),
+            &mut Vec::new(),
+            |_, _, _| panic!("invalid output")
+        )
+        .is_err()
+    );
+    assert_eq!(
+        std::fs::read_to_string(output.join("keep")).expect("retained"),
+        "previous result"
+    );
+    let inside = f.archive.join("update");
+    assert!(
+        tpfre::update::run_with(
+            &update_options(&f, &inside),
+            &mut Vec::new(),
+            |_, _, _| panic!("invalid output")
+        )
+        .is_err()
+    );
+    assert!(!inside.exists());
+}
+
+#[test]
+fn update_cli_has_a_static_only_mode_and_refuses_missing_snapshot_arguments() {
+    let f = update_build(MIDDLE_TARGET);
+    let output = f._root.path().join("static only");
+    let (code, stdout, stderr) = run(&[
+        "update",
+        "--old",
+        s(&f.archive),
+        "--new",
+        s(&f.archive),
+        "--repo",
+        s(&f.repository),
+        "--out",
+        s(&output),
+        "--check-only",
+    ]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert_eq!(update_summary(&output)["status"], "static_checks_passed");
+    assert!(!output.join("tests.log").exists());
+    let game = f._root.path().join("game");
+    let (code, _, _) = run(&[
+        "update",
+        "--old",
+        s(&f.archive),
+        "--game",
+        s(&game),
+        "--out",
+        s(&output),
+    ]);
+    assert_eq!(
+        code, 2,
+        "an install requires its build label before snapshotting"
+    );
+}
+
+#[test]
+fn rejected_update_destinations_never_create_directories_in_an_input() {
+    let f = update_build(MIDDLE_TARGET);
+    let game = f._root.path().join("game");
+    let forbidden = game.join("do-not-create");
+    let output = forbidden.join("run");
+    let mut options = update_options(&f, &output);
+    options.input = tpfre::update::Input::Install {
+        game: &game,
+        build: "fixture",
+        executable: "game.exe",
+        steam_manifest: None,
+    };
+    assert!(
+        tpfre::update::run_with(&options, &mut Vec::new(), |_, _, _| panic!(
+            "invalid output"
+        ))
+        .is_err()
+    );
+    assert!(!forbidden.exists());
+    let output = f._root.path().join("safe run");
+    let mut options = update_options(&f, &output);
+    options.input = tpfre::update::Input::Install {
+        game: &game,
+        build: "fixture",
+        executable: "game.exe",
+        steam_manifest: None,
+    };
+    options.cache = Some(&forbidden);
+    assert!(
+        tpfre::update::run_with(&options, &mut Vec::new(), |_, _, _| panic!("invalid cache"))
+            .is_err()
+    );
+    assert!(!forbidden.exists());
+    assert!(!output.exists());
+}
+
+#[test]
+fn one_analysis_collects_both_missing_profile_and_native_bundle_problems() {
+    let f = update_build(MIDDLE_TARGET);
+    let game = f._root.path().join("game");
+    let mut bytes = std::fs::read(game.join("game.exe")).expect("game");
+    bytes[0x88..0x8c].copy_from_slice(&999u32.to_le_bytes());
+    std::fs::write(game.join("game.exe"), bytes).expect("updated game");
+    let output = f._root.path().join("all problems run");
+    let mut options = update_options(&f, &output);
+    options.input = tpfre::update::Input::Install {
+        game: &game,
+        build: "next",
+        executable: "game.exe",
+        steam_manifest: None,
+    };
+    assert_eq!(
+        tpfre::update::run_with(&options, &mut Vec::new(), |_, _, _| panic!("unknown build"))
+            .expect("pipeline"),
+        1
+    );
+    let summary = update_summary(&output);
+    let problems = summary["problems"].as_array().expect("all problems");
+    assert_eq!(problems.len(), 2);
+    assert_eq!(problems[0]["stage"], "signatures");
+    assert_eq!(problems[1]["stage"], "native-bundle");
+    assert!(output.join("files.json").is_file());
+    assert!(output.join("audit.json").is_file());
 }

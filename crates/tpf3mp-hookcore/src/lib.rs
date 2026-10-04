@@ -13,6 +13,7 @@
 //! x86-64 only and reports [`detour::DetourError::UnsupportedArchitecture`]
 //! elsewhere.
 
+pub mod bundle;
 pub mod detour;
 pub mod pattern;
 pub mod pe;

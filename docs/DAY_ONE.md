@@ -379,10 +379,21 @@ Release-day order:
    Linux and macOS builds, and on Windows for its symbol map and scripts. Then
    write the build's hook profile with `make_profile.py` from the binary, its
    symbol map and the target names.
-2. **On a patch:** `tpfre index` the new build and `tpfre diff` the old and new
-   databases (or `name_functions.py` and `diff_builds.py` on the maps);
-   re-verify any hook whose target is listed resized/appeared/disappeared,
-   and run `make_profile.py` on the new build for its profile.
+2. **On a patch (Windows PE builds):** keep complete private snapshots of
+   both installs with `tpfre archive`, including script/API sources rather
+   than just the EXE. Run `tpfre audit OLD NEW --profiles profiles --json`:
+   every old hook target is checked, even if named-function diff misses it;
+   matching signatures also get a containing-function comparison. Review
+   changes and matcher suggestions manually, investigate the script diff,
+   then generate/review the new build's profile. Run the strict
+   `tpfre verify NEW --profiles profiles --json` against its exact identity
+   before the normal CI and real-game acceptance gates. Unknown builds and
+   missing inputs fail; static evidence never approves runtime compatibility.
+   EXE-only old archives cannot recover the old scripts: pass the explicit
+   executable and keep that comparison marked unavailable. Commands, limits
+   and report/exit-code meanings: [tpfre](../tools/tpfre/README.md#game-update-workflow-windows-pe-builds).
+   On other binary formats, continue with `name_functions.py` and
+   `diff_builds.py`; these new audit commands currently require PE32+ x64.
 3. **Script API (per platform):** `check_lua.py` first, then `dayone.py
    probes install` (the TF3 probes), activate them in Mod Hub, start a game,
    and `dayone.py collect` the dumps (§3).

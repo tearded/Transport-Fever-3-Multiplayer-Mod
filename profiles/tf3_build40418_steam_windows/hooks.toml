@@ -1,0 +1,1628 @@
+# Static candidate for Windows Steam Preview 40418 / build ID 25686323.
+# Derived from the release profile. Comments below retain release provenance;
+# the reviewed Preview sites are in investigation/PREVIEW_40418_2026-10-04.md.
+# All 145 targets must pass the archived Preview, including optional targets.
+# This directory deliberately has no native.rs: it cannot be selected as a
+# compiled bundle. ABI data and real-game acceptance are still outstanding.
+# Signature success does not approve Preview runtime compatibility.
+
+# Signature profile for Transport Fever 3, Steam build 40408 (Windows x64),
+# the release build of 2026-09-29.
+#
+# Made on release day from the installed executable with `tpfre` (docs/DAY_ONE.md
+# step 3): TF3 has no __FUNCSIG__ names, so each target was found by carrying
+# TPF2's names over with `tpfre match` (shared assert strings, RTTI slots, the
+# call graph, source-file order) and checked against the source file TF3's own
+# __FILE__ strings name for it. `tpfre q sig --toml` made each block: every
+# build-variable byte is wildcarded, and every signature matches exactly once in
+# .text. The prologue is the exact bytes the detour engine would relocate. Like
+# TPF2's, .text is not encrypted on disk (SteamStub's .bind section only).
+#
+# GameSim::Step, CGameTime::GetSpeed and the step's call of it are used by the
+# hook and confirmed in the running game; the others are static findings
+# (investigation/TF3_OFFICIAL_API_2026-09-29.md, "Measured on the release build").
+# TF3 sets the speed through the script command makeGameSetSpeedCmd; the getter
+# the simulation step reads it through is CGameTime::GetSpeed below.
+
+name = "Transport Fever 3 Build 40418 Preview (Steam, Windows x64)"
+image_base = 0x140000000
+region = ".text"
+
+[build]
+sha256 = "0017c15f267bc07d465cb7a3515f9b7af6cf5fe3e3a9c9ea6669496b16f30cc0"
+size = 69756856
+pe_timestamp = 0x6AC01887
+
+# GameSim::Step (TPF2 0x15aa00; here 0x159390): the per-batch simulation entry.
+# Matched by three assert strings it alone uses in both builds; TF3 names
+# game/gamesim.cpp for it.
+[[target]]
+name = "GameSim::Step"
+signature = "40 55 41 56 48 83 EC 48 4C 8B F2 48 8B E9"
+offset = 0
+prologue = "40 55 41 56 48 83 EC 48 4C 8B F2 48 8B E9"
+required = true
+
+# CGame::Step (TPF2 0x118e90; here 0x11f3b0): the main-thread pacing entry.
+# Two shared assert strings; game/game.cpp.
+[[target]]
+name = "CGame::Step"
+signature = "40 53 48 83 EC 20 48 8B 81 F0 01 00 00 48 8B D9"
+offset = 0
+prologue = "40 53 48 83 EC 20 48 8B 81 F0 01 00 00 48 8B D9"
+required = true
+
+# CGameTime::GetSpeed (TPF2 0x2877a0; here 0x2a95a0): the speed GameSim::Step
+# reads, in updates per call (GameSpeed.speedup). Not matched by name: it is
+# the getter GameSim::Step calls before its update loop, 27 bytes returning the
+# component's speedup, in gametime.cpp, as TPF2's. The hook only reads it here
+# (the speed row's value, the player's request to the room); the UI and the
+# particles read it too, so it is never changed for them.
+[[target]]
+name = "CGameTime::GetSpeed"
+signature = "48 83 EC 28 48 8B 41 10 48 8B 49 08 8B 10 E8 ?? ?? ?? ?? 8B 40 04"
+offset = 0
+prologue = "48 83 EC 28 48 8B 41 10 48 8B 49 08 8B 10"
+required = true
+
+# GameSim::Step's own call of CGameTime::GetSpeed (here 0x1593ee, step + 0x5e),
+# the only one of its seven callers inside the step: `mov rcx,[rbp+8]; mov
+# rcx,[rcx+0x28]; call GetSpeed; cmp eax,ebx; mov r12d,eax`. In a room's game
+# the hook redirects this one call to answer 1, so one call of the step is one
+# update (HOOKS.md, "The step gate in the game"), as TPF2MP patched the step's
+# calls and not the getter. The hook also checks the call targets GetSpeed.
+[[target]]
+name = "GameSim::Step/GetSpeed call"
+signature = "48 8B 4D 08 48 8B 49 28 E8 ?? ?? ?? ?? 3B C3 44 8B E0"
+offset = 8
+prologue = "E8"
+required = true
+
+# UI::CMenuUI::StartSavegame (TPF2 0x6785c0; here 0x6a2880): the in-process
+# load entry. Its lambdas keep the name in RTTI, and its log line (now "Game
+# initialization is already active!") is used by this function alone, with
+# "Preparing to load game"; game/ui/components/menuui.cpp. The weakest of the
+# four: confirm with its callers before relying on it.
+[[target]]
+name = "UI::CMenuUI::StartSavegame"
+signature = "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 48 8D 6C 24 A9 48 81 EC C0 00 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 45 47 48 8B F1 C6 81 D0 04 00 00 00"
+offset = 0
+prologue = "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20"
+required = true
+
+# UI::CMenuUI::CreatePage (TPF2 0x663370; here 0x6a2ee0): rebuilds a menu page.
+# Matched by its log line "Mods changed, recreating data..."; menuui.cpp.
+[[target]]
+name = "UI::CMenuUI::CreatePage"
+signature = "48 89 5C 24 18 55 56 57 48 8D 6C 24 B9 48 81 EC B0 00 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 45 37 0F B6 DA"
+offset = 0
+prologue = "48 89 5C 24 18 55 56 57 48 8D 6C 24 B9 48 81 EC B0 00 00 00"
+required = true
+
+# The command queue's add (TPF2's CommandList::Add lambda, 0x9d2420; here
+# 0x9d23c0): where native commands, the street and track builders' among them,
+# are queued. One shared assert string; game/command/commandlist.cpp. Optional
+# until the capture design settles on this entry.
+[[target]]
+name = "CommandList::Add::lambda"
+signature = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 30 49 8B E8 4C 8B D2"
+offset = 0
+prologue = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18"
+required = false
+
+# CommandList::Add itself (0x9d29c0, commandlist.cpp; RTTI: Connection
+# Add(Command, std::function<void(Command const&)>, weak_ptr<CmdProgress>)):
+# rcx the list, rdx the connection returned, r8 the 0x38-byte Command, r9 the
+# callback, the progress on the stack. Every player command is queued here, on
+# the main thread; the hook counts the player's builds (HOOKS.md, "The build
+# tools"). Its 43 callers are the tools and the scripting bridge.
+[[target]]
+name = "CommandList::Add"
+signature = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 98 48 81 EC 68 01 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 45 50 49 8B F1"
+offset = 0
+prologue = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 98"
+required = false
+
+# The simulation's apply of a WorldBuildProposal command (0x9e1160,
+# apply_command.cpp): the only function naming "WorldBuildProposal", and the
+# one that fires the apply_command events onPreBuildProposal and
+# onPostBuildProposal and calls construction_builder_util::Apply. The command
+# dispatcher (0x9d7350, a jump table on the payload's variant index + 1, the
+# index at payload+0x9b8; this is case 53) calls it with rcx its context and
+# rdx the payload, whose byte at +0x3d2 is playerInitiated, and stores its bool
+# as the command's result. The hook answers false here for the player's own
+# builds in the room's game, which the room builds in every game instead.
+[[target]]
+name = "WorldBuildProposal apply"
+signature = "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 40 F7 FF FF"
+offset = 0
+prologue = "48 89 5C 24 18 55 56 57 41 54 41 55 41 56"
+required = false
+
+# UI::ModuleBuilder::MousePressed's call of CommandList::Add (0x543b25, in
+# 0x543630, which names "UI::ModuleBuilder::MousePressed" and
+# modulebuilder.cpp): `lea r9,[rbp+0xa0]; mov r8,rax; lea rdx,[rsp+0x50];
+# mov rcx,rdi; call Add`, after the factory 0x9ee860 made the command with
+# playerInitiated 1. Add returns to this + 5 (0x543b2a) for every module
+# edit, which tells game scripts nothing; the hook reads its proposal there
+# (crates/tpf3mp-hook/src/modules.rs; found for feat/capture-all,
+# investigation/TPF3_CONSTRUCTION_CAPTURE_2026-09-29.md there, re-checked
+# with tpfre on this build: one match). Without it the module editor stays
+# refused.
+[[target]]
+name = "ModuleBuilder::MousePressed/Add call"
+signature = "4C 8D 8D A0 00 00 00 4C 8B C0 48 8D 54 24 50 48 8B CF E8 ?? ?? ?? ??"
+offset = 18
+prologue = "E8"
+required = false
+
+# UI::StreetTerminalBuilder::MousePressed's call of CommandList::Add
+# (0x5954e8, in 0x594f50, whose lambda's RTTI names
+# "UI::StreetTerminalBuilder::MousePressed(UI::CRendererComponent *)"):
+# `lea rcx,[rbp+0x58]; mov [rsp+0x20],rcx; lea r9,[rbp+0x68]; mov r8,rax;
+# lea rdx,[rbp-0x80]; mov rcx,rbx; call Add`, then the Connection's dtor and
+# `mov byte [rsi+0x13d],0`. The stop tool's click (the stop builder, and the
+# signal and waypoint builder); Add returns to this + 5 (0x5954ed). Its
+# callback is the std::function at rbp+0x68 (impl pointer at +0x38 to
+# itself, the tool at +8). The hook frees the tool's busy byte there in a
+# room (crates/tpf3mp-hook/src/stoptool.rs; found with tpfre on this build:
+# one match). Without it the tool waits for each click's answer.
+[[target]]
+name = "StreetTerminalBuilder::MousePressed/Add call"
+signature = "48 8D 4D 58 48 89 4C 24 20 4C 8D 4D 68 4C 8B C0 48 8D 55 80 48 8B CB E8 ?? ?? ?? ?? 48 8D 4D 80 E8 ?? ?? ?? ?? C6 86 3D 01 00 00 00"
+offset = 23
+prologue = "E8"
+required = false
+
+# UI::StreetTerminalBuilder::MousePressed setting its busy byte before it
+# queues the click (0x595305, `mov byte [rsi+0x2c8],1`; the click returns at
+# once while it is set, 0x594f95, and only the command's callback clears it,
+# 0x59777d). The signature holds the offset 0x2c8 crates/tpf3mp-hook/src/
+# stoptool.rs writes: a build that moved it does not resolve, and the tool
+# waits as the game has it. One match on this build (tpfre).
+[[target]]
+name = "StreetTerminalBuilder::MousePressed/busy set"
+signature = "C6 86 C8 02 00 00 01 48 8B 9E 98 00 00 00 48 8D 45 58"
+offset = 0
+prologue = "C6 86 C8 02 00 00 01"
+required = false
+
+# UI::ProposalAction::DoApply's call of CommandList::Add (0x549be5, in
+# 0x549ac0, whose lambda's RTTI names "UI::ProposalAction::DoApply(bool,
+# bool)"): `lea r9,[rsp+0x70]; mov r8,rax; lea rdx,[rsp+0x4e0]; mov rcx,rdi;
+# call Add`, after the factory 0x9ee860 made the command with
+# playerInitiated 1. The terrain tools (UI::TerrainModifier), the terrain
+# painter and the asset brush reach it, and only they (their vf17 tail-calls
+# DoApply); Add returns to this + 5 (0x549bea). The hook reads the
+# terraform's height grid there (crates/tpf3mp-hook/src/terrain.rs; found
+# with tpfre on this build: one match). Without it terraforming stays
+# refused.
+[[target]]
+name = "ProposalAction::DoApply/Add call"
+signature = "4C 8D 4C 24 70 4C 8B C0 48 8D 94 24 E0 04 00 00 48 8B CF E8 ?? ?? ?? ??"
+offset = 19
+prologue = "E8"
+required = false
+
+# Lua 5.2's C API, which the hook calls to give each Lua state the
+# `tpf3mp_native` table (HOOKS.md, "The Lua side"). luaB_print is found by its
+# own string; its calls name gettop, getglobal, pushvalue, callk, tolstring and
+# settop. The linker laid lapi.c's functions out alphabetically (TPF2's are
+# too), so the rest follow from their places between those, each checked by
+# what it calls (build 40408, 0x2fbd5d0-0x2fbf0b3). Only luaB_print is
+# detoured; the others are only called, so their prologues are just the bytes
+# before their first call or branch.
+
+# luaB_print (0x2fccd10): Lua's `print` (lbaselib.c): the only function naming "'tostring' must return a string to 'print'". Detoured: the first `print` of a Lua state gives it `tpf3mp_native`. Its calls name six of the API functions below.
+[[target]]
+name = "luaB_print"
+signature = "48 89 5C 24 08 48 89 6C 24 18 56 57 41 56 48 83 EC 30 48 8B F9"
+offset = 0
+prologue = "48 89 5C 24 08 48 89 6C 24 18 56 57 41 56"
+required = true
+
+# lua_checkstack (0x2fbd650): Compares the room left with LUAI_MAXSTACK (0xf4240).
+[[target]]
+name = "lua_checkstack"
+signature = "48 89 5C 24 18 89 54 24 10 57 48 83 EC 20 4C 8B 49 10"
+offset = 0
+prologue = "48 89 5C 24 18 89 54 24 10 57 48 83 EC 20"
+required = true
+
+# lua_createtable (0x2fbd880): luaC_step, luaH_new, the table tag 0x45, luaH_resize.
+[[target]]
+name = "lua_createtable"
+signature = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B 41 18 41 8B F8"
+offset = 0
+prologue = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20"
+required = true
+
+# lua_gettop (0x2fbdd10): luaB_print's first call; (L->top - (ci->func + 1)) / 16.
+[[target]]
+name = "lua_gettop"
+signature = "48 8B 41 20 48 8B 51 10 48 2B 10 48 8D 42 F0"
+offset = 0
+prologue = "48 8B 41 20 48 8B 51 10 48 2B 10 48 8D 42 F0"
+required = true
+
+# lua_next (0x2fbe080): index2addr, then luaH_next.
+[[target]]
+name = "lua_next"
+signature = "40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 4C 8B 43 10 48 8B CB"
+offset = 0
+prologue = "40 53 48 83 EC 20 48 8B D9"
+required = true
+
+# lua_pushboolean (0x2fbe1d0): A leaf: the value `edx != 0`, tag 1.
+[[target]]
+name = "lua_pushboolean"
+signature = "4C 8B 41 10 33 C0 85 D2 0F 95 C0 41 89 00"
+offset = 0
+prologue = "4C 8B 41 10 33 C0 85 D2 0F 95 C0 41 89 00"
+required = true
+
+# lua_pushcclosure (0x2fbe1f0): Its prologue is TPF2's lua_pushcclosure's byte for byte.
+[[target]]
+name = "lua_pushcclosure"
+signature = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 49 63 F8"
+offset = 0
+prologue = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20"
+required = true
+
+# lua_pushlstring (0x2fbe340): luaC_step, then luaS_newlstr.
+[[target]]
+name = "lua_pushlstring"
+signature = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B 41 18 49 8B F8 48 8B F2 48 8B D9 48 83 78 18 00 7E ?? E8 ?? ?? ?? ?? 4C 8B C7 48 8B D6 48 8B CB E8 ?? ?? ?? ??"
+offset = 0
+prologue = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20"
+required = true
+
+# lua_pushnil (0x2fbe3a0): A leaf: tag 0.
+[[target]]
+name = "lua_pushnil"
+signature = "48 8B 41 10 C7 40 08 00 00 00 00 48 83 41 10 10"
+offset = 0
+prologue = "48 8B 41 10 C7 40 08 00 00 00 00 48 83 41 10 10"
+required = true
+
+# lua_pushnumber (0x2fbe3c0): A leaf: the double in xmm1, tag 3.
+[[target]]
+name = "lua_pushnumber"
+signature = "48 8B 41 10 C5 FB 11 08 C7 40 08 03 00 00 00"
+offset = 0
+prologue = "48 8B 41 10 C5 FB 11 08 C7 40 08 03 00 00 00"
+required = true
+
+# lua_pushvalue (0x2fbe4b0): luaB_print's third and fourth calls.
+[[target]]
+name = "lua_pushvalue"
+signature = "48 83 EC 28 4C 8B D1 E8 ?? ?? ?? ?? 4D 8B 42 10 48 8B 10"
+offset = 0
+prologue = "48 83 EC 28 4C 8B D1"
+required = true
+
+# lua_rawget (0x2fbe590): index2addr, then luaH_get with the key at the top.
+[[target]]
+name = "lua_rawget"
+signature = "40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 48 8B 53 10 48 83 EA 10"
+offset = 0
+prologue = "40 53 48 83 EC 20 48 8B D9"
+required = true
+
+# lua_rawgeti (0x2fbe5d0): Its prologue is TPF2's lua_rawgeti's byte for byte.
+[[target]]
+name = "lua_rawgeti"
+signature = "40 53 48 83 EC 20 45 8B D0 48 8B D9 E8 ?? ?? ?? ?? 41 8B D2 48 8B 08"
+offset = 0
+prologue = "40 53 48 83 EC 20 45 8B D0 48 8B D9"
+required = true
+
+# lua_rawset (0x2fbe6b0): index2addr, luaH_set, the barrier.
+[[target]]
+name = "lua_rawset"
+signature = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B F9 E8 ?? ?? ?? ?? 48 8B 5F 10 48 8B CF"
+offset = 0
+prologue = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20"
+required = true
+
+# lua_settop (0x2fbeaf0): luaB_print's `lua_pop`; a leaf.
+[[target]]
+name = "lua_settop"
+signature = "85 D2 78 ?? 48 8B 41 20"
+offset = 0
+prologue = "85 D2"
+required = true
+
+# lua_toboolean (0x2fbecb0): False only for nil and a false boolean.
+[[target]]
+name = "lua_toboolean"
+signature = "48 83 EC 28 E8 ?? ?? ?? ?? 8B 48 08 85 C9"
+offset = 0
+prologue = "48 83 EC 28"
+required = true
+
+# lua_tolstring (0x2fbed30): luaB_print's fifth call; its prologue is TPF2's lua_tolstring's.
+[[target]]
+name = "lua_tolstring"
+signature = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 49 8B D8 8B F2 48 8B F9 E8 ?? ?? ?? ??"
+offset = 0
+prologue = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20"
+required = true
+
+# lua_tonumberx (0x2fbedd0): A number (tag 3) as it is, else luaV_tonumber; `isnum` in r8.
+[[target]]
+name = "lua_tonumberx"
+signature = "40 53 48 83 EC 30 49 8B D8 E8 ?? ?? ?? ?? 83 78 08 03 74 ?? 48 8D 54 24 20 48 8B C8 E8 ?? ?? ?? ?? 48 85 C0 75 ?? 48 85 DB 74 ?? 89 03 C5 F9 57 C0"
+offset = 0
+prologue = "40 53 48 83 EC 30 49 8B D8"
+required = true
+
+# lua_type (0x2fbef90): LUA_TNONE for luaO_nilobject, else the tag's low nibble.
+[[target]]
+name = "lua_type"
+signature = "48 83 EC 28 E8 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? 48 3B C1 74 ?? 8B 40 08 83 E0 0F 48 83 C4 28"
+offset = 0
+prologue = "48 83 EC 28"
+required = true
+
+# The main menu's load of the room's world (crates/tpf3mp-hook/src/menu.rs).
+# All optional: without them a game needs a world up to take the room's.
+
+# CMenuUI per-frame update (vtable slot 50, main thread): polls m_loadGameResult
+# (+0x1bd0) and the pending SavegameInfo lookup (+0x1b90); starts queued loads.
+# Detoured: after the game's own frame, the hook follows the room from the menu.
+# (rva 0x6a0160)
+[[target]]
+name = "UI::CMenuUI::DoStep"
+signature = "48 89 5C 24 10 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 50 F6 FF FF"
+offset = 0
+prologue = "48 89 5C 24 10 55 56 57 41 54 41 55 41 56"
+required = false
+
+# DoStep's test of CMenuUI::m_game (rva 0x6a01c0, DoStep + 0x60): `cmp
+# [rsi+0x6b0], r13; je; cmp [rsi+0x7d0], r13; je; mov rdx, r14; mov rcx,
+# [rsi+0x508]; call`, which hands the frame to the world's UI when a world is
+# loaded. m_game is the field CMenuUI::StartGame asserts clear ("!m_game") and
+# sets, and CMenuUI::StopGame clears. Read only: the hook takes the field's
+# offset from the displacement (bytes 3..7) and reads it in the menu's frame to
+# know whether a world is loaded (crates/tpf3mp-hook/src/at_menu.rs).
+[[target]]
+name = "UI::CMenuUI::DoStep/m_game test"
+signature = "4C 39 AE ?? ?? ?? ?? 74 ?? 4C 39 AE ?? ?? ?? ?? 74 ?? 49 8B D6 48 8B 8E"
+offset = 0
+prologue = "4C 39 AE"
+required = false
+
+# DoStep's read of CMenuUI::m_loadGameResult (rva 0x6a0c84, DoStep + 0xb24):
+# `mov rbx, [rsi+0x1bd0]; test rbx, rbx; je; cmp byte [rsi+0x1bd8], 0; je`,
+# the future of a load under way, which DoStep polls and hands to StartGame
+# when it is ready (StartGame asserts "!m_loadGameResult.Valid()" on the same
+# field). Read only: the hook takes the offset from the displacement and reads
+# the field in the menu's frame to know a load runs, without the game's locks;
+# while one does it never calls the menu's Lua (a call there hung the host's
+# load, 2026-09-30). Without it the menu never calls its Lua (fail closed).
+[[target]]
+name = "UI::CMenuUI::DoStep/m_loadGameResult read"
+signature = "48 8B 9E ?? ?? ?? ?? 48 85 DB 0F 84 ?? ?? ?? ?? 80 BE ?? ?? ?? ?? 00 74"
+offset = 0
+prologue = "48 8B 9E"
+required = false
+
+# Lua 5.2 C API, address only (never detoured). (rva 0x2fbe0c0)
+[[target]]
+name = "lua_pcallk"
+signature = "48 89 74 24 18 57 48 83 EC 40 33 F6 48 89 6C 24 58"
+offset = 0
+prologue = "48 89 74 24 18 57 48 83 EC 40 33 F6 48 89 6C 24 58"
+required = false
+
+# Lua 5.2 C API, address only (never detoured). (rva 0x2fb40b0)
+[[target]]
+name = "luaL_ref"
+signature = "48 89 5C 24 10 57 48 83 EC 20 8B FA 48 8B D9"
+offset = 0
+prologue = "48 89 5C 24 10 57 48 83 EC 20 8B FA 48 8B D9"
+required = false
+
+# Lua 5.2 lua_load(L, reader, data, chunkname, mode) (rva 0x2fbdf70): luaZ_init,
+# the "?" default chunk name, luaD_protectedparser, then the _ENV upvalue set
+# from the registry's globals (index 2). Called only, never detoured: the main
+# menu's load runs a chunk with it.
+# The main menu's Multiplayer entry (docs/LOBBY.md). Optional: without them
+# the menu stays the game's and everything above still installs. Found on
+# release day for feat/ingame-lobby, where the entry reached the real game's
+# menu with these signatures (its own profile file then; merged in here).
+
+# resolveutil.loadfile's body (0x2fa1d50; framework/lua/Loader.cpp,
+# lua::MakeState::<lambda_8>): the strings "Could no load file", "base/tl.lua"
+# and "Error while pcalling". Detoured: the menu entry's loader patch.
+[[target]]
+name = "lua_loadfile"
+signature = "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 56 41 57 48 8D AC 24 C0 FE FF FF 48 81 EC 40 02 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 85 30 01 00 00 0F B6 DA 4C 8B F1"
+offset = 0
+prologue = "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20"
+required = false
+
+# Lua bytecode-cache lookup before loadfile's body; (cache, State&, URI&) -> bool.
+# 0x2fa8130. Intercept before lookup so cached industry chunks are wrapped too.
+[[target]]
+name = "lua_cached_loadfile"
+signature = "48 89 5C 24 20 55 56 57 41 54 41 56 48 81 EC 90 00 00 00"
+offset = 0
+prologue = "48 89 5C 24 20 55 56 57 41 54 41 56 48 81 EC 90 00 00 00"
+required = false
+
+# lua_load (0x2fbdf70): luaZ_init, the "?" default chunk name,
+# luaD_protectedparser, then the _ENV upvalue fix-up (not the nearby lua_dump).
+# Called, never detoured.
+[[target]]
+name = "lua_load"
+signature = "48 89 5C 24 10 56 48 83 EC 50 49 8B D9 48 8B F1"
+offset = 0
+prologue = "48 89 5C 24 10 56 48 83 EC 50 49 8B D9 48 8B F1"
+required = false
+
+# RegisterAppUsertypes(lua::State&, UI::CMenuUI&, std::function<bool()> const&)
+# (rva 0xdc5fa0): gives a Lua state its `app` table (the string
+# "RegisterAppUsertypes", and the only function naming getProgressMonitor and
+# setWaitForStartReadyGame). Called from the CMenuUI construction path, the
+# react menu and CMenuUI::SetupAppScriptInterface. Detoured: after it, the
+# hook adopts the state for the main menu's load.
+[[target]]
+name = "RegisterAppUsertypes"
+signature = "48 89 5C 24 20 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 50 FB FF FF 48 81 EC B0 05 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 85 A8 04 00 00 49 8B D8"
+offset = 0
+prologue = "48 89 5C 24 20 55 56 57 41 54 41 55 41 56"
+required = false
+
+# The seeds and the order fixes (crates/tpf3mp-hook/src/seeds.rs, order.rs;
+# docs/HOOKS.md, "Seeds, as built" and "The order fixes, as built"). All
+# optional: a build without one loses that piece, not the profile.
+
+# The land-vehicle order fix's site (crates/tpf3mp-hook/src/order.rs, docs/HOOKS.md
+# "The order fixes, as built"): inside Update2, right after the minstd seed is
+# fixed up (`cmove r8d, r12d` ... the mask loop) and right before the engine's
+# Fisher-Yates reads the vector it shuffles: `mov r13, [rbp-0x20]` (begin),
+# `mov rsi, [rbp-0x18]` (end), `cmp r13, rsi`. The hook sorts that vector by
+# entity id here. Site 0xac1b70 = signature start + 40; nothing branches into
+# 0xac1b71..0xac1b7b (tpfre xrefs).
+[[target]]
+name = "ecs::LandVehicleMoveSystem::Update2/shuffle"
+signature = "45 0F 44 C4 41 BE 40 00 00 00 49 C7 C3 FF FF FF FF 0F 1F 80 00 00 00 00 4D 8D 76 FF 49 D1 EB 49 81 FB FD FF FF 7F 77 F0 4C 8B 6D E0 48 8B 75 E8 4C 3B EE"
+offset = 40
+prologue = "4C 8B 6D E0 48 8B 75 E8 4C 3B EE"
+required = false
+
+# The engine's own walk from an entry of that vector to its node record, at the
+# head of the reservation loop (0xac1d72): `mov r8, [rbp-0x80]` (this), `mov
+# rdx, [r8+8]` (the node-list holder), `movsxd rax, [r13]` (the entry's node
+# index), `lea rcx, [rax+rax*4]`, `mov rax, [rdx]` (the records), `lea r12,
+# [rax+rcx*4]` (record = records + index*20). The order fix reads the entity id
+# the same way and refuses unless this shape is present.
+[[target]]
+name = "ecs::LandVehicleMoveSystem::Update2/records"
+signature = "4C 8B 45 80 49 8B 50 08 49 63 45 00 48 8D 0C 80 48 8B 02 4C 8D 24 88 49 8B 50 18"
+offset = 0
+prologue = "4C 8B 45 80 49 8B 50 08 49 63 45 00 48 8D 0C 80 48 8B 02 4C 8D 24 88"
+required = false
+
+# The paused-tick fix (crates/tpf3mp-hook/src/ticks.rs; docs/HOOKS.md "Seeds, as
+# built"; investigation/TPF3_TRAIN_PRIORITY_2026-09-30.md). GameSim::Step's
+# paused path (its speed call answered 0) calls the GameTime advance with r8b = 0
+# at 0x159412: `mov rcx,[rbp+8]; xor r8d,r8d; mov edx,[rcx+0x208]; mov
+# rcx,[rcx+0x18]; call advance`, then `mov rdx,[rbp+8]; xor r8d,r8d` for the
+# engine's paused update. The advance always counts tickCount (+0x3c), so every
+# frame the room holds the world counts on its own. The hook redirects this one
+# call, checked to reach CGameTime::Advance, and skips it in the room's game.
+# Site = signature start (0x159401) + 17; one match in .text (tpfre q bytes).
+[[target]]
+name = "GameSim::Step/paused GameTime advance"
+signature = "48 8B 4D 08 45 33 C0 8B 91 08 02 00 00 48 8B 49 18 E8 ?? ?? ?? ?? 48 8B 55 08 45 33 C0"
+offset = 17
+prologue = "E8"
+required = false
+
+# The GameTime advance (name ours; 0xbace10, gametime.cpp's neighbour): (engine,
+# GameTime entity, bool update). An engine modification scope around `inc
+# [GameTime+0x3c]` always and `inc [GameTime+0x40]` when update is set, then a
+# ComponentChanged for GameTime. Called at 0x159412 (paused, update 0) and
+# 0x15954b (each update, update 1). The redirect checks the call reaches it.
+[[target]]
+name = "CGameTime::Advance"
+signature = "48 89 5C 24 10 55 56 57 41 56 41 57 48 83 EC 20 41 0F B6 E8"
+offset = 0
+prologue = "48 89 5C 24 10 55 56 57 41 56 41 57 48 83 EC 20"
+required = false
+
+# The advance's two increments (0xbace99 = advance + 0x89): `inc [rdi+0x3c];
+# test bpl,bpl; je +3; inc [rdi+0x40]`. The fix refuses unless they are here: the
+# call it skips must be the one that counts tickCount and not updateCount.
+[[target]]
+name = "CGameTime::Advance/tick"
+signature = "FF 47 3C 40 84 ED 74 03 FF 47 40"
+offset = 0
+prologue = "FF 47 3C 40 84 ED 74 03 FF 47 40"
+required = false
+
+# CGameTime's tickCount and updateCount getters (0x2a95c0, 0x2a9680; names
+# ours): `rax=[rcx+0x10]; rcx=[rcx+8]; edx=[rax]; call GetComponent<GameTime>;
+# mov eax,[rax+0x3c]` (+0x40). Called only: the hook logs both counters at every
+# checkpoint through them, with the CGameTime the step's speed call was made on.
+# The land-vehicle shuffle's seed reads the first (0xac1b23).
+[[target]]
+name = "CGameTime::GetTickCount"
+signature = "48 83 EC 28 48 8B 41 10 48 8B 49 08 8B 10 E8 ?? ?? ?? ?? 8B 40 3C 48 83 C4 28 C3"
+offset = 0
+prologue = "48 83 EC 28 48 8B 41 10 48 8B 49 08 8B 10"
+required = false
+
+[[target]]
+name = "CGameTime::GetUpdateCount"
+signature = "48 83 EC 28 48 8B 41 10 48 8B 49 08 8B 10 E8 ?? ?? ?? ?? 8B 40 40 48 83 C4 28 C3"
+offset = 0
+prologue = "48 83 EC 28 48 8B 41 10 48 8B 49 08 8B 10"
+required = false
+
+# The vehicles-at-a-stop order fix's site (order.rs): inside Update, right after
+# the call of TransportVehicleSystem's (line, stopIndex) -> &vector<Entity>
+# getter (below), `mov [rsp+0x248], rax` keeps the vector for the boarding
+# loop; the hook sorts it by entity id here. Site 0xb0e35c = signature start +
+# 9; nothing branches into 0xb0e35d..0xb0e363 (tpfre xrefs). TPF2's `vehstop`
+# site (0xa820f4) had the same shape.
+[[target]]
+name = "ecs::SimEntityAtTerminalSystem::Update/vehicles at stop"
+signature = "49 8B 4F 28 E8 ?? ?? ?? ?? 48 89 84 24 48 02 00 00 41 8B 7F 50 48 8B 4C 24 58"
+offset = 9
+prologue = "48 89 84 24 48 02 00 00 41 8B 7F 50"
+required = false
+
+# The getter that call reaches (name ours): hashes (line, stopIndex) into the
+# system data's phmap (+0x90) and returns &slot.vector, or a static empty
+# vector when the key is missing. The fix checks the call before its site
+# targets this. 0xb86510
+[[target]]
+name = "ecs::TransportVehicleSystem::GetVehiclesAtLineStop"
+signature = "48 89 5C 24 10 57 48 83 EC 30 48 8B F9 89 54 24 40"
+offset = 0
+prologue = "48 89 5C 24 10 57 48 83 EC 30 48 8B F9 89 54 24 40"
+required = false
+
+# The platform-order fix (order.rs `platform`; investigation/TPF3_TRAIN_PRIORITY_2026-09-30.md).
+# ecs::TransportVehicleSystem::Update2 (vf12, 0xb8bae0) walks its node list, 8-byte
+# {entity, TransportVehicle index} records, `for rsi in 0..count*8`, reloading the
+# list's begin each iteration (`mov rax,[r13+8]; mov rdi,[rax]`, 0xb8bcc4) and asking
+# FindNextFreeTerminal for each en-route vehicle. The site is the next three
+# instructions (0xb8bccb = signature start + 7): `mov rcx,[r13+0x10]; movsxd
+# rax,[rsi+rdi+4]; imul rbx,rax,0x1e8`; the first two (9 bytes) are stolen, nothing
+# branches into 0xb8bccc..0xb8bcd3 (tpfre xrefs), and rdi is set anew after the loop
+# (0xb8c22f) before any other use. The hook points rdi at a copy sorted by entity.
+[[target]]
+name = "ecs::TransportVehicleSystem::Update2/visit"
+signature = "49 8B 45 08 48 8B 38 49 8B 4D 10 48 63 44 3E 04 48 69 D8 E8 01 00 00"
+offset = 7
+prologue = "49 8B 4D 10 48 63 44 3E 04 48 69 D8 E8 01 00 00"
+required = false
+
+# (anon)::FindNextFreeTerminal (0xb84e20, named by its assert) std::sorts its 12-byte
+# candidate terminals [r13, r14) by a cost it looks up per candidate (0xb85453; the
+# comparator compares floats only). The site (0xb85430) is the size computation right
+# before that call: `mov rcx,r14; sub rcx,r13` (6 bytes, stolen; 0xb85430 is a branch
+# target, 0xb85431..0xb85435 are not), then `mov rax,rdi; imul rcx`. The hook puts
+# the candidates in one order first, so equal costs break the same way everywhere.
+[[target]]
+name = "FindNextFreeTerminal/candidate sort"
+signature = "49 8B CE 49 2B CD 48 8B C7 48 F7 E9 48 D1 FA 4C 8B C2 49 C1 E8 3F 4C 03 C2 4C 8D 4D F0 49 8B D6 49 8B CD E8"
+offset = 0
+prologue = "49 8B CE 49 2B CD 48 8B C7 48 F7 E9"
+required = false
+
+# LineSystem::GetData's successful return, 0xad20f4. The trace reads only
+# the returned route cache. Both straight-line instructions (8 bytes) are
+# stolen; the following ret stays in place. No incoming interior branches.
+[[target]]
+name = "ecs::LineSystem::GetData/return"
+signature = "48 83 C0 18 48 83 C4 28 C3 4C 8D 0D ?? ?? ?? ?? 41 B8 7F 04 00 00"
+offset = 0
+prologue = "48 83 C0 18 48 83 C4 28 C3"
+required = false
+
+# transport::EdgeReservationManager::Reserve (assert-named): log every claim in order. 0x255c2e0
+[[target]]
+name = "transport::EdgeReservationManager::Reserve"
+signature = "44 89 4C 24 20 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 58 FF FF FF"
+offset = 0
+prologue = "44 89 4C 24 20 55 53 56 57 41 54 41 55 41 56"
+required = false
+
+# The shorter Reserve overload, called from the move systems' vf4/vf9 (assert-named). 0x255c160
+[[target]]
+name = "transport::EdgeReservationManager::Reserve_simple"
+signature = "48 89 5C 24 18 55 57 41 54 41 55 41 57 48 83 EC 60"
+offset = 0
+prologue = "48 89 5C 24 18 55 57 41 54 41 55 41 57 48 83 EC 60"
+required = false
+
+# transport::EdgeUseManager::Add (assert-named): a person's entry on a road edge
+# (rcx = this, rdx = &EdgeId, r8d = entity, r9d = component index, then the
+# bounds); its one caller is PersonMoveSystem. Measured, not changed (survey
+# item 3; order.rs). 0x255e940
+[[target]]
+name = "transport::EdgeUseManager::Add"
+signature = "48 89 5C 24 18 48 89 74 24 20 55 57 41 56 48 8D 6C 24 C0 48 81 EC 40 01 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 45 38"
+offset = 0
+prologue = "48 89 5C 24 18 48 89 74 24 20 55 57 41 56"
+required = false
+
+# transport::EdgeUseManager::AddRange (assert-named): a vehicle's entries on the
+# edges of its move path (rcx = this, r9 = &edges vector, one caller). Measured,
+# not changed (survey item 3). 0x255cc70
+[[target]]
+name = "transport::EdgeUseManager::AddRange"
+signature = "48 8B C4 48 89 58 10 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 08 FF FF FF 48 81 EC C0 01 00 00 C5 F8 29 70 B8 C5 F8 29 78 A8 C5 78 29 40 98 C5 78 29 48 88 C5 78 29 90 78 FF FF FF C5 78 29 98 68 FF FF FF 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 45 58"
+offset = 0
+prologue = "48 8B C4 48 89 58 10 55 56 57 41 54 41 55"
+required = false
+
+# The per-step engine advance GameSim::Step calls for each sub-step (recon: sub_2bb8a50(engine, dt); name ours). 0x2bb8a50
+[[target]]
+name = "ecs::Engine::Update"
+signature = "40 56 57 41 56 48 83 EC 40 48 8B 79 30 48 8B F1"
+offset = 0
+prologue = "40 56 57 41 56 48 83 EC 40 48 8B 79 30 48 8B F1"
+required = false
+
+# The game scripts' calls, where the engine hands a script's call the lua::State it
+# runs in (crates/tpf3mp-hook/src/seeds.rs, piece 1). The game runs game scripts on a
+# pool of Lua states, one per worker thread of its job pool, so the seeds module
+# reseeds math.random in the state about to run each call, on its own thread, from
+# the room's step, the call's kind and the script's entity.
+#
+# game_script_util::Update's functor, _Do_call(this, lua::State*& rdx,
+# lua::Loader2::GameScriptData& r8) (vtable 0x37412a8 slot 2; rva 0xf45450): builds the
+# GameScriptStateNotificationHelper for the state before the script's update runs in
+# it. The entity is at this+0x20 (mov eax, [rdi+0x20] at 0xf45490).
+[[target]]
+name = "game_script_util::Update/lambda_1::_Do_call"
+signature = "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 30 4C 8B 79 18"
+offset = 0
+prologue = "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20"
+required = false
+
+# game_script_util::PostUpdate's functor, the same shape (vtable 0x37412e0 slot 2; its
+# code also serves HandleApplyCommandBuildProposal's functor; rva 0xf449b0). The
+# entity is at this+0x18 (mov eax, [rdi+0x18] at 0xf449e6).
+[[target]]
+name = "game_script_util::PostUpdate/lambda_1::_Do_call"
+signature = "48 89 5C 24 10 48 89 6C 24 18 56 57 41 56 48 83 EC 30 48 8B 69 10"
+offset = 0
+prologue = "48 89 5C 24 10 48 89 6C 24 18 56 57 41 56"
+required = false
+
+# game_script_util::HandleEvent's inner lambda, operator()(captures, lua::State* rdx,
+# GameScriptData& r8), reached from its functor's _Do_call (vtable 0x3741318 slot 2,
+# 0xf44a70: mov rdx,[rdx]; add rcx,8; jmp) (rva 0xf41770). The entity is at
+# captures+0x20; captures+0x28 is the event's int const* seed, which the engine
+# applies itself when set (call lua::State::RandomSeed at 0xf417b5).
+[[target]]
+name = "game_script_util::HandleEvent/lambda_1/lambda_1::operator()"
+signature = "48 89 5C 24 18 55 56 57 41 56 41 57 48 8D 6C 24 A0 48 81 EC 60 01 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 45 50 4D 8B F8"
+offset = 0
+prologue = "48 89 5C 24 18 55 56 57 41 56 41 57 48 8D 6C 24 A0"
+required = false
+
+# The TownDevelopAt command applier seeds its minstd from the CRT rand() (wall clock): refuse or reseed (item 5). 0x9dedf0
+[[target]]
+name = "TownDevelopAt::Apply"
+signature = "48 8B C4 48 89 58 18 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 48 FC FF FF 48 81 EC 80 04 00 00 C5 F8 29 70 B8 C5 F8 29 78 A8 C5 78 29 40 98"
+offset = 0
+prologue = "48 8B C4 48 89 58 18 55 56 57 41 54 41 55"
+required = false
+
+# The town street field's cache fix (crates/tpf3mp-hook/src/townfield.rs,
+# town-field-cache; on unless TPF3MP_HOOK_TOWN_FIELD_CACHE=0). StreetField::At
+# (our name; called by TryCandidate's open pass at 0x967e0e): rcx the field,
+# r8 the street's end; it answers the field's two axes there from a std::map
+# at field+0x18 keyed by the end's 50 m cell, else computes them (0x2b76b86..)
+# and inserts them (0x2b76660). The cached answer is the first point's in the
+# cell, per GameState, unsaved. The site is the lookup's end test (0x2b76b4a,
+# `cmp byte [r9+0x19],0`, 5 bytes stolen; then `jne` to the miss path): the
+# fix points r9 at the head (r10). Only the jne at 0x2b76b1c branches to it,
+# to its first byte. 0x2b76a90
+[[target]]
+name = "StreetField::At"
+signature = "40 55 56 41 54 41 55 41 56 41 57 48 81 EC 98 00 00 00 C4 C1 7A 10 00 C5 FA 5E 0D ?? ?? ?? ?? C5 F2 58 15 ?? ?? ?? ?? 4C 8B 51 18"
+offset = 0
+prologue = "40 55 56 41 54 41 55 41 56 41 57"
+required = false
+
+[[target]]
+name = "StreetField::At/cache found"
+signature = "80 79 19 00 74 D6 41 80 79 19 00 75 35 41 3B 69 1C 75 0A 41 3B 71 20 75 04 32 D2 EB 04 41 0F 4D D3 84 D2 78 1D 4D 3B CA 74 18"
+offset = 6
+prologue = "41 80 79 19 00"
+required = false
+
+# The town trace (crates/tpf3mp-hook/src/towntrace.rs, TPF3MP_HOOK_TOWN_TRACE=1;
+# logging only). TownUpdateSize::Apply (our name; it opens the "TownUpdateSize"
+# scope; rcx its context, GameState at +8; rdx the command: town +0, size
+# factors +4/+8/+0xc, flag +0x10) writes the factors into the town, seeds a
+# minstd_rand from an FNV-1a of updateCount and calls TownDeveloper::Develop
+# (0x8dc240, at 0x9dfccb) with GameState+0x200. Two splices: the develop site
+# (0x9dfc8a, `mov rax,[rbp+8]; mov rcx,[rax+0x200]`, 11 bytes stolen, the seed
+# in ecx) and the return (0x9dfcd7, `mov al,1; add rsp,0x50`, 6 bytes stolen,
+# the generator after Develop at [rsp+0x90]). The function is straight-line:
+# nothing branches into either's stolen bytes past the first. 0x9dfb10
+[[target]]
+name = "TownUpdateSize::Apply"
+signature = "40 53 55 56 57 41 54 41 56 41 57 48 83 EC 50 4C 8B FA 48 8B E9 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 90 48 8B 45 08 4C 8B 70 18"
+offset = 0
+prologue = "40 53 55 56 57 41 54 41 56 41 57 48 83 EC 50"
+required = false
+
+[[target]]
+name = "TownUpdateSize::Apply/develop"
+signature = "48 8B 45 08 48 8B 88 00 02 00 00 C6 84 24 9C 00 00 00 00 48 C7 44 24 30 00 00 00 00 48 8B 84 24 98 00 00 00 48 89 44 24 28 48 8D 84 24 90 00 00 00 48 89 44 24 20 45 0F B6 4F 10 45 8B 07 49 8B D6 E8"
+offset = 0
+prologue = "48 8B 45 08 48 8B 88 00 02 00 00"
+required = false
+
+[[target]]
+name = "TownUpdateSize::Apply/return"
+signature = "45 0F B6 4F 10 45 8B 07 49 8B D6 E8 ?? ?? ?? ?? 90 E8 ?? ?? ?? ?? 90 B0 01 48 83 C4 50 41 5F 41 5E 41 5C 5F 5E 5D 5B C3"
+offset = 0x17
+prologue = "B0 01 48 83 C4 50"
+required = false
+
+# TownDeveloper::Develop (towndeveloper.cpp, the "Develop" assert name): rcx the
+# developer's context, rdx the engine, r8d the town, r9b the flag, the minstd
+# generator's address at [rsp+0x28]. Spliced at its entry by the town trace
+# (`mov [rsp+0x18],r8d`, 5 bytes stolen); its callers are the applier above and
+# the town system's creation paths (0x90bdc7, 0x90be5c, 0x90c0ed, 0x90c17b).
+# 0x8dc240
+[[target]]
+name = "TownDeveloper::Develop"
+signature = "44 89 44 24 18 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 98 F0 FF FF B8 68 10 00 00 E8 ?? ?? ?? ?? 48 2B E0"
+offset = 0
+prologue = "44 89 44 24 18"
+required = false
+
+# The edge watch (crates/tpf3mp-hook/src/edgewatch.rs; HOOKS.md, "The edge
+# watch"; logging only). CommandApply::One (our name; "Simulation Thread: Apply
+# Command", game/command/apply_command.cpp): rcx the GameState (engine at +0x18,
+# CGameTime at +0x28), rdx the 0x38-byte Command (payload at +0, entity list
+# +8/+0x10 of 16-byte entries, result byte +0x30). It reads the payload's kind at
+# +0xaf (`movsx rcx, byte [r8+0x9b8]`) for the dispatcher 0x9d7350. Its callers:
+# CGame::RunGameSimLoop's drain of CommandList (0x11eb96), CGame's two send
+# lambdas (0x120334; 0x1204bf, a script's sendCommand applied at once, in
+# 0x120410), and GameState's command function (0x268ed0, a tail jump). Two
+# splices: its entry (`mov [rsp+0x18],rbx`, 5 bytes stolen) and its epilogue
+# past the cookie check (0x9e1f62, `lea r11,[rsp+0xb0]`, 8 bytes stolen; r14
+# the command, r15 the GameState), which both paths out reach; nothing
+# branches into either's stolen bytes past the first. 0x9e1c10
+[[target]]
+name = "CommandApply::One"
+signature = "48 89 5C 24 18 48 89 74 24 20 55 57 41 54 41 56 41 57 48 8D 6C 24 C9 48 81 EC B0 00 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 45 2F 4C 8B F2"
+offset = 0
+prologue = "48 89 5C 24 18"
+required = false
+
+[[target]]
+name = "CommandApply::One/return"
+signature = "4C 89 65 BF E8 ?? ?? ?? ?? 90 48 8B 4D 2F 48 33 CC E8 ?? ?? ?? ?? 4C 8D 9C 24 B0 00 00 00 49 8B 5B 40 49 8B 73 48 49 8B E3 41 5F 41 5E 41 5C 5F 5D C3"
+offset = 0x16
+prologue = "4C 8D 9C 24 B0 00 00 00"
+required = false
+
+# The street trace (crates/tpf3mp-hook/src/streettrace.rs; HOOKS.md, "The
+# street trace"; logging only). TownDeveloper::Develop's street step (0x967720)
+# tries each street node with StreetDeveloper::TryCandidate (our name; rcx the
+# candidate: node +0, x +4, y +8; dl 1 in the block pass, 0 in the open pass).
+# Spliced at its entry (`mov rax,rsp; mov [rax+0x10],rbx`, 7 bytes stolen; it
+# is straight-line there) and at its epilogue past the cookie check (0x9680dc,
+# `lea r11,[rsp+0x960]`, 8 bytes stolen; al the result, rbp its frame), which
+# both ways out reach; nothing branches into either's stolen bytes past the
+# first. 0x967920
+[[target]]
+name = "StreetDeveloper::TryCandidate"
+signature = "48 8B C4 48 89 58 10 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 68 F7 FF FF 48 81 EC 60 09 00 00"
+offset = 0
+prologue = "48 8B C4 48 89 58 10"
+required = false
+
+[[target]]
+name = "StreetDeveloper::TryCandidate/return"
+signature = "48 8B 8D C0 07 00 00 48 33 CC E8 ?? ?? ?? ?? 4C 8D 9C 24 60 09 00 00 49 8B 5B 48"
+offset = 0xf
+prologue = "4C 8D 9C 24 60 09 00 00"
+required = false
+
+# TryCandidate's refusals go into a std::set (this insert: rcx the set, rdx the
+# result slot, one of six in TryCandidate's frame by the reason, r8 the 20-byte
+# key: node, its streets, the pass, its loops, the direction's index). Called
+# from TryCandidate only (0x967bd5, 0x967c5f, 0x968035). Spliced at its entry
+# (`mov [rsp+8],rbx`, 5 bytes stolen). 0x963320
+[[target]]
+name = "StreetDeveloper::Reject"
+signature = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 50 49 8B D8 48 8B FA 48 8B F1 48 8B 29 48 8B 45 08 48 89 44 24 30"
+offset = 0
+prologue = "48 89 5C 24 08"
+required = false
+
+# The street's build (0x9657c0, reached from TryCandidate through 0x9692c0)
+# right after CreateProposalData (0xa1fd10, called at 0x9659e7): the proposal's
+# two error vectors at [rbp+0x998] and [rbp+0x9b0], both empty to build.
+# Spliced at 0x9659ed (`mov rax,[rbp+0x9a0]`, 7 bytes stolen); nothing branches
+# into its stolen bytes past the first.
+[[target]]
+name = "StreetDeveloper::BuildStreet/errors"
+signature = "4C 8D 8D C0 00 00 00 45 33 C0 48 8B D3 48 8D 8D 20 04 00 00 E8 ?? ?? ?? ?? 90 48 8B 85 A0 09 00 00 48 39 85 98 09 00 00 0F 85"
+offset = 0x1a
+prologue = "48 8B 85 A0 09 00 00"
+required = false
+
+# Junction layout anchors from the Lua binding registration code. Read-only:
+# these instructions establish the field offsets used by junctions.rs.
+[[target]]
+name = "BaseNodeConfig/field offsets"
+signature = "C7 45 80 70 00 00 00 C7 45 84 50 00 00 00 C7 45 88 48 00 00 00 C7 45 98 4C 00 00 00 C7 45 94 18 00 00 00"
+offset = 0
+prologue = "C7 45 80 70 00 00 00"
+required = false
+
+[[target]]
+name = "StreetProposal/node configuration offsets"
+signature = "C7 45 A4 78 00 00 00 C7 45 BC 60 00 00 00 C7 45 CC 48 00 00 00 C7 45 D0 30 00 00 00"
+offset = 0
+prologue = "C7 45 A4 78 00 00 00"
+required = false
+
+# BaseNodeConfig constructs its 0x30-byte crosswalk hash set at +0x18.
+[[target]]
+name = "BaseNodeConfig/crosswalk set layout"
+signature = "49 8D 4F 18 48 89 4D 98 48 8D 35 ?? ?? ?? ?? 48 89 75 90 48 89 31 4C 89 61 08 4C 89 61 10 4C 89 61 18 4C 89 61 28 45 88 67 48"
+offset = 0
+prologue = "49 8D 4F 18 48 89 4D 98"
+required = false
+
+# Lua 5.2 C API, address only (never detoured). (rva 0x2fbdb90)
+[[target]]
+name = "lua_getfield"
+signature = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 4D 8B D0 48 8B F1 E8 ?? ?? ?? ?? 48 8B 5E 10 49 8B D2"
+offset = 0
+prologue = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20"
+required = false
+
+# The probe of the engine's player (crates/tpf3mp-hook/src/probe.rs,
+# investigation/TF3_LOCAL_PLAYER_2026-10-01.md). Read only, and only with
+# TPF3MP_PROBE_PLAYER=1: the hook takes field offsets from these two getters'
+# displacements and never calls, detours or writes them.
+#
+# The GUI's GameState getter: UI::CMenuUI::SwitchToGameUI's lambda_1/lambda_2,
+# a std::function<GameState const &()> vf2 (rva 0x6aa800): `mov rax,[rcx+8];
+# mov rax,[rax+0x6b0]; mov rax,[rax+0x1e0]; ret`, m_game then its GameState.
+# The GameState displacement is fixed in the signature: its twin (lambda_3,
+# 0x6aaaa0, GameRes at +0x1d8) has the same shape.
+[[target]]
+name = "probe: GUI GameState getter"
+signature = "48 8B 41 08 48 8B 80 ?? ?? ?? ?? 48 8B 80 E0 01 00 00 C3"
+offset = 0
+prologue = "48 8B 41 08 48 8B 80"
+required = false
+
+# The game scripts' GameState getter: CGame::CGame's lambda_3/lambda_1, a
+# std::function<GameState const &()> vf2 (rva 0x11ffd0): `[[CGame+0x1f0] +
+# 0x78 + 8*i]`, i the int at +0x98, or 1 - i when the functor's flag is set.
+[[target]]
+name = "probe: engine GameState getter"
+signature = "80 79 10 00 48 8B 41 08 48 8B 80 ?? ?? ?? ?? 74 ?? B9 01 00 00 00 2B 88 ?? ?? ?? ?? 48 63 D1 48 8B 44 D0 ?? C3"
+offset = 0
+prologue = "80 79 10 00 48 8B 41 08"
+required = false
+
+# The probe's caller count (crates/tpf3mp-hook/src/probe.rs), only with
+# TPF3MP_PROBE_PLAYER=1: street_util::ProposalStreetGraph::GetPlayerOwnedPtr,
+# vf5 of the proposal street graph (rva 0xa46cd0; named by its assert string
+# "street_util::ProposalStreetGraph::GetPlayerOwnedPtr"), this in rcx and the
+# entity in edx, the entity's PlayerOwned (or null) in rax. Detoured to count
+# the return addresses of its callers, inside and outside GameSim::Step, and
+# always answered by the original. The live graph's twin (vf5, 0xa45d90) is
+# byte-identical to four other slots and has no unique signature.
+[[target]]
+name = "probe: ProposalStreetGraph::GetPlayerOwnedPtr"
+signature = "48 83 EC 28 4C 8B 49 20 4C 8B D1 49 8B 41 48 4D 8B 41 50 49 3B C0 74 ?? 39 10 0F 84 ?? ?? ?? ?? 48 05 50 03 00 00 49 3B C0 75 ?? 49 8B 49 18 49 8B 41 20 48 3B C8 74 ?? 39 11 0F 84 ?? ?? ?? ?? 48 81 C1 50 03 00 00 48 3B C8 75 ?? 4D 63 42 34"
+offset = 0
+prologue = "48 83 EC 28 4C 8B 49 20 4C 8B D1 49 8B 41 48"
+required = false
+
+# The probe's log of the native tools' ownership test (probe.rs), only with
+# TPF3MP_PROBE_PLAYER=1: rva 0x610ea0 in game\ui\actions\
+# street_builder_util.cpp, unnamed; the probe calls it
+# street_util::IsOwnedByOtherPlayer. The engine in rcx, the tool's player
+# in edx (false when negative), an entity in r8d; looks the entity's
+# PlayerOwned up (the RTTI type descriptor at 0x610ec4) and answers
+# owner != player, false for an entity no player owns. The street
+# builder's snap (CreateFindSnapPointRoadEarlyAbortContext, call at
+# 0x5fc022) marks both ends of an edge it answers true for as fixed. A leaf
+# that never reads r9; detoured to log what it answers true for, always
+# answered by the original.
+[[target]]
+name = "probe: street_util IsOwnedByOtherPlayer"
+signature = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 30 49 63 F8 8B DA 48 8B E9 85 D2 0F 88 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 83 C1 48 4C 8D 44 24 58"
+offset = 0
+prologue = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18"
+required = false
+
+# The person-order fixes (crates/tpf3mp-hook/src/persons.rs; docs/HOOKS.md,
+# "The person-order fixes"). Ported from silver2127's TPF2 Multiplayer
+# (docs/re/HOTJOIN_ORDER.md, native/src/slice/hotjoin_order.inl): each batch
+# the person simulation consumes in ECS node-list (or history) order is sorted
+# by entity id right before the engine reads it.
+#
+# candidates: destination_util::GetTargetsByLandUse (0x8e3ac0, our name; the
+# PersonCapacity family's node list copied into a local vector<Entity> at
+# [rsp+0x70]..[rsp+0x78], rbx = rsp+0x70 since 0x8e3cd9), right after the copy
+# loop and before the chunked build whose entries BinarySearchIndex (0x8e4400)
+# sums and searches with one draw. The site is `mov dword [rsp+0x60], 1`
+# (0x8e3d65, 8 bytes, stolen whole); nothing branches into 0x8e3d66..0x8e3d6c.
+[[target]]
+name = "destination_util::GetTargetsByLandUse/candidates"
+signature = "C7 44 24 60 01 00 00 00 E8 ?? ?? ?? ?? 4C 8B D0 48 8B 54 24 78 48 8B 4C 24 70 48 2B D1 48 C1 FA 02"
+offset = 0
+prologue = "C7 44 24 60 01 00 00 00"
+required = false
+
+# departures: ecs::SimEntityAtBuildingSystem::Update2 (vf12, 0xb05ea0) collects
+# the persons and cargo whose stay ran out, in node order, into two
+# vector<Entity> ([rbp+7], [rbp+0x1f]) and emits each to its signal
+# (0xaeaeb0): SimPersonSystem::NoteAtBuildingPersonsLeave (0xb2e950) draws
+# from one generator seeded by updateCount, in batch order. The site is the
+# test of the first vector after the thread-pool loop (0xb05f92, `mov rcx,
+# [rbp+7]; cmp rcx, [rbp+0xf]`, 8 bytes stolen); the only branch to it is
+# the je at 0xb05f51, to its first byte.
+[[target]]
+name = "ecs::SimEntityAtBuildingSystem::Update2/leave batches"
+signature = "48 8B C8 E8 ?? ?? ?? ?? 48 8B 4D 07 48 3B 4D 0F 74 1A 48 8B 47 30"
+offset = 8
+prologue = "48 8B 4D 07 48 3B 4D 0F 74 1A 48 8B 47 30 48 85 C0 74 11 48 8D 55 07 48 8B 48 10 E8"
+required = false
+
+# arrivals: ecs::PersonMoveSystem::Update2 (vf12, 0xaecaa0) collects the walk
+# arrivals, in node order, into a vector<Entity> at [rbp-0x78] and emits it
+# (0xaecfe8) to SimPersonSystem::NoteWalkPersonsArrived (0xb33a30), which
+# draws stay durations in batch order. The site (0xaecfcd, `mov rax,
+# [rbp-0x70]; cmp [rbp-0x78], rax`, 8 bytes stolen) is reached by the je at
+# 0xaecf11, at its first byte only.
+[[target]]
+name = "ecs::PersonMoveSystem::Update2/arrival batch"
+signature = "E8 ?? ?? ?? ?? 48 8B 45 90 48 39 45 88 74 17 49 8B 4F 68 48 85 C9 74 0E"
+offset = 5
+prologue = "48 8B 45 90 48 39 45 88 74 17 49 8B 4F 68 48 85 C9 74 0E 48 8D 55 88 48 8B 49 10 E8"
+required = false
+
+# needs-path (TF2's idle): ecs::SimEntityNeedsPathSystem::Update (vf11,
+# 0xb181b0), the only caller of PathFactory::Compute (0x8d11e0), builds one
+# input per entry of its own list m_systemData->add ([[this+0x10]], a
+# vector<Entity> in insertion order) and Compute seeds a generator per chunk
+# from updateCount and the chunk's start index. The site is the list's first
+# read (0xb18213, `mov rax, [r13+0x10]; mov rdx, [rax+8]`, 8 bytes stolen; no
+# branch reaches 0xb18213..0xb1821a).
+[[target]]
+name = "ecs::SimEntityNeedsPathSystem::Update/list"
+signature = "49 8B 45 10 48 8B 50 08 48 2B 10 48 C1 FA 02 4C 8D 45 30 48 8D 4D E0 E8"
+offset = 0
+prologue = "49 8B 45 10 48 8B 50 08 48 2B 10 48 C1 FA 02 4C 8D 45 30 48 8D 4D E0 E8"
+required = false
+
+# The list's data is copy-on-write (a shared_ptr at this+0x10, shared with
+# the replicated engine's copy): EntityToBeRemoved (vf5, 0xb18100) takes a
+# private copy through the getter this call reaches (0xb186c0) before it
+# writes. The needs-path fix calls the same getter before it sorts.
+[[target]]
+name = "ecs::SimEntityNeedsPathSystem::EntityToBeRemoved/data getter call"
+signature = "48 8D 4F 10 E8 ?? ?? ?? ?? 48 8B F8 4C 8B 40 08 48 8B 10 49 3B D0 74 40"
+offset = 4
+prologue = "E8"
+required = false
+
+# freed ids: ecs::Engine::EndModification (0x2bb4d90) appends the
+# modification's removed ids (m_betweenChanges, [[r12]] with r12 =
+# engine+0x1f0, a vector<Entity> in RemoveEntity order) to the FIFO free-id
+# deque at engine+0xd8 (deque insert 0x2bb1110 at 0x2bb4ff3); AddEntity
+# (0x2bb37b0) pops its front. The site is `lea rcx, [r13+0xd8]` (0x2bb4fd1,
+# 7 bytes stolen), reached by the je at 0x2bb4fbf, at its first byte only.
+[[target]]
+name = "ecs::Engine::EndModification/free-id append"
+signature = "49 8D 8D D8 00 00 00 4D 8B 0C 24 49 8B 41 08 48 89 44 24 20 4D 8B 09 4D 8B 85 F8 00 00 00 48 8D 55 87 E8 ?? ?? ?? ??"
+offset = 0
+prologue = "49 8D 8D D8 00 00 00 4D 8B 0C 24 49 8B 41 08 48 89 44 24 20 4D 8B 09 4D 8B 85 F8 00 00 00 48 8D 55 87 E8"
+required = false
+
+# The tools' player (crates/tpf3mp-hook/src/toolplayer.rs; docs/HOOKS.md,
+# "The tools' player"), off with TPF3MP_HOOK_TOOL_COMPANY=0. UI::CGameUI's
+# constructor (0x647860) reads the save's player once ([rbp-0x50], 0x648ace)
+# and hands a copy to each tool it builds. In a room the hook writes the
+# player's company into three tools' copies at the start of each tool's
+# Step, on the main thread. Every field is a UI object's, read by its own
+# class's code only (tpfre, every dword read of the offset in the class's
+# code range, and the vtable's only users being the constructor and
+# destructor):
+# - UI::StreetBuilder (street and track builder, both built by CGameUI,
+#   "action.streetbuilder.street"/".track") +0xc0: stored by the ctor
+#   0x56a740 only; read by 0x56fc80 (CreateProposalAndUpdate's pool lambda),
+#   0x5755b0, CreateProposalAndUpdate 0x577ed0 (x2), 0x580900, Step 0x585e50
+#   (x2, the snap at 0x586b4e), 0x589980 and the ctor's lambda 0x58caf0.
+# - UI::TrackModifier (road and track modifiers) +0xa0: stored by the ctor
+#   0x5b41b0 only; read by Step 0x5bc120, Build 0x5bf880 (x2), vf5 0x5cbf80
+#   (x2, the snap at 0x5cca24) and the ctor's lambda 0x5cf120.
+# - UI::Bulldozer's BulldozerFilter (vtable 0x36aef70, made only in the
+#   ctor 0x4c49a0, kept at +0xc0): its player list at +0x10, set once by the
+#   ctor to { the bulldozer's player } (0x4c4f33..0x4c4fb7) and copied only
+#   by BulldozerFilter::vf1 0x4d5070 into each action's query, which
+#   sub_5f7db0 checks owners against.
+
+# UI::StreetBuilder::Step (vf5).
+[[target]]
+name = "UI::StreetBuilder::Step"
+signature = "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 C0 CB FF FF"
+offset = 0
+prologue = "48 89 5C 24 18 55 56 57 41 54 41 55 41 56"
+required = false
+
+# The street builder ctor's player store: mov eax,[rbp+0x128]; mov
+# [rsi+0xc0],eax (the field's offset read from the code).
+[[target]]
+name = "UI::StreetBuilder ctor/player store"
+signature = "48 8B 85 10 01 00 00 48 89 86 B0 00 00 00 48 8B 85 18 01 00 00 48 89 86 B8 00 00 00 8B 85 28 01 00 00 89 86 C0 00 00 00"
+offset = 0
+prologue = "48 8B 85 10 01 00 00"
+required = false
+
+# UI::TrackModifier::Step (vf5).
+[[target]]
+name = "UI::TrackModifier::Step"
+signature = "48 89 5C 24 20 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 50 CC FF FF"
+offset = 0
+prologue = "48 89 5C 24 20 55 56 57 41 54 41 55 41 56"
+required = false
+
+# The track modifier ctor's player store: mov eax,[rbp+0x330]; mov
+# [r14+0xa0],eax.
+[[target]]
+name = "UI::TrackModifier ctor/player store"
+signature = "48 8B 85 20 03 00 00 49 89 86 98 00 00 00 8B 85 30 03 00 00 41 89 86 A0 00 00 00"
+offset = 0
+prologue = "48 8B 85 20 03 00 00"
+required = false
+
+# UI::Bulldozer::Step (vf5).
+[[target]]
+name = "UI::Bulldozer::Step"
+signature = "48 8B C4 48 89 58 20 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 28 F1 FF FF"
+offset = 0
+prologue = "48 8B C4 48 89 58 20 55 56 57 41 54 41 55"
+required = false
+
+# The bulldozer ctor's BulldozerFilter: lea rax,[vtable]; its fields
+# (players at +0x10..+0x20); mov [r14+0xc0],rbx.
+[[target]]
+name = "UI::Bulldozer ctor/filter"
+signature = "48 8D 05 ?? ?? ?? ?? 48 89 03 48 89 73 08 48 89 7B 10 48 89 7B 18 48 89 7B 20 66 C7 43 28 00 00 EB 03 48 8B DF 48 89 5D D8 49 89 9E C0 00 00 00"
+offset = 0
+prologue = "48 8D 05"
+required = false
+
+# The tools' player, the station tools and the bulldozer's own player
+# (toolplayer.rs). CGameUI hands the player read once ([rbp-0x50]) to:
+# - UI::ConstructionBuilder (sub_50b3b0, 0x649f28) +0xa0: stored only by
+#   its ctor (0x50b453); read by sub_514f90 (x2), MousePressed 0x51bbc0
+#   (x2) and Step 0x51cd60, all game\ui\actions\constructionbuilder.cpp.
+# - UI::StreetTerminalBuilder (sub_5906e0 through sub_645ee0, the stop
+#   builder 0x649df0 and the signal and waypoint builder 0x64a232) +0xa0:
+#   stored only by its ctor (0x590795); read by sub_594f50 (x3, the snap
+#   through 0x5936d0) and Step 0x595f30.
+# - UI::ModuleBuilder (sub_540390 through sub_645940, 0x64a739) +0xa8:
+#   stored only by its ctor (0x540456); read by sub_5423b0, MousePressed
+#   0x543630 (x2).
+# - UI::Bulldozer +0x28, its own player: stored by its ctor (0x4c4a4f, the
+#   4th argument); read by the ctor (seeding the filter), its lambda
+#   0x4d2650 (x2), 0x4d2b70, 0x4d46b0 and Step 0x4d6340, the proposals it
+#   makes for its player.
+[[target]]
+name = "UI::ConstructionBuilder::Step"
+signature = "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 B0 D5 FF FF"
+offset = 0
+prologue = "48 89 5C 24 18 55 56 57 41 54 41 55 41 56"
+required = false
+
+[[target]]
+name = "UI::ConstructionBuilder ctor/player store"
+signature = "49 89 B6 90 00 00 00 48 8B 85 E0 02 00 00 49 89 86 98 00 00 00 8B 85 F0 02 00 00 41 89 86 A0 00 00 00"
+offset = 0
+prologue = "49 89 B6 90 00 00 00"
+required = false
+
+[[target]]
+name = "UI::StreetTerminalBuilder::Step"
+signature = "40 53 56 57 41 54 41 55 41 56 41 57 B8 80 14 00 00"
+offset = 0
+prologue = "40 53 56 57 41 54 41 55 41 56 41 57 B8 80 14 00 00"
+required = false
+
+[[target]]
+name = "UI::StreetTerminalBuilder ctor/player store"
+signature = "49 89 BE 88 00 00 00 49 89 B6 90 00 00 00 48 8B 85 C0 01 00 00 49 89 86 98 00 00 00 8B 85 D0 01 00 00 41 89 86 A0 00 00 00"
+offset = 0
+prologue = "49 89 BE 88 00 00 00"
+required = false
+
+[[target]]
+name = "UI::ModuleBuilder::Step"
+signature = "40 53 56 57 41 54 41 55 41 56 41 57 B8 A0 10 00 00"
+offset = 0
+prologue = "40 53 56 57 41 54 41 55 41 56 41 57 B8 A0 10 00 00"
+required = false
+
+[[target]]
+name = "UI::ModuleBuilder ctor/player store"
+signature = "48 8B 85 C8 02 00 00 48 89 87 98 00 00 00 49 8B 04 24 33 C9 49 89 0C 24 48 89 87 A0 00 00 00 8B 85 E0 02 00 00 89 87 A8 00 00 00"
+offset = 0
+prologue = "48 8B 85 C8 02 00 00"
+required = false
+
+[[target]]
+name = "UI::Bulldozer ctor/player store"
+signature = "48 8D 05 ?? ?? ?? ?? 49 89 06 49 89 76 20 41 89 5E 28 48 8B 85 C8 01 00 00"
+offset = 0
+prologue = "48 8D 05"
+required = false
+
+# The probe's log of the street bulldozer's answers (probe.rs), only with
+# TPF3MP_PROBE_PLAYER=1: the edge test, a lambda of
+# UI::StreetBulldozerAction::vf2 (sub_5f2a00: captures in rcx, edge in edx),
+# and the owner test every bulldozer action calls (sub_5f7db0: engine,
+# owner list, entity, flag). Pass-through detours.
+[[target]]
+name = "probe: StreetBulldozerAction edge test"
+signature = "40 53 57 41 56 48 83 EC 20 48 8B 41 08 8B DA"
+offset = 0
+prologue = "40 53 57 41 56 48 83 EC 20 48 8B 41 08 8B DA"
+required = false
+
+[[target]]
+name = "probe: bulldozer owner test"
+signature = "48 89 5C 24 18 55 56 41 56 48 83 EC 30 48 8B 42 08"
+offset = 0
+prologue = "48 89 5C 24 18 55 56 41 56 48 83 EC 30 48 8B 42 08"
+required = false
+
+# The bulldozer's owner list (toolplayer.rs): a std::vector<Entity> at
+# +0xa8, which its ctor fills with its player (0x4c4f6f) and copies into
+# its filter (0x4c4fb7), and from which every query it makes is built
+# (sub_4d51c0, called by Step 0x4d6a82, 0x4d4ac0, 0x4d2eb1 and its ctor's
+# lambda 0x4d2897, 0x4d29ff). Its setter sub_4d6220 (this, list) assigns
+# both; the menu's step calls it (CMenuUI::DoStep's lambda, sub_68f070,
+# sub_6a76e0, sub_6a1410 at 0x6a14bc) with the GUI's player
+# ([[game+0x1e0]+0x20c]) or an empty list. Readers of +0xa8 in the
+# bulldozer: those calls, the ctor, the setter, and its dtor sub_4cb390.
+[[target]]
+name = "UI::Bulldozer ctor/owner list"
+signature = "49 89 BE 98 00 00 00 49 89 BE A0 00 00 00 4D 8D BE A8 00 00 00 49 89 3F 49 89 7F 08 49 89 7F 10"
+offset = 0
+prologue = "49 89 BE 98 00 00 00"
+required = false
+
+[[target]]
+name = "UI::Bulldozer set owner list"
+signature = "48 89 5C 24 08 57 48 83 EC 30 48 8D 99 A8 00 00 00 4C 8B C2 48 8B F9 48 3B DA"
+offset = 0
+prologue = "48 89 5C 24 08 57 48 83 EC 30 48 8D 99 A8 00 00 00"
+required = false
+
+# The views' player (crates/tpf3mp-hook/src/guiplayer.rs; docs/HOOKS.md,
+# "The views' player"), off with TPF3MP_HOOK_GUI_COMPANY=0. Each site reads
+# the player of the GameState the GUI's IGameStateProvider gives (+0x20c,
+# one of the simulation's buffers, never written) in a UI function, and is
+# spliced at the target: after the read, the register holding the player
+# becomes the player's company in a room; at an owner test, the owner's
+# pointer is pointed at a copy. Every target's splice takes whole
+# instructions no branch lands inside, with no branch, call or RIP-relative
+# operand (tpfre, every jump target of the function checked).
+
+# UI::HudIconManager::PreemptiveOctreeTraversal (hudiconmanager.cpp), via PreparePreemptiveOctreeTraversalFn's lambda 0x680850; eax = player, stored in the traversal's context (function 0x67b610, splice 0x67b7db).
+[[target]]
+name = "view: HudIconManager::PreemptiveOctreeTraversal/player"
+signature = "8B 80 0C 02 00 00 4C 89 75 B8 48 89 5D C0"
+offset = 6
+prologue = "4C 89 75 B8 48 89 5D C0"
+required = false
+
+# UI::StationViewer::vf4; ebx = player (function 0x83a570, splice 0x83a608).
+[[target]]
+name = "view: StationViewer::vf4/player"
+signature = "8B 98 0C 02 00 00 48 8B 46 10 4C 8D 70 78"
+offset = 6
+prologue = "48 8B 46 10 4C 8D 70 78"
+required = false
+
+# sub_839c50 from sub_557b90 from UI::CSelector (vf2@8, vf5@8); ebx = player (function 0x839c50, splice 0x839cd9).
+[[target]]
+name = "view: CSelector pick/player"
+signature = "8B 98 0C 02 00 00 48 8B 47 10 4C 8D 70 78"
+offset = 6
+prologue = "48 8B 47 10 4C 8D 70 78"
+required = false
+
+# UI::ViewCreator::vf1, from UI::CreateSelectorFilter; ebx = player, looked up as a Player (function 0x867030, splice 0x86712a).
+[[target]]
+name = "view: ViewCreator::vf1/player"
+signature = "41 8B 9D 0C 02 00 00 48 8D 05 ?? ?? ?? ?? 48 8D 55 38 48 89 45 38"
+offset = 14
+prologue = "48 8D 55 38 48 89 45 38"
+required = false
+
+# sub_8764c0, from UI::layers::CatchmentAreaHelper's ctor lambda 0x878400; r8d = player (function 0x8764c0, splice 0x8765f5).
+[[target]]
+name = "view: CatchmentAreaHelper/player 1"
+signature = "44 8B 80 0C 02 00 00 48 8B 5D A0 48 8B 53 10"
+offset = 7
+prologue = "48 8B 5D A0 48 8B 53 10"
+required = false
+
+# sub_8764c0; ebx = player, kept across the call to sub_867550 (function 0x8764c0, splice 0x876f36).
+[[target]]
+name = "view: CatchmentAreaHelper/player 2"
+signature = "8B 98 0C 02 00 00 49 8B CC E8 ?? ?? ?? ?? 40 88 7C 24 20"
+offset = 14
+prologue = "40 88 7C 24 20"
+required = false
+
+# sub_8764c0; ebx = player (function 0x8764c0, splice 0x8770ba).
+[[target]]
+name = "view: CatchmentAreaHelper/player 3"
+signature = "8B 98 0C 02 00 00 4D 8D 77 10 49 8B CE"
+offset = 6
+prologue = "4D 8D 77 10 49 8B CE"
+required = false
+
+# sub_8764c0; ebx = player, kept across the call to sub_867550 (function 0x8764c0, splice 0x8770fd).
+[[target]]
+name = "view: CatchmentAreaHelper/player 4"
+signature = "8B 98 0C 02 00 00 49 8B CE E8 ?? ?? ?? ?? C6 44 24 20 00"
+offset = 14
+prologue = "C6 44 24 20 00"
+required = false
+
+# sub_8779c0 from sub_8764c0; mov eax,[player]; cmp [rbx],eax: rbx the owner, dead after (overwritten at 0x877b73; the jne lands in the epilogue 0x877e01) (function 0x8779c0, splice 0x877b39).
+[[target]]
+name = "view: CatchmentAreaHelper/owner test"
+signature = "8B 80 0C 02 00 00 39 03"
+offset = 0
+prologue = "8B 80 0C 02 00 00 39 03"
+required = false
+
+# sub_87b7f0 from sub_882250 (LayerManagerColorMap) from UI::CGameUI::vf50; eax = player (function 0x87b7f0, splice 0x87b840).
+[[target]]
+name = "view: LayerManagerColorMap/player 1"
+signature = "8B 80 0C 02 00 00 49 8B 10 49 8B 48 10"
+offset = 6
+prologue = "49 8B 10 49 8B 48 10"
+required = false
+
+# sub_87b7f0; ebx = player (function 0x87b7f0, splice 0x87b919).
+[[target]]
+name = "view: LayerManagerColorMap/player 2"
+signature = "11 FF 52 08 48 8B 4B 08 8B 98 0C 02 00 00 48 8B 79 38 48 8B 71 30"
+offset = 14
+prologue = "48 8B 79 38 48 8B 71 30"
+required = false
+
+# sub_87b7f0; ebx = player (function 0x87b7f0, splice 0x87b9ef).
+[[target]]
+name = "view: LayerManagerColorMap/player 3"
+signature = "11 FF 52 08 48 8B 4B 10 8B 98 0C 02 00 00 48 8B 79 38 48 8B 71 30"
+offset = 14
+prologue = "48 8B 79 38 48 8B 71 30"
+required = false
+
+# a lambda of UI::layers::LayerManager; eax = player (function 0x883020, splice 0x88307b).
+[[target]]
+name = "view: LayerManager colour lambda/player"
+signature = "8B 80 0C 02 00 00 48 8B 51 10 4C 8B 09"
+offset = 6
+prologue = "48 8B 51 10 4C 8B 09"
+required = false
+
+# sub_885b10, from LayerManager::SetColorFunction's lambda_2 (0x8830e0); mov eax,[player]; cmp [rdx],eax: rdx the owner, dead after (overwritten at 0x885cab; the jne lands in the epilogue 0x885f0c) (function 0x885b10, splice 0x885c82).
+[[target]]
+name = "view: LayerManager colour/owner test"
+signature = "8B 85 0C 02 00 00 39 02"
+offset = 0
+prologue = "8B 85 0C 02 00 00 39 02"
+required = false
+
+# sub_29f66d0, a UI::react params::RendererComponentDelegate builtin; ebx = player (function 0x29f66d0, splice 0x29f689a).
+[[target]]
+name = "view: react RendererComponentDelegate/player"
+signature = "8B 98 0C 02 00 00 49 8B 07 49 8B CF"
+offset = 6
+prologue = "49 8B 07 49 8B CF"
+required = false
+
+# sub_289e060, a UI::react params::RailroadCrossingComp builtin; r14d = player (function 0x289e060, splice 0x289e116).
+[[target]]
+name = "view: react RailroadCrossingComp/player"
+signature = "44 8B B0 0C 02 00 00 48 8B 03 48 8B 08"
+offset = 7
+prologue = "48 8B 03 48 8B 08"
+required = false
+
+# The map with every company (guiplayer.rs; TPF3MP_HOOK_GUI_ALL_COMPANIES=0
+# keeps it to the player's own). The HUD icon pass, sub_674430 (a lambda of
+# UI::HudIconManager::PreemptiveOctreeTraversal through its std::_Binder,
+# 0x680c10; and sub_66c160 from the traversal 0x67b610), skips an entity
+# whose PlayerOwned owner is not the pass's player: lea rdx,[rax+rcx*4];
+# test rdx,rdx; je; cmp [rdx],r12d; jne. Spliced at the lea (a jump target,
+# 0x6748d9 lands there; nothing lands inside): for an owner that is a
+# company of the room the pointer is formed at a copy of the pass's player.
+# rax and rcx are dead after (rax reloaded at 0x674949 or replaced at
+# 0x674990, rcx written at 0x67492f, 0x6744a5, 0x674542 before any read).
+[[target]]
+name = "view: HudIconManager icon pass/owner"
+signature = "48 8B 04 D0 48 8D 14 88 48 85 D2 74 05 44 39 22 75"
+offset = 4
+prologue = "48 8D 14 88 48 85 D2"
+required = false
+
+# The getPlayer binding (SetupUtilInterface's "getPlayer", registered by
+# sub_24791a0 at 0x253a01a; its closure sub_24ed220): rdi the closure, its
+# std::function getter at +0x38 called (call [rax+0x10]), movsxd
+# rdx,[GameState+0x20c], then the Lua integer push sub_2fbe300 at the
+# target. Redirected: for a closure whose getter is the GUI's
+# (CMenuUI::SwitchToGameUI's, 0x6aa800) or the React GUI's
+# (ScriptComponentRoot::ReloadInterfaces's, 0x27c80a0), both reading the
+# GUI's slot +0x1e0, the pushed answer is the player's company in a room.
+[[target]]
+name = "view: getPlayer binding/push"
+signature = "48 8B 01 FF 50 10 48 63 90 0C 02 00 00 48 8B CB E8 ?? ?? ?? ??"
+offset = 16
+prologue = "E8"
+required = false
+
+# The probe's log of the map's line viewer (probe.rs), only with
+# TPF3MP_PROBE_PLAYER=1: in sub_7f01d0 (UI::LineViewer::Update's lambda,
+# game/ui/util/lineviewer.cpp), right after LineSystem::GetData(line)
+# (call at 0x7f03e2): mov ecx,[r15+0x80]; cmp [rax+0x18],ecx; jne skip;
+# then the data's segment lists against the line's stops (0x7f0444). Spliced
+# at the mov (no branch lands inside), read only.
+[[target]]
+name = "probe: LineViewer route data test"
+signature = "48 8B C8 E8 ?? ?? ?? ?? 41 8B 8F 80 00 00 00 39 48 18"
+offset = 8
+prologue = "41 8B 8F 80 00 00 00"
+required = false
+
+# The probe's log of the line viewer's edge geometry (probe.rs), only with
+# TPF3MP_PROBE_PLAYER=1: sub_7f10a0 (game/ui/util/lineviewer.cpp, the one
+# that builds a line's edge geometries; called by LineViewer::Update at
+# 0x7f6598, 0x7f69e9, 0x7f6a55). Detoured to read, after the original, the
+# byte sizes of its result's three vectors per line; answer unchanged.
+[[target]]
+name = "probe: LineViewer GetEdgeGeometries"
+signature = "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 A0 48 81 EC 60 01 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 45 50 45 8B F9"
+offset = 0
+prologue = "48 89 5C 24 18 55 56 57 41 54 41 55 41 56"
+required = false
+
+# The line viewers' candidate lines (guiplayer.rs): sub_7f3ea0 (called by
+# UI::LineViewer::Update 0x7f554c and UI::MetroViewer::vf4 0x7fdbd9) calls
+# the line system's player-to-lines index sub_ad2620(index, player) with the
+# player the viewer stored at +0x28 when sub_29f66d0 made it; only those
+# lines get their whole route built (sub_7f10a0 with stop filter -1) and
+# drawn. The call is redirected: in a room it answers every company's lines
+# (the companies the GUI notes, tpf3mp.companies), else the game's answer.
+# The index function itself and its other callers (the simulation's
+# sub_c5a4a0 among them) are untouched. The callee's first bytes are checked.
+[[target]]
+name = "view: LineViewer lines of the player/call"
+signature = "48 89 7C 24 50 33 DB 89 5C 24 58 8B 55 78 E8 ?? ?? ?? ??"
+offset = 14
+prologue = "E8"
+required = false
+
+# The other players' build previews, drawn by the hook (crates/tpf3mp-hook/
+# src/drawing.rs; docs/HOOKS.md, "Build previews";
+# investigation/TPF3_BUILD_PREVIEWS_2026-10-02.md). A UI::BuilderRenderer of
+# the hook's for each other member, made by the game's own RendererFactory,
+# filled by builder_renderer_util::AddToRenderer from the ProposalData the
+# mod's GUI has the game make (makeProposalData), and drawn by the main
+# CRendererComponent ("mainView"). Ported from TpF2 Multiplayer's
+# native/src/preview_plugin.cpp (build 35924). All are only called, but the
+# call site in makeProposalData, which is redirected, and ~CGameUI, which is
+# detoured. Without every one of them, nobody's preview is drawn.
+
+# UI::RendererFactory::Create (0x8266d0): rcx the factory, returns a new
+# BuilderRenderer (0x1d0 bytes, constructor 0x7b4160). Its 11 callers are
+# the tools' constructors.
+[[target]]
+name = "UI::RendererFactory::Create"
+signature = "48 89 5C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 81 EC F0 00 00 00 4C 8B E9"
+offset = 0
+prologue = "48 89 5C 24 08 55 56 57 41 54 41 55 41 56 41 57"
+required = false
+
+# UI::CRendererComponent::AddRenderable (0x6ae970): its assert string; a
+# second registration of one renderable is a fatal assert.
+[[target]]
+name = "UI::CRendererComponent::AddRenderable"
+signature = "48 89 5C 24 08 48 89 74 24 18 48 89 54 24 10 57 48 83 EC 20 48 8B F2 48 8D B9 30 05 00 00"
+offset = 0
+prologue = "48 89 5C 24 08 48 89 74 24 18 48 89 54 24 10"
+required = false
+
+# UI::CRendererComponent::RemoveRenderable (0x6afdf0): the mirror of Add,
+# which the tools' vf16 call.
+[[target]]
+name = "UI::CRendererComponent::RemoveRenderable"
+signature = "40 53 48 83 EC 20 4C 8B C2 48 8B D9 48 8B 91 38 05 00 00"
+offset = 0
+prologue = "40 53 48 83 EC 20 4C 8B C2 48 8B D9"
+required = false
+
+# UI::BuilderRenderer::Clear(renderer, models, view terrain, height mods)
+# (0x7ba590): 25 callers, the tools' Step among them.
+[[target]]
+name = "UI::BuilderRenderer::Clear"
+signature = "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 54 41 55 41 56 41 57 48 8D 6C 24 C9 48 81 EC F0 00 00 00 45 0F B6 F9"
+offset = 0
+prologue = "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20"
+required = false
+
+# UI::BuilderRenderer's scalar deleting destructor (vtable 0x36dca68, slot
+# 0, 0x7b89a0), the body inlined. It does not unregister itself.
+[[target]]
+name = "UI::BuilderRenderer::vf0"
+signature = "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 81 EC 10 01 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 00 01 00 00"
+offset = 0
+prologue = "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20"
+required = false
+
+# UI::builder_renderer_util::AddToRenderer (0x5e2b20): its assert strings;
+# the overload ending in three bools every tool calls (ModelData, toolkit,
+# renderer, Proposal, ProposalData, offset, map, bool x3).
+[[target]]
+name = "builder_renderer_util::AddToRenderer"
+signature = "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 18 FE FF FF 48 81 EC E8 02 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 85 D0 01 00 00 49 8B F1"
+offset = 0
+prologue = "40 55 53 56 57 41 54 41 55 41 56 41 57"
+required = false
+
+# CreateProposalData (0xa1fd10, create_proposal_data.cpp): what the
+# redirected call below calls first, always.
+[[target]]
+name = "CreateProposalData"
+signature = "48 89 5C 24 10 48 89 6C 24 18 48 89 4C 24 08 56 57 41 56 48 83 EC 50 49 8B F1 49 8B E8"
+offset = 0
+prologue = "48 89 5C 24 10 48 89 6C 24 18 48 89 4C 24 08"
+required = false
+
+# makeProposalData's call of CreateProposalData (0x25122da, in the binding's
+# body 0x2511ec0): the toolkit in rdx, the converted Proposal in r9, the
+# ProposalData made into rcx. Redirected: after the game's own call, a call
+# the hook armed draws the result for the member it names.
+[[target]]
+name = "makeProposalData/CreateProposalData call"
+signature = "4C 8D 8D 40 03 00 00 4D 8B 45 50 48 8D 95 80 01 00 00 48 8D 8D A0 06 00 00 E8 ?? ?? ?? ??"
+offset = 25
+prologue = "E8"
+required = false
+
+# UI::CGameUI::~CGameUI's body (0x650470, from vf0 0x658af0): detoured, so
+# the hook's renderers leave its main component and are destroyed first.
+[[target]]
+name = "UI::CGameUI::~CGameUI"
+signature = "48 89 5C 24 10 48 89 74 24 18 55 57 41 54 41 56 41 57 48 8D 6C 24 C0 48 81 EC 40 01 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 45 38"
+offset = 0
+prologue = "48 89 5C 24 10 48 89 74 24 18 55 57 41 54 41 56"
+required = false
+
+# Layout anchors, read only: each instruction gives the offset the hook
+# reads. UI::CMenuUI::StartGame stores the new CGameUI (mov [rbx+0x6b8],rax
+# after its constructor, 0x6a4f52).
+[[target]]
+name = "UI::CMenuUI::StartGame/CGameUI store"
+signature = "E8 ?? ?? ?? ?? 90 48 89 83 B8 06 00 00"
+offset = 6
+prologue = "48 89 83"
+required = false
+
+# UI::CGameUI::CreateUI keeps its RendererFactory at +0x588 (lea
+# rax,[r12+0x588], 0x65be0c) ...
+[[target]]
+name = "UI::CGameUI::CreateUI/RendererFactory field"
+signature = "49 8D 84 24 88 05 00 00 48 8D 8D C0 03 00 00"
+offset = 0
+prologue = "49 8D 84 24"
+required = false
+
+# ... and its main CRendererComponent, "mainView", at +0xbf0 (mov
+# [r12+0xbf0],rcx, 0x65b1bc).
+[[target]]
+name = "UI::CGameUI::CreateUI/mainView store"
+signature = "48 89 4D 70 49 89 8C 24 F0 0B 00 00"
+offset = 4
+prologue = "49 89 8C 24"
+required = false
+
+# The game's ProposalViewer reads the CGameUI's ModelData at +0x538 for
+# AddToRenderer (mov rcx,[rcx+0x538], 0x2aa3b06) ...
+[[target]]
+name = "ProposalViewer/ModelData read"
+signature = "48 8B 4D 80 48 8B 89 38 05 00 00 E8"
+offset = 4
+prologue = "48 8B 89"
+required = false
+
+# ... after testing the ProposalData's preprocess flag at +0x570, set when
+# the game did not evaluate the proposal (cmp byte [r15+0x570],0,
+# 0x2aa39d5).
+[[target]]
+name = "BuilderRenderer::EndHeightMod/upload flag"
+signature = "80 B9 F0 00 00 00 00 74 ?? 48 8B 91 B8 01 00 00 48 81 C2 F8 1A 00 00 44 0F B6 81 F3 00 00 00 48 8B 49 50 E8"
+offset = 0
+prologue = "80 B9"
+required = false
+
+# UI::BuilderRenderer::EndHeightMod (0x7bbae0), detoured: its only caller
+# is AddToRenderer (0x5e31ab), the end of a renderer's height mods. The hook
+# notes the game's own renderers that upload heights, to apply them again
+# after a reset.
+[[target]]
+name = "UI::BuilderRenderer::EndHeightMod"
+signature = "48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 41 56 41 57 48 8D 6C 24 90 48 81 EC 70 01 00 00 C5 F8 29 70 C8 C5 F8 29 78 B8 C5 78 29 40 A8"
+offset = 0
+prologue = "48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20"
+required = false
+
+# terrain::ViewTerrain::ApplyBlocks(vector<tuple<CVec2i, CVec2i, unsigned
+# short const*>> const&, bool) (0x396a00, named by its RTTI lambdas): the
+# upload of a renderer's height blocks into the view terrain. Called, not
+# detoured; Clear's reset (0x398600, its only caller is Clear, 0x7ba7af)
+# undoes every block of the view terrain at once.
+[[target]]
+name = "terrain::ViewTerrain::ApplyBlocks"
+signature = "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 50 FF FF FF 48 81 EC B0 01 00 00 C5 F8 29 B4 24 A0 01 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 85 98 00 00 00"
+offset = 0
+prologue = "48 89 5C 24 18 55 56 57 41 54 41 55 41 56"
+required = false
+[[target]]
+name = "UI::StreetBuilder::ResetProposal"
+signature = "48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 56 41 57 48 8D A8 A8 F6 FF FF"
+offset = 0
+prologue = "48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20"
+required = false
+
+# The depot the line window's store buys at (guiplayer.rs): the bindings
+# api.engine.util.vehicle.findBestDepotForLine (registered at 0x253c13f by
+# sub_24929a0; closure sub_24fe290 -> sub_24f5470 -> sub_2517cf0) and
+# findBestLineAndDepotForVehicle (0x253c094, sub_24921a0; sub_24fe210 ->
+# sub_24f5260 -> sub_268a7b0) both reach sub_2689fd0, and it sub_2689dd0;
+# nothing else calls those four. Each keeps only what the GameState's player
+# owns: mov reg,[GameState+0x20c]; cmp [rax],reg; jne skip, rax the owner's
+# PlayerOwned. Spliced at the load and compare (no branch lands inside; rax
+# is dead after on both paths): on the GUI's thread outside the step, an
+# owner that is the player's company passes and the save's player's does
+# not. Only the game's GUI scripts call the bindings on build 40408
+# (line_util.tl, manager_window.tl, vehicle_store_window.tl).
+[[target]]
+name = "view: findBestDepot depot owner test"
+signature = "49 8B 0E 8B 91 0C 02 00 00 39 10 0F 85"
+offset = 3
+prologue = "8B 91 0C 02 00 00 39 10"
+required = false
+
+[[target]]
+name = "view: findBestDepot owner test"
+signature = "48 8B 4D 80 8B 89 0C 02 00 00 39 08 75"
+offset = 4
+prologue = "8B 89 0C 02 00 00 39 08"
+required = false

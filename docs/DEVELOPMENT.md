@@ -157,6 +157,100 @@ cargo clippy --workspace --all-targets -- -D warnings
 To test in the real game, with several games in one room on one PC, see
 [GAME_TESTING.md](GAME_TESTING.md).
 
+### Game update builds
+
+`profiles/native-build.txt` selects the reviewed native build directory. The
+hook's build script and the update tools read that same selection: `hooks.toml`
+and `native.rs` always belong to the selected bundle. For an update, review the
+new profile, offsets, layouts and callback ABI, then change this one selection
+on the feature branch ([HOOKS.md](HOOKS.md#reviewing-the-native-data-for-a-game-update)).
+
+For the combined process, use `tpfre update`: it snapshots an installed
+update or reads an existing archive, collects all archived file changes,
+script changes, profiled hook/function changes and independent blockers, then checks/tests and builds only when its
+exact reviewed native bundle is selected. Batch the diagnosed changes before
+rerunning; use `--check-only` for the initial analysis. See the
+[one-run command and reports](../tools/tpfre/README.md#one-update-run).
+It never edits the game or automatically approves unknown ABI data.
+
+Build `tools/tpfre` once with the machine's `quiet-cargo` wrapper when installed.
+Then, from the repository root, run the standalone tool against a complete
+private source archive:
+
+```powershell
+& ./tools/tpfre/target/release/tpfre.exe build --repo . --archive "$env:USERPROFILE/TPF3-MP-builds/25533170-sources" --jobs 2
+```
+
+This checks every archived file, the exact SHA-256, size and PE timestamp of
+the selected profile, and every target including optional ones. Only after
+success does it run the release build of launcher, agent, server and hook.
+Missing/incomplete inputs, a different build or failed hooks stop before Cargo
+starts. A saved verification report cannot substitute for the live check;
+custom profiles cannot override the compiled bundle. An installed Preview is
+not needed to verify an archived supported build.
+The local build uses the machine's `quiet-cargo` wrapper automatically when
+installed, so its build shares the queue and CPU cap with other sessions.
+
+The `release` workflow runs the same `verify-build` check on pushes to
+`feat/game-update-*`, `feat/upstream-update-*`, `dev`, `acceptance` and `main`, and on manual runs.
+Packages are built on `main` or
+manual runs with `verify_only` left off; a failed check blocks every package.
+Other feature branches can run it manually with `verify_only` enabled. Set up:
+
+- a dedicated private Windows GitHub Actions runner labelled
+  `tpf3mp-game-builds`, with Git, the pinned Rust toolchain, Windows PowerShell
+  and the machine's `quiet-cargo` wrapper under the runner account's
+  `.claude/tools/quiet-cargo/quiet-cargo.cmd`;
+- the repository variable `TPF3MP_GAME_ARCHIVE`, an absolute path to the
+  complete source archive readable by that runner, outside its checkout.
+
+Set up the runner and repository variable in each repository before merging
+these release-workflow changes there. A runner registered to a fork and the
+fork's variables do not configure upstream. Without the variable the workflow
+fails; with an offline runner the verification job waits and packaging stays
+blocked. Keep the gate enabled and complete the operator setup before using it.
+The workflow requires a clean checkout of the exact release commit and records
+it alongside the bundle file hashes and target results. Only
+`game-build-verification.json` is
+uploaded and attached to the draft release; game files, sources and indexes
+remain on the private runner. Missing configuration fails before scheduling
+the private check. A failed target check retains its static report as an
+artifact for investigation while packaging stays blocked. An unavailable
+runner holds packaging until the runner is
+available. Ordinary CI compilation/testing needs no private game inputs.
+The verification tool's Cargo target directory stays in the runner's tool
+cache, outside the clean checkout. Repeated checks reuse compilation artifacts
+while still checking the current commit and every private archive file afresh.
+The private job is never triggered by pull requests. Register it only in the
+trusted repository that holds the release workflow. Run `run.cmd` under its
+configured Windows account; it must be online for checks to finish. On a
+non-admin machine it can start hidden at that account's Windows login instead
+of being installed as a service. Keep runner credentials and archives outside
+Git, and use the Release archive until a reviewed Preview bundle is selected.
+
+For static work on `feat/game-update-*` or `feat/upstream-update-*`, the optional repository variable
+`TPF3MP_CANDIDATE_GAME_ARCHIVE` names a second complete private archive.
+When configured, the same private job also runs `tpfre verify` against all
+candidate signatures, including optional targets, and uploads the separate
+`game-candidate-verification.json` artifact. Missing or unsupported candidate
+input fails the update check; an unset variable leaves this optional check out.
+The active native selection and `TPF3MP_GAME_ARCHIVE` still govern packaging.
+For Preview 40418, point the candidate variable at its complete private source
+archive while keeping the active variable on Release. Signature success never
+selects or approves the candidate's native ABI or runtime. Ordinary CI also
+checks the candidate's pinned identity and the native hold without game files.
+
+To verify a pushed feature branch without building or drafting a release:
+
+```powershell
+gh workflow run release.yml --repo OWNER/REPO --ref feat/my-update -f verify_only=true
+```
+
+Static success certifies profile bytes only. Native ABI review, real-game
+acceptance and the feature → dev → acceptance → main gates still apply; no
+platform gains game support from this check alone. Ordinary `cargo build`
+remains available for development and is not a verified update build.
+
 ### Which build is this
 
 Every launcher, agent, server and hook says which build it is. The build

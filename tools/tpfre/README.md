@@ -29,6 +29,145 @@ The database is written to the current directory (`<stem>.tpfdb`) unless
 `-o` says otherwise, never next to the game. It is written under a temporary
 name and renamed when complete.
 
+## Game update workflow (Windows PE builds)
+
+Run from `tools/tpfre`; keep archives and caches private, outside Git. Before
+Steam replaces a supported build, snapshot its install. After the update,
+snapshot again under a new directory and compare:
+
+```powershell
+$tpfre = './target/release/tpfre.exe'
+& $tpfre archive --game 'D:/SteamLibrary/steamapps/common/Transport Fever 3' --build 25686323 --out "$env:USERPROFILE/TPF3-MP-builds/25686323-sources"
+& $tpfre audit "$env:USERPROFILE/TPF3-MP-builds/25533170-sources" "$env:USERPROFILE/TPF3-MP-builds/25686323-sources" --profiles ../../profiles --cache "$env:USERPROFILE/TPF3-MP-builds/indexes" --json > audit.json
+# After manual investigation and a profile for the exact new executable:
+& $tpfre verify "$env:USERPROFILE/TPF3-MP-builds/25686323-sources" --profiles ../../profiles --json > verification.json
+```
+
+`archive` copies the chosen root executable (`--exe` overrides the name),
+root EXE/DLL/SO/dylib files, loose `.tl`/`.lua`/`.json`/`.gs` sources and
+those sources extracted from ZIP containers. It supports stored/deflated ZIP
+and TF3's `UG` local headers. It records SHA-256 and sizes of archived files.
+For loose inputs `sources.hash_scope` is `file`; for ZIPs it is
+`script_entries`, the hash of the sorted JSON array of `(entry name, size,
+content SHA-256)` tuples, excluding unrelated textures/audio and compression.
+The Steam manifest is copied when found beside `common`
+(`--steam-manifest` overrides discovery); its build ID must match `--build`.
+It retains depot IDs and the branch, when present. Without that manifest,
+the build label is supplied by the operator; it is not independently verified.
+Assets such as textures and audio are omitted. ZIP64, encrypted entries,
+linked inputs, unsafe paths and excessive script sizes are refused.
+
+A destination must be new and outside both the install and Git worktrees.
+The install is read only; selected contents are hashed again and the complete
+file inventory (paths, sizes, modification times) is checked before completion
+to catch updates during copying. Failure leaves `.incomplete`; consumers refuse it.
+`build.json` is written last. Archive input is checked against every recorded
+file's hash and size, including scripts and libraries.
+
+`audit` uses the hookcore profile parser/scanner for every target in every
+profile matching the old executable's exact identity. It reports missing or
+ambiguous signatures, invalid offsets, changed prologues, old/new RVAs and
+normalized containing-function differences. Normalization excludes address
+operands, retaining field offsets and other constants. Equality does **not**
+prove callee/data equivalence or ABI compatibility. Matcher suggestions are
+investigation hints, never automatically accepted targets. SHA-keyed indexes
+are cached without modifying profiles or executables.
+
+Profile discovery accepts flat `*.toml` files and immediate per-build
+directories containing `hooks.toml`, in deterministic path order. Other
+metadata inside a bundle is not parsed as a hook profile. The runtime's
+native data and profile are paired in these bundles; `verify` checks profile
+bytes and does not certify their Rust ABI data (see [HOOKS.md](../../docs/HOOKS.md#reviewing-the-native-data-for-a-game-update)).
+
+An undecodable function body (for example embedded data) is reported with
+`normalized_function_equal: null` and `comparison_error`; it requires manual
+review, while the remaining targets are still checked.
+
+Two complete archives also produce added/removed/changed script lists.
+An explicit EXE path is accepted for older EXE-only archives, but reports the
+script comparison as unavailable and requires review. `verify` checks the
+exact new identity and **all** profile targets, including optional ones; absent
+executables or unknown builds are errors, never skipped tests.
+
+Exit codes: `0` = no static differences requiring review (`audit`) or all
+profile bytes verified (`verify`); `1` = review required/target failure;
+`2` = CLI usage error; `3` = invalid input or incomplete analysis. Reports
+always say `runtime_verified: false`. These commands never activate hooks,
+approve a build or replace real-game acceptance. Keep the existing
+feature → dev → acceptance → main release gates.
+
+## One update run
+
+`tpfre update` collects the complete change list before invoking Cargo. It
+reads an installed game (`--game` plus its Steam `--build` ID) or an existing
+complete private archive (`--new`). `--old` is the last supported archive.
+Use a new private output directory for each run:
+
+```powershell
+# From the repository root; the existing Preview archive needs no installation:
+& ./tools/tpfre/target/release/tpfre.exe update --repo . --old "$env:USERPROFILE/TPF3-MP-builds/25533170-sources" --new "$env:USERPROFILE/TPF3-MP-builds/25686323-sources" --out "$env:USERPROFILE/TPF3-MP-builds/runs/preview-analysis-01" --cache "$env:USERPROFILE/TPF3-MP-builds/indexes" --jobs 2 --check-only
+# After a game patch, replace --new with:
+# --game 'D:/SteamLibrary/steamapps/common/Transport Fever 3' --build <Steam-build-ID>
+```
+
+The run saves `files.json` (changed/added/removed archived contents, including
+libraries), `audit.json` (every baseline target/function and changed scripts),
+`signatures.json` when an exact candidate exists, `native-bundle.json` when
+the selected bundle matches, and `summary.json` with all independent blocking
+checks. A missing candidate does not hide the separate native-bundle failure.
+No game or profile is modified; new snapshots, reports and caches stay private.
+Existing run directories and output/cache locations inside inputs/Git are
+refused before creating anything there.
+
+The command does not infer ABI data, accept matcher suggestions, repin a
+profile to an unknown executable or change `native-build.txt`. An unknown
+update leaves a complete diagnosis and stops before Cargo. Investigate and
+batch the needed changes, prepare and select its reviewed native bundle, then
+rerun. A previously prepared exact new bundle is a reviewed input: the old
+baseline audit remains diagnostic, since old signatures can deliberately
+stop matching after the reviewed changes. With an unchanged EXE, changed
+scripts or libraries still block reuse of its bundle; their review is required.
+Update the supported baseline only after the existing acceptance process.
+
+When the static checks pass, a normal run checks format, Clippy and the whole
+workspace's tests (collecting failures across crates), then makes one release build of launcher, agent, server
+and hook. A failed check stops subsequent stages; Cargo output is retained in
+`format.log`, `clippy.log`, `tests.log` and `build.log`. The archive and selected
+native data are checked again after testing before compilation. The machine's
+quiet-cargo wrapper handles heavy commands. `--check-only` executes the same
+analysis and static gates without tests or compilation.
+
+Exit 0 means `static_checks_passed` in check-only mode or `built` after the
+checks and release build. Exit 1 means `blocked` with the stage and reasons
+in `summary.json`; invalid output locations/CLI inputs retain the usual codes
+3/2. Every result has `runtime_verified: false`. A local build still needs
+real-game acceptance and the existing branch/release gates; it is not published
+by this command.
+
+## Checked update builds
+
+From the repository root, `tpfre verify-build --repo . --archive <snapshot>
+--json` checks the bundle selected in `profiles/native-build.txt`, exactly as
+the hook build script selects it. A complete private archive is required;
+an EXE-only input or a custom profile cannot bypass this gate. SHA-256,
+size and PE timestamp must all be pinned and match, and optional targets
+must pass too. The report records the bundle file hashes and checkout commit;
+it never certifies runtime compatibility.
+
+`tpfre build --repo . --archive <snapshot> --jobs 2` performs that live check,
+then invokes `cargo build --release --locked` for launcher, agent, server
+and hook. A failure stops before Cargo runs. It accepts no old success report
+and has no skip-verification switch. Cargo failures remain failed builds.
+When installed on the machine, `quiet-cargo` runs that build through its
+shared queue and CPU cap.
+Run the standalone `tpfre` binary for this command: wrapping `cargo run ...
+build` in `quiet-cargo` would make the nested build wait for its own parent.
+
+The release workflow requires `verify-build` on a dedicated private runner
+before every package job, including manual runs. Only its JSON report leaves
+that runner. Setup and the one-command local invocation are in
+[DEVELOPMENT.md](../../docs/DEVELOPMENT.md#game-update-builds).
+
 ## What the index holds
 
 | table | what |

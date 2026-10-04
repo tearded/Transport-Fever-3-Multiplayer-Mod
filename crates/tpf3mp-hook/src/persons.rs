@@ -477,23 +477,10 @@ pub mod candidates {
     pub const FIX: &str = "person-candidates-order";
     /// Set to `0` (or `off`), this batch keeps the engine's order.
     pub const TOGGLE_ENV: &str = "TPF3MP_HOOK_PERSON_CANDIDATES_ORDER";
-    pub const SITE: &str = "destination_util::GetTargetsByLandUse/candidates";
-    /// `mov dword [rsp+0x60], 1`, stolen whole.
-    pub const EXPECTED: [u8; 8] = [0xC7, 0x44, 0x24, 0x60, 0x01, 0x00, 0x00, 0x00];
-    /// Where the vector is: `lea rbx, [rsp+0x70]` before the copy loop, and
-    /// the build's size computation from `[rsp+0x78] - [rsp+0x70]` after
-    /// the call that follows the site.
-    pub const CONTEXT: &[(i64, &[u8])] = &[
-        (-0x8c, &[0x48, 0x8D, 0x5C, 0x24, 0x70]),
-        (
-            0xd,
-            &[
-                0x4C, 0x8B, 0xD0, 0x48, 0x8B, 0x54, 0x24, 0x78, 0x48, 0x8B, 0x4C, 0x24, 0x70,
-            ],
-        ),
-    ];
-    /// The vector's offset from the site's stack pointer.
-    pub const VECTOR_AT_RSP: u64 = 0x70;
+    pub use crate::build_data::native::persons::candidates::CONTEXT;
+    pub use crate::build_data::native::persons::candidates::EXPECTED;
+    pub use crate::build_data::native::persons::candidates::SITE;
+    pub use crate::build_data::native::persons::candidates::VECTOR_AT_RSP;
 
     static STATE: State = State::new();
 
@@ -544,27 +531,12 @@ pub mod departures {
 
     pub const FIX: &str = "person-departures-order";
     pub const TOGGLE_ENV: &str = "TPF3MP_HOOK_PERSON_DEPARTURES_ORDER";
-    pub const SITE: &str = "ecs::SimEntityAtBuildingSystem::Update2/leave batches";
-    /// `mov rcx, [rbp+7]; cmp rcx, [rbp+0xf]` (stolen), `je`, the signal at
-    /// `[rdi+0x30]`, `lea rdx, [rbp+7]`, `mov rcx, [rax+0x10]`, `call`.
-    pub const EXPECTED: [u8; 28] = [
-        0x48, 0x8B, 0x4D, 0x07, 0x48, 0x3B, 0x4D, 0x0F, 0x74, 0x1A, 0x48, 0x8B, 0x47, 0x30, 0x48,
-        0x85, 0xC0, 0x74, 0x11, 0x48, 0x8D, 0x55, 0x07, 0x48, 0x8B, 0x48, 0x10, 0xE8,
-    ];
-    /// The second vector's emit, after the first's: `mov r8, [rbp+0x1f];
-    /// cmp r8, [rbp+0x27]`, `je`, the signal at `[rdi+0x28]`, `lea rdx,
-    /// [rbp+0x1f]`, `call`.
-    pub const CONTEXT: &[(i64, &[u8])] = &[(
-        0x24,
-        &[
-            0x4C, 0x8B, 0x45, 0x1F, 0x4C, 0x3B, 0x45, 0x27, 0x74, 0x1E, 0x48, 0x8B, 0x47, 0x28,
-            0x48, 0x85, 0xC0, 0x74, 0x15, 0x48, 0x8D, 0x55, 0x1F, 0x48, 0x8B, 0x48, 0x10, 0xE8,
-        ],
-    )];
-    /// The two emits' calls, from the site.
-    pub const EMITS: [u64; 2] = [0x1b, 0x3f];
-    pub const FIRST: i64 = 7;
-    pub const SECOND: i64 = 0x1f;
+    pub use crate::build_data::native::persons::departures::CONTEXT;
+    pub use crate::build_data::native::persons::departures::EMITS;
+    pub use crate::build_data::native::persons::departures::EXPECTED;
+    pub use crate::build_data::native::persons::departures::FIRST;
+    pub use crate::build_data::native::persons::departures::SECOND;
+    pub use crate::build_data::native::persons::departures::SITE;
 
     static STATE: State = State::new();
 
@@ -625,15 +597,10 @@ pub mod arrivals {
 
     pub const FIX: &str = "person-arrivals-order";
     pub const TOGGLE_ENV: &str = "TPF3MP_HOOK_PERSON_ARRIVALS_ORDER";
-    pub const SITE: &str = "ecs::PersonMoveSystem::Update2/arrival batch";
-    /// `mov rax, [rbp-0x70]; cmp [rbp-0x78], rax` (stolen), `je`, the signal
-    /// at `[r15+0x68]`, `lea rdx, [rbp-0x78]`, `mov rcx, [rcx+0x10]`, `call`.
-    pub const EXPECTED: [u8; 28] = [
-        0x48, 0x8B, 0x45, 0x90, 0x48, 0x39, 0x45, 0x88, 0x74, 0x17, 0x49, 0x8B, 0x4F, 0x68, 0x48,
-        0x85, 0xC9, 0x74, 0x0E, 0x48, 0x8D, 0x55, 0x88, 0x48, 0x8B, 0x49, 0x10, 0xE8,
-    ];
-    pub const EMIT: u64 = 0x1b;
-    pub const VECTOR: i64 = -0x78;
+    pub use crate::build_data::native::persons::arrivals::EMIT;
+    pub use crate::build_data::native::persons::arrivals::EXPECTED;
+    pub use crate::build_data::native::persons::arrivals::SITE;
+    pub use crate::build_data::native::persons::arrivals::VECTOR;
 
     static STATE: State = State::new();
 
@@ -705,34 +672,14 @@ pub mod needs_path {
 
     pub const FIX: &str = "person-needs-path-order";
     pub const TOGGLE_ENV: &str = "TPF3MP_HOOK_PERSON_NEEDS_PATH_ORDER";
-    pub const SITE: &str = "ecs::SimEntityNeedsPathSystem::Update/list";
-    pub const GETTER_CALL: &str =
-        "ecs::SimEntityNeedsPathSystem::EntityToBeRemoved/data getter call";
-    /// `mov rax, [r13+0x10]; mov rdx, [rax+8]` (stolen), `sub rdx, [rax];
-    /// sar rdx, 2; lea r8, [rbp+0x30]; lea rcx, [rbp-0x20]; call`.
-    pub const EXPECTED: [u8; 24] = [
-        0x49, 0x8B, 0x45, 0x10, 0x48, 0x8B, 0x50, 0x08, 0x48, 0x2B, 0x10, 0x48, 0xC1, 0xFA, 0x02,
-        0x4C, 0x8D, 0x45, 0x30, 0x48, 0x8D, 0x4D, 0xE0, 0xE8,
-    ];
-    /// The results loop reads `add` again by position: `mov rax,
-    /// [r13+0x10]; mov rcx, [rax]; mov ebx, [rcx+r12*4]`.
-    pub const CONTEXT: &[(i64, &[u8])] = &[(
-        0x1ad,
-        &[
-            0x49, 0x8B, 0x45, 0x10, 0x48, 0x8B, 0x08, 0x42, 0x8B, 0x1C, 0xA1,
-        ],
-    )];
-    /// The getter's head: `[rcx+8]` the control block, a private copy made
-    /// when its use count at `+8` is above 1.
-    pub const GETTER: [u8; 41] = [
-        0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x20,
-        0x48, 0x8B, 0xD9, 0x48, 0x8B, 0x41, 0x08, 0x48, 0x85, 0xC0, 0x0F, 0x84, 0xA7, 0x00, 0x00,
-        0x00, 0x83, 0x78, 0x08, 0x01, 0x0F, 0x8E, 0x9D, 0x00, 0x00, 0x00,
-    ];
-    /// The shared pointer in the system, and the use count in its block.
-    pub const DATA: u64 = 0x10;
-    pub const CONTROL: u64 = 0x18;
-    pub const USES: u64 = 8;
+    pub use crate::build_data::native::persons::needs_path::CONTEXT;
+    pub use crate::build_data::native::persons::needs_path::CONTROL;
+    pub use crate::build_data::native::persons::needs_path::DATA;
+    pub use crate::build_data::native::persons::needs_path::EXPECTED;
+    pub use crate::build_data::native::persons::needs_path::GETTER;
+    pub use crate::build_data::native::persons::needs_path::GETTER_CALL;
+    pub use crate::build_data::native::persons::needs_path::SITE;
+    pub use crate::build_data::native::persons::needs_path::USES;
 
     type Getter = unsafe extern "system" fn(shared: u64) -> u64;
     static GETTER_AT: AtomicU64 = AtomicU64::new(0);
@@ -838,15 +785,8 @@ pub mod freed_ids {
 
     pub const FIX: &str = "freed-id-order";
     pub const TOGGLE_ENV: &str = "TPF3MP_HOOK_FREED_ID_ORDER";
-    pub const SITE: &str = "ecs::Engine::EndModification/free-id append";
-    /// `lea rcx, [r13+0xd8]` (stolen), `mov r9, [r12]; mov rax, [r9+8];
-    /// mov [rsp+0x20], rax; mov r9, [r9]; mov r8, [r13+0xf8]; lea rdx,
-    /// [rbp-0x79]; call`: the vector `[r12]` handed to the deque's insert.
-    pub const EXPECTED: [u8; 35] = [
-        0x49, 0x8D, 0x8D, 0xD8, 0x00, 0x00, 0x00, 0x4D, 0x8B, 0x0C, 0x24, 0x49, 0x8B, 0x41, 0x08,
-        0x48, 0x89, 0x44, 0x24, 0x20, 0x4D, 0x8B, 0x09, 0x4D, 0x8B, 0x85, 0xF8, 0x00, 0x00, 0x00,
-        0x48, 0x8D, 0x55, 0x87, 0xE8,
-    ];
+    pub use crate::build_data::native::persons::freed_ids::EXPECTED;
+    pub use crate::build_data::native::persons::freed_ids::SITE;
 
     static STATE: State = State::new();
 

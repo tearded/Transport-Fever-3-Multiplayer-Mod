@@ -44,14 +44,10 @@
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
-/// Where a `Command` keeps its payload.
-const COMMAND_PAYLOAD: usize = 0;
-/// Where a payload keeps its variant index (build 40408).
-const PAYLOAD_INDEX: usize = 0x9b8;
-/// The variant index of a `WorldBuildProposal` (the dispatcher's case 53).
-const WORLD_BUILD_PROPOSAL: i8 = 52;
-/// Where a `WorldBuildProposal` payload keeps `playerInitiated`.
-const PLAYER_INITIATED: usize = 0x3d2;
+use crate::build_data::native::builds::COMMAND_PAYLOAD;
+use crate::build_data::native::builds::PAYLOAD_INDEX;
+use crate::build_data::native::builds::PLAYER_INITIATED;
+use crate::build_data::native::builds::WORLD_BUILD_PROPOSAL;
 
 /// The game's own add and apply, reached through their detours'
 /// trampolines.

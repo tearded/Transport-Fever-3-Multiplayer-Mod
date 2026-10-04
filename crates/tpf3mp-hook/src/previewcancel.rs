@@ -12,7 +12,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-pub const RESET_TARGET: &str = "UI::StreetBuilder::ResetProposal";
+pub use crate::build_data::native::previewcancel::RESET_TARGET;
 static ORIGINAL: AtomicUsize = AtomicUsize::new(0);
 type Reset = unsafe extern "C-unwind" fn(usize, u8);
 

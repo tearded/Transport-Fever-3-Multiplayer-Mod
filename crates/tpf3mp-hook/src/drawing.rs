@@ -67,32 +67,22 @@ use std::{
 
 use tpf3mp_proto::PlayerId;
 
-/// The profile's names of what this module calls, redirects or detours.
-pub const CREATE_TARGET: &str = "UI::RendererFactory::Create";
-pub const ADD_TARGET: &str = "UI::CRendererComponent::AddRenderable";
-pub const REMOVE_TARGET: &str = "UI::CRendererComponent::RemoveRenderable";
-pub const CLEAR_TARGET: &str = "UI::BuilderRenderer::Clear";
-pub const DESTROY_TARGET: &str = "UI::BuilderRenderer::vf0";
-pub const FILL_TARGET: &str = "builder_renderer_util::AddToRenderer";
-pub const EVALUATE_TARGET: &str = "CreateProposalData";
-pub const CALL_TARGET: &str = "makeProposalData/CreateProposalData call";
-pub const GAME_UI_DTOR_TARGET: &str = "UI::CGameUI::~CGameUI";
-pub const END_HEIGHTS_TARGET: &str = "UI::BuilderRenderer::EndHeightMod";
-pub const APPLY_TARGET: &str = "terrain::ViewTerrain::ApplyBlocks";
-/// The layout anchors, and the opcode each one's offset follows.
-pub const GAME_UI_FIELD: (&str, &[u8]) =
-    ("UI::CMenuUI::StartGame/CGameUI store", &[0x48, 0x89, 0x83]);
-pub const FACTORY_FIELD: (&str, &[u8]) = (
-    "UI::CGameUI::CreateUI/RendererFactory field",
-    &[0x49, 0x8D, 0x84, 0x24],
-);
-pub const MAIN_VIEW_FIELD: (&str, &[u8]) = (
-    "UI::CGameUI::CreateUI/mainView store",
-    &[0x49, 0x89, 0x8C, 0x24],
-);
-pub const MODEL_DATA_FIELD: (&str, &[u8]) = ("ProposalViewer/ModelData read", &[0x48, 0x8B, 0x89]);
-pub const UPLOAD_FIELD: (&str, &[u8]) =
-    ("BuilderRenderer::EndHeightMod/upload flag", &[0x80, 0xB9]);
+pub use crate::build_data::native::drawing::ADD_TARGET;
+pub use crate::build_data::native::drawing::APPLY_TARGET;
+pub use crate::build_data::native::drawing::CALL_TARGET;
+pub use crate::build_data::native::drawing::CLEAR_TARGET;
+pub use crate::build_data::native::drawing::CREATE_TARGET;
+pub use crate::build_data::native::drawing::DESTROY_TARGET;
+pub use crate::build_data::native::drawing::END_HEIGHTS_TARGET;
+pub use crate::build_data::native::drawing::EVALUATE_TARGET;
+pub use crate::build_data::native::drawing::FACTORY_FIELD;
+pub use crate::build_data::native::drawing::FILL_TARGET;
+pub use crate::build_data::native::drawing::GAME_UI_DTOR_TARGET;
+pub use crate::build_data::native::drawing::GAME_UI_FIELD;
+pub use crate::build_data::native::drawing::MAIN_VIEW_FIELD;
+pub use crate::build_data::native::drawing::MODEL_DATA_FIELD;
+pub use crate::build_data::native::drawing::REMOVE_TARGET;
+pub use crate::build_data::native::drawing::UPLOAD_FIELD;
 
 /// Most members drawn at once.
 pub const MAX_DRAWN: usize = 16;
@@ -144,8 +134,7 @@ impl Layout {
     }
 }
 
-/// Bytes of the upload anchor [`Upload::read`] reads.
-pub const UPLOAD_LEN: usize = 40;
+pub use crate::build_data::native::drawing::UPLOAD_LEN;
 
 /// Where `EndHeightMod` uploads a renderer's terrain heights, each offset
 /// from its own instruction (build 40408, 0x7bbb6a): `cmp byte
