@@ -208,7 +208,10 @@ Nothing there changes: the agent declares only the shared mods.
 - Without `--mods`, the launcher finds the player's mods itself and the
   player chooses their personal ones ("Choosing mods" below). With
   `--mods <file>`, one mod a line in load order with its version, that list
-  overrides it, as before; the picker is then off.
+  overrides it, as before; the picker is then off. A room that tells its
+  mods still has its worlds loaded with its list and settings in such a
+  game (the content check covers the mods, not their settings), with the
+  file's personal mods after them.
 - Each listed mod is found among the installed ones and scanned
   (`crates/tpf3mp-agent/src/content.rs`, `split`). A personal one stays out of
   the manifest; a carried one too, with `--personal-game-scripts`; a shared
@@ -231,13 +234,19 @@ its save's mods (or the room's plan of them, which keeps `tpf3mp_1` only
 when the save lists it), and without the mod's game script it held paused
 for good, without a word (2026-10-01). So:
 
-- the launcher refuses a start save whose mods read and do not list
-  `tpf3mp_1` (creating a room, and the owner's pick in the room), saying
+- a room's list always runs `tpf3mp_1`, and every game loads the room's
+  list (`mods::plan`), so a start save without it is taken when the room's
+  list is made of it: the owner's pick on the Load Game page, or, with
+  the picker, a save whose mods read and fit a room's list. Otherwise
+  (`--mods`, too many mods, or no picker) each game loads the save's own
+  mods, and the launcher refuses a start save whose mods read and do not
+  list `tpf3mp_1` (creating a room, and the owner's pick in the room), saying
   "This save doesn't have the TPF3-MP mod enabled: load it once, turn
   TPF3-MP on in its mods, save it, then pick it again"
   (`crates/tpf3mp-agent/src/save_check.rs`);
-- the agent does not load a world from the room that does not list it:
-  the session ends, and both windows say why;
+- the agent does not load a world from the room that does not list it,
+  when it loads the world with the save's own mods: the session ends, and
+  both windows say why;
 - the hook's log says when a world's plan leaves it out, which a save whose
   mods the agent could not read may still bring.
 
@@ -279,7 +288,7 @@ Without `--mods`, the launcher (`crates/tpf3mp-agent/src/picker.rs`):
 
 - **finds every installed mod** by itself when it starts: Mod Hub's cache
   (`mod.io\10640\mods` under `%PUBLIC%`, then `%LOCALAPPDATA%`), each Steam account's
-  `staging_area` and `mods`, the game's `mods` and `dlcs` (the first of each
+  `staging_area` and `mods`, the game's `mods`, `mods\release` and `dlcs` (the first of each
   id counts), scans each and keeps its class and first reason, its name
   (`_metadata/modinfo.json`) and its `revision`. Each goes to the launcher's
   log: `mod schbrongx_minimap 1 is personal: only what this player sees`;
@@ -290,15 +299,46 @@ Without `--mods`, the launcher (`crates/tpf3mp-agent/src/picker.rs`):
   (`"mods"`), and the room's worlds load with the chosen ones (the lists of
   `Begin`, read when the game begins; a choice made later loads with the
   next world);
-- **makes the owner's start save the room's shared mods.** When the player
+- **takes the room's mods as the owner picks them** (bridge version 25,
+  protocol 18). The owner picks the room's save on the game's own Load Game
+  page (LOBBY.md, "The room's save and mods"), and with it its mods and
+  their settings on the page's Mods and Gameplay Settings tabs, as the game
+  would load the save. The window sends them with the save
+  (`LobbyAction::ChooseRoomMods`: the mods in the game's load order, each
+  with its name and source as the owner's game knows it, and the settings
+  of the room's mods and the game's own, `GAME_SETTINGS`), and the
+  launcher (`Mods::choose_room`) makes them the room's: each in the
+  owner's installed version, TPF3-MP's own last, the owner's personal
+  mods left out. A mod the owner's game has from Mod Hub is named with its
+  Mod Hub number, read from the installed copy, whatever source the save
+  recorded (a save made while the mod was a local copy still says
+  `StagingArea`). The launcher declares them with the save's upload
+  (`DeclareRoom`), and the room tells every member (`RoomMods`). Changing
+  them marks every member not ready;
+- **makes the owner's start save the room's shared mods** when nothing was
+  picked on the Load Game page (a `--start-save`, or the first pick of a
+  room made from the Host page before its mods arrive). When the player
   creates a room from a start save, the launcher reads the save's mods
   (`tpf3mp_modscan::save`, below) and takes those that are not the player's
   personal mods (chosen or not) as the room's, each in the player's version
   (a mod the save lists and this player lacks is still the room's, with no
   version: fail closed). It declares them before the room exists. A save
   whose mods do not read leaves the room's mods unknown, and says so:
-  worlds then load with their saves' own mods, as without the picker;
-- **learns them as a guest.** Joining a room, the launcher declares no mods
+  worlds then load with their saves' own mods, as without the picker.
+  A save with more mods than a room's list holds (256) is still compared
+  whole, but not told as the room's list: every game loads the save's
+  own mods;
+- **adopts them as a guest.** The room tells its mods (`RoomMods`) on
+  joining and whenever they change, and the launcher (`Mods::adopt`)
+  declares at once those this player has, in their own versions; one
+  missing or in another version shows on the lobby's Room's mods tab and
+  on the player's card, and holds the start. A guest installs a missing
+  Mod Hub mod from that tab (LOBBY.md, "Installing from Mod Hub"), and the
+  launcher finds the installed mods again (`LobbyAction::RescanMods`).
+  Mods are compared by version, and a Mod Hub download's version names the
+  file installed, so two downloads of different Mod Hub files differ;
+- **learns them as a guest** from a room that tells none (its owner declared only their
+  content, `DeclareContent`). Joining a room, the launcher declares no mods
   but TPF3-MP's own ("TPF3-MP's own mod" above);
   the room answers with what this game lacks (`ContentDiff`: the owner's
   mods in load order, the first 32 named, with the owner's versions), and
@@ -350,10 +390,16 @@ with `mods : {Mod.ModId}`) (SEEN).
 So nothing is stripped from a save. Every game loads the room's world with
 its own list instead (`tpf3mp_bridge::mods::plan`):
 
-1. the save's mods that are shared (the room's list, the same for everyone),
-   or this player's personal ones, or TPF3-MP itself, in the save's order;
-2. then this player's personal mods the save lacks;
+1. the room's mods, in the room's order, TPF3-MP's own among them, whatever
+   the save lists: a mod the owner added on the Load Game page is added in
+   every game alike, one they left out is left out;
+2. then this player's personal mods;
 3. the save's other mods, another player's personal ones, are left out.
+
+The settings follow the same way (`tpf3mp_bridge::mods::settings`): the
+save's, with each of the room's mods that has settings in the room's list,
+and the game's own (`""`) when the room carries them, taking exactly the
+room's.
 
 Each is checked with the user profile's `ModRep:exists`; a shared mod not
 installed fails the load and holds the world, saying which. The lists reach

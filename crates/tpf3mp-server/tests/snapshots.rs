@@ -613,3 +613,39 @@ async fn a_public_rooms_listing_follows_its_start_save() {
     );
     server.shut_down().await;
 }
+
+/// A newcomer to a running game hears the game's mods before its refusal,
+/// so the launcher declares those it has and joins on its second try,
+/// however many mods the room runs (the 32 named by a difference were all
+/// it could learn before).
+#[tokio::test]
+async fn a_newcomer_hears_the_games_mods_before_its_refusal() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = RunningServer::start(saving(dir.path())).await;
+    let mut ann = server.client("ann").await;
+    let invite = seat(&mut [&mut ann], FAST).await;
+    let lines: Vec<String> = (0..40).map(|n| format!("mod{n:02} 1")).collect();
+    let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let declared = common::room_of(&lines);
+    ann.client.declare_room(declared.clone()).await.unwrap();
+    // The room's mods changed: ready again.
+    ann.client.set_ready(true).await.unwrap();
+    ann.client.start_game().await.unwrap();
+    let mut player = Player::new(ann);
+    player.play_until(|p| p.executed >= 1).await;
+
+    let mut cat = server.client("cat").await;
+    cat.client.declare_content(content(1)).await.unwrap();
+    assert_eq!(
+        cat.client.join_room(join(&invite)).await.unwrap_err(),
+        ClientError::Refused(RequestError::ContentMismatch)
+    );
+    let told = cat.room_mods().await.expect("the game's mods");
+    assert_eq!(*told, declared.room_mods());
+    assert_eq!(told.mods.len(), 41, "all of them, TPF3-MP's own too");
+    cat.client.declare_content(told.manifest()).await.unwrap();
+    let room = cat.client.join_room(join(&invite)).await.unwrap();
+    assert_eq!(room.members.len(), 2, "a seat at the running game");
+    drop(player);
+    server.shut_down().await;
+}

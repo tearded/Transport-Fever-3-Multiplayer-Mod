@@ -314,6 +314,13 @@ async fn two_players_play_a_room_from_their_launchers() {
         })
         .await;
     cat_page.act(json!({ "action": "leave" })).await;
+    // Out of the room, Cat's page no longer says how Cat's game differs
+    // from it.
+    cat_page
+        .wait_for("Cat's page forgetting the room's differences", |state| {
+            state["content_diff"].is_null()
+        })
+        .await;
     ann_page
         .wait_for("Cat gone", |state| {
             state["room"]["members"]
@@ -936,6 +943,7 @@ async fn a_guest_with_its_own_mods_learns_the_rooms_and_the_room_starts() {
         class,
         reason: String::new(),
         path: root.path().join(id),
+        hub: None,
     };
     gus.picker = Some(Mods::new(
         toy_content().game,

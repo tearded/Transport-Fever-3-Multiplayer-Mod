@@ -296,6 +296,9 @@ pub enum ClientEvent {
     ContentDiff(Option<ContentDiff>),
     /// The server's operator says something to everyone connected.
     Notice(ChatText),
+    /// The room's mods, as its owner declared them, or `None` while it has
+    /// none (protocol 18's `ServerMessage::RoomMods`).
+    RoomMods(Option<Box<tpf3mp_proto::RoomMods>>),
     /// What another member's build tool shows now, or `None` once it shows
     /// nothing. Dropped rather than queued when events are not taken fast
     /// enough: another comes within seconds.
@@ -713,6 +716,21 @@ impl Client {
         self.done(Request::DeclareContent(content)).await
     }
 
+    /// Declares what this player's game runs, or as the room's owner, that
+    /// and the room's mods ([`picker::Declaration`]).
+    pub async fn declare(&self, declaration: picker::Declaration) -> Result<(), ClientError> {
+        self.done(declaration.request()).await
+    }
+
+    /// The room's owner declares what their game runs and the room's mods,
+    /// together: for this connection, and to the room it owns.
+    pub async fn declare_room(
+        &self,
+        declaration: tpf3mp_proto::RoomDeclaration,
+    ) -> Result<(), ClientError> {
+        self.done(Request::DeclareRoom(Box::new(declaration))).await
+    }
+
     pub async fn start_game(&self) -> Result<(), ClientError> {
         self.done(Request::StartGame).await
     }
@@ -934,6 +952,7 @@ async fn read_control(
             ServerMessage::Chat { from, text } => ClientEvent::Chat { from, text },
             ServerMessage::ContentDiff(diff) => ClientEvent::ContentDiff(diff),
             ServerMessage::Notice(text) => ClientEvent::Notice(text),
+            ServerMessage::RoomMods(room) => ClientEvent::RoomMods(room),
             ServerMessage::Preview { from, preview } => {
                 // Advisory: never a reason to stop reading the control
                 // stream, which carries the responses.

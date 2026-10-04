@@ -54,6 +54,8 @@ pub(crate) struct View {
     pub(crate) mods: Vec<ModRow>,
     /// The room's shared mods, and whether this player has each.
     pub(crate) room_mods: Vec<RoomModRow>,
+    /// The settings of the room's mods, as its owner picked them.
+    pub(crate) room_params: Vec<ParamRow>,
     /// The page of public rooms last asked for, while connected.
     pub(crate) rooms: Option<RoomList>,
 }
@@ -145,6 +147,53 @@ pub enum Action {
         #[serde(default)]
         year: u16,
     },
+    /// The room's owner, in its lobby: the room's mods are these, as the
+    /// game's mod selector has them, in its activation order, with the
+    /// settings it holds (docs/MODS.md, "The room's mods"). Their personal
+    /// mods among them are the ones they play with; TPF3-MP's own is the
+    /// room's last whatever the selection says. Every player is asked to get
+    /// ready again.
+    ///
+    /// With `save`, the room starts from that save too, as `ChooseStart`
+    /// says, in the same declaration: the owner picks both on the game's
+    /// Load Game page.
+    ChooseRoomMods {
+        #[serde(default)]
+        save: String,
+        #[serde(default)]
+        map: String,
+        #[serde(default)]
+        year: u16,
+        mods: Vec<SelectedMod>,
+        #[serde(default)]
+        params: Vec<ModSetting>,
+    },
+    /// Finds the installed mods again, as after installing one from Mod
+    /// Hub, and declares anew what changed.
+    RescanMods,
+}
+
+/// One mod the owner picked in the game's mod selector.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct SelectedMod {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    /// Where the game has it from: `mod.io`, `StagingArea`, ...
+    #[serde(default)]
+    pub source: String,
+    /// Its Mod Hub number, for a mod from Mod Hub.
+    #[serde(default)]
+    pub modio: Option<u64>,
+}
+
+/// One setting of one of the room's mods, as the selector holds it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ModSetting {
+    #[serde(rename = "mod")]
+    pub id: String,
+    pub key: String,
+    pub value: i64,
 }
 
 /// What a public room's list entry says of its world, as the creating
@@ -279,6 +328,9 @@ pub struct State {
     /// The room's shared mods, from its owner's start save, and whether this
     /// player has each; empty while not known.
     pub room_mods: Vec<RoomModRow>,
+    /// The settings of the room's mods, as its owner picked them: what the
+    /// owner's mod selector starts from again.
+    pub room_params: Vec<ParamRow>,
     /// In a room's lobby: the save its game starts from, as the room names
     /// it to everyone; `None` when the owner's game provides the world.
     pub start: Option<RoomStart>,
@@ -327,12 +379,32 @@ pub enum ModClass {
     Shared,
 }
 
-/// One of the room's shared mods, and whether this player has it.
+/// One of the room's mods, and whether this player has it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RoomModRow {
     pub id: String,
+    /// Its name for players, as the room's owner's game has it.
+    pub name: String,
+    /// The room's version (empty when the owner lacks it).
     pub version: String,
+    /// This player's version, if installed.
+    pub yours: Option<String>,
     pub have: ModHave,
+    /// Where the owner's game has it from: `mod.io`, `StagingArea`,
+    /// `UserMods`, `DLC`, `BuiltInMods`; empty unknown.
+    pub source: String,
+    /// Its Mod Hub number, for a mod from Mod Hub: what the lobby offers
+    /// to install, once the player's own game confirms it.
+    pub modio: Option<u64>,
+}
+
+/// One setting of one of the room's mods.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ParamRow {
+    #[serde(rename = "mod")]
+    pub id: String,
+    pub key: String,
+    pub value: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -371,7 +443,11 @@ pub(crate) fn mod_rows(mods: &crate::picker::Mods) -> (Vec<ModRow>, Vec<RoomModR
         .into_iter()
         .map(|r| RoomModRow {
             id: r.id,
+            name: r.info.name.as_str().to_owned(),
             version: r.version,
+            yours: r.yours,
+            source: r.info.source.as_str().to_owned(),
+            modio: r.info.modio,
             have: match r.have {
                 crate::picker::Have::Yes => ModHave::Yes,
                 crate::picker::Have::No => ModHave::No,
@@ -492,6 +568,8 @@ pub struct Member {
     pub you: bool,
     /// Whether this member's game matches the owner's.
     pub content: MemberContent,
+    /// How this member's game differs from the room's, while it does.
+    pub differs: Option<tpf3mp_proto::ContentStatus>,
     /// The banner the member picked, if any (`tpf3mp_proto::BANNERS`).
     pub banner: Option<String>,
     /// Where the member's game is with the room's world while it comes in.
@@ -584,6 +662,7 @@ pub(crate) fn snapshot(view: &View, status: &Status) -> State {
                     connected: member.connected,
                     owner: member.player == room.owner,
                     you: Some(member.player) == you,
+                    differs: member.differs,
                     content: match (owners, member.content) {
                         (Some(owners), Some(theirs)) if owners == theirs => MemberContent::Same,
                         (Some(_), Some(_)) => MemberContent::Differs,
@@ -679,6 +758,7 @@ pub(crate) fn snapshot(view: &View, status: &Status) -> State {
         start_save: view.start_save.clone(),
         mods: view.mods.clone(),
         room_mods: view.room_mods.clone(),
+        room_params: view.room_params.clone(),
         rooms: view.rooms.clone().filter(|_| view.connected),
         start: status
             .room

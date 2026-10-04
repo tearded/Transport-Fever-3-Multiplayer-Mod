@@ -120,7 +120,7 @@ pub fn install_api(api: MenuApi) -> bool {
 ///
 /// `busy()` is a compatibility placeholder returning nil; it queries no API.
 pub const CHUNK: &str = r#"
-local here, gone, plan = ...
+local here, gone, plan, params = ...
 local number
 local sentinel = setmetatable({}, { __gc = function() if number then gone(number) end end })
 -- A save whose details are being read, for the mods it lists.
@@ -151,6 +151,20 @@ local function withMods(theApp, data)
 	end
 	local info = api.type.SaveGameDetails.new(data.info)
 	info.mods = mods
+	-- The room's settings of its mods and of the game (under ""): each such
+	-- entry is the room's; other mods' stay the save's.
+	local text = params and params()
+	if type(text) == "string" and text ~= "" then
+		local room = {}
+		for mod, key, value in string.gmatch(text, "([^\t\n]*)\t([^\t\n]+)\t(%-?%d+)") do
+			room[mod] = room[mod] or {}
+			room[mod][key] = math.floor(tonumber(value))
+		end
+		local all = {}
+		for mod, of in pairs(info.modParams or {}) do all[mod] = of end
+		for mod, of in pairs(room) do all[mod] = of end
+		info.modParams = all
+	end
 	return info
 end
 local function load(name)
@@ -491,7 +505,8 @@ unsafe fn run_chunk(l: State) -> Result<bool, String> {
         (api.pushcclosure)(l, native_here as CFunction, 0);
         (api.pushcclosure)(l, native_gone as CFunction, 0);
         (api.pushcclosure)(l, lua::native_mods as CFunction, 0);
-        let status = (menu.pcallk)(l, 3, 0, 0, 0, std::ptr::null());
+        (api.pushcclosure)(l, lua::native_mod_params as CFunction, 0);
+        let status = (menu.pcallk)(l, 4, 0, 0, 0, std::ptr::null());
         if status != 0 {
             let why = string_at_top(api, l).unwrap_or_default();
             (api.settop)(l, top);
@@ -1196,6 +1211,7 @@ pub(crate) mod tests {
         lua::set_mods(Some(tpf3mp_bridge::ModLists {
             shared: to(&["vehicles_pack"]),
             personal: to(&["my_colours"]),
+            params: Vec::new(),
         }));
         let menu = Lua::new();
         menu.run(FAKE_MENU).unwrap();

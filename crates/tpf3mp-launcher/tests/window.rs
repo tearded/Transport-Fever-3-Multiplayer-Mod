@@ -96,6 +96,7 @@ fn member(name: &str, owner: bool, you: bool, ready: bool) -> Member {
         owner,
         you,
         content: MemberContent::Same,
+        differs: None,
         banner: None,
         loading: None,
     }
@@ -292,6 +293,7 @@ fn a_player_whose_mods_differ_sees_what_to_change() {
             member("Ann", true, false, false),
             Member {
                 content: MemberContent::Differs,
+                differs: None,
                 ..member("Bob", false, true, false)
             },
         ],

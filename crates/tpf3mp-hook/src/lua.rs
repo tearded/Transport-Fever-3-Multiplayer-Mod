@@ -808,6 +808,7 @@ pub unsafe fn register(api: &LuaApi, l: State) {
                 (b"dump", native_dump),
                 (b"dumped", native_dumped),
                 (b"mods", native_mods),
+                (b"modparams", native_mod_params),
                 (b"personal", native_personal),
                 (b"shared", native_shared),
                 (b"note", native_note),
@@ -1607,25 +1608,61 @@ pub fn plan_mods(save: &str) -> Option<Plan> {
         named(&plan.dropped),
         named(&plan.added)
     ));
-    if !plan
-        .mods
-        .iter()
-        .any(|name| name == tpf3mp_bridge::mods::OWN_MOD)
-    {
-        // Seen live: such a world loads, and then holds paused for good.
-        // The agent refuses such a save and such a world before they get
-        // here; one whose mods it could not read still may.
+    if !save.iter().any(|name| name == tpf3mp_bridge::mods::OWN_MOD) {
+        // Seen live: a world without the mod loads, and then holds paused
+        // for good. The room's list adds it; the agent refuses such a save
+        // before it gets here, and one whose mods it could not read still
+        // may come.
         log(without_own_mod());
     }
     Some(plan)
 }
 
-/// What the hook's log says of a world that loads without TPF3-MP's mod.
+/// What the hook's log says of a world whose save lacks TPF3-MP's mod.
 fn without_own_mod() -> String {
     format!(
-        "the room's world loads without TPF3-MP's mod ({}): the save does not have it enabled, so the mod's game script will not run and the world will hold paused; load the save once, turn TPF3-MP on in its mods, save it, and start a room from it again",
+        "the room's save does not have TPF3-MP's mod ({}) enabled: it loads with it added; should the world hold paused, load the save once, turn TPF3-MP on in its mods, save it, and start a room from it again",
         tpf3mp_bridge::mods::OWN_MOD
     )
+}
+
+/// The settings of the room's mods the room's owner picked, one a line:
+/// the mod, a tab, the setting, a tab, its value; `None` without the room's
+/// lists or with no settings (the save's then stay).
+pub fn mod_params_text() -> Option<String> {
+    let shared = shared();
+    let lists = shared.mods.as_ref()?;
+    if lists.params.is_empty() {
+        return None;
+    }
+    let mut text = String::new();
+    for of in &lists.params {
+        for param in &of.params {
+            text.push_str(&format!(
+                "{}\t{}\t{}\n",
+                of.id.as_str(),
+                param.key.as_str(),
+                param.value
+            ));
+        }
+    }
+    Some(text)
+}
+
+/// `modparams()`: [`mod_params_text`], or nil. The main menu's load gets
+/// it too (`crate::menu`).
+pub(crate) unsafe extern "C-unwind" fn native_mod_params(l: State) -> c_int {
+    let Some(api) = API.get() else {
+        return 0;
+    };
+    // SAFETY: a C function's call has room for its result.
+    unsafe {
+        match mod_params_text() {
+            Some(text) => push_str(api, l, text.as_bytes()),
+            None => (api.pushnil)(l),
+        }
+    }
+    1
 }
 
 /// `personal()`: this player's personal mods, one name a line, or nil
@@ -3005,13 +3042,15 @@ pub(crate) mod tests {
             ])
             .unwrap(),
             personal: tpf3mp_proto::BoundedVec::default(),
+            params: Vec::new(),
         }));
         let _ = take_log();
-        plan_mods("urbangames_deluxe_upgrade_pack\nurbangames_preorder_pack").unwrap();
+        let plan = plan_mods("urbangames_deluxe_upgrade_pack\nurbangames_preorder_pack").unwrap();
+        assert!(plan.mods.iter().any(|name| name == "tpf3mp_1"), "added");
         let said = take_log();
         assert!(
             said.iter().any(
-                |line| line.contains("loads without TPF3-MP's mod (tpf3mp_1)")
+                |line| line.contains("does not have TPF3-MP's mod (tpf3mp_1) enabled")
                     && line.contains("turn TPF3-MP on in its mods")
             ),
             "{said:?}"
@@ -3020,7 +3059,7 @@ pub(crate) mod tests {
         assert!(
             !take_log()
                 .iter()
-                .any(|line| line.contains("without TPF3-MP's mod")),
+                .any(|line| line.contains("does not have TPF3-MP's mod")),
             "not for a world that has it"
         );
         set_mods(None);
@@ -3036,6 +3075,7 @@ pub(crate) mod tests {
         set_mods(Some(ModLists {
             shared: tpf3mp_proto::BoundedVec::new(vec![name("vehicles_pack")]).unwrap(),
             personal: tpf3mp_proto::BoundedVec::new(vec![name("my_timetables")]).unwrap(),
+            params: Vec::new(),
         }));
         let save = "vehicles_pack
 tpf3mp_1

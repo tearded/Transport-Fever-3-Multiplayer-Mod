@@ -389,7 +389,7 @@ fn play_through_hook(
         options,
         invite: *invite,
         password: None,
-        content: Some(toy_content()),
+        content: Some(tpf3mp_agent::picker::Declaration::Content(toy_content())),
         give_up_after: plan.deadline,
     };
     let worlds = match &plan.worlds {

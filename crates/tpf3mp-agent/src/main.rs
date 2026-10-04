@@ -258,7 +258,7 @@ async fn run(command: Command) -> Result<()> {
                 options,
                 invite,
                 password,
-                content: Some(content),
+                content: Some(tpf3mp_agent::picker::Declaration::Content(content)),
                 give_up_after: REJOIN_PATIENCE,
             };
             play(client, events, &game, rejoin).await?;
@@ -301,7 +301,7 @@ async fn run(command: Command) -> Result<()> {
                 options,
                 invite,
                 password,
-                content: Some(content),
+                content: Some(tpf3mp_agent::picker::Declaration::Content(content)),
                 give_up_after: REJOIN_PATIENCE,
             };
             play(client, events, &game, rejoin).await?;

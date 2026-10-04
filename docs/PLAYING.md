@@ -242,59 +242,71 @@ window too.
      Click one to join it; one with a password asks for it first.
      **Previous**, **Next** and **Refresh** page through the list, which
      also refreshes itself every ten seconds. **Join with code**, at
-     the top, opens a small popup for a friend's room: the **invite code**
-     they sent you, such as `K7QM2X` (upper or lower case), the room's
-     password if it has one, and **Join** or **Cancel**. A private room is
-     joined by invite, either here or through **Join a friend** on the main menu.
-   - **Host a room**: a **room name** (your name's room if you leave it
-     empty); **Start from this save**, up to 100 saves, newest named saves
-     first, followed by automatic saves (only internal room copies are
-     excluded), or
-     **Create a new world...** (offered first). The save must have TPF3-MP
-     among its mods: a save without it is refused with "This save doesn't
-     have the TPF3-MP mod enabled: load it once, turn TPF3-MP on in its
-     mods, save it, then pick it again", since the room's game cannot run
-     in a world without it. Should such a world reach a game anyway, the
-     launcher does not load it, and both windows say why; **Players**, 2
-     to 16; **How you
-     play**, two pictures: **Co-op**, everyone for the room's one company,
-     or **Competitive**, each player founding a company of their own in
-     the game; **Who can find
-     it**: **Private**, invite only (the default), or **Public**, in the
-     room list, with your save's climate and year; the **Rules**, when the
-     server offers more than one (`native` is the game's own rules and
+     the bottom right, opens a page for a friend's room: the **invite
+     code** they sent you, such as `K7QM2X` (upper or lower case), the
+     room's password if it has one, and the server and name you join
+     with; **Join** or **Cancel**. A private room is joined by invite,
+     either here or through **Join a friend** on the main menu.
+   - **Host a room**: the **world** the room starts from, a big card:
+     click it to pick a save on the game's own **Load Game** page, which
+     then reads "The room's save and mods" and has **Use for the room**
+     instead of Load Game. Pick a save, check or change its mods on its
+     **Mods** tab and its settings on **Gameplay Settings**, as you would
+     to load it, and press **Use for the room**: the room starts from that
+     save, with exactly those mods and settings in every player's game.
+     The first tile, **New world**, starts the room from a world you
+     create: the game opens its normal setup screens for climate, map and
+     settings once the room is made. TPF3-MP is always among the room's
+     mods, so a save from single player without it works too: every game
+     adds it when it loads the room's world. (A launcher started with
+     `--mods` loads saves with their own mods; there a save without
+     TPF3-MP is refused with "This save doesn't have the TPF3-MP mod
+     enabled: load it once, turn TPF3-MP on in its mods, save it, then
+     pick it again", since the room's game cannot run in a world without
+     it.) **How you play**, two pictures: **Co-op**, everyone for
+     the room's one company, or **Competitive**, each player founding a
+     company of their own in the game. Then the **room name** (your
+     name's room if you leave it empty), **Players**, 2 to 16, **Who can
+     find it**: **Private**, invite only (the default), or **Public**, in
+     the room list, with your save's climate and year; the **Rules**, when
+     the server offers more than one (`native` is the game's own rules and
      economy, as in single player; a description says what the others
      are); and an optional **password**. Then **Create room**. You own the
-     room: you start its game and can remove players. When creating a new
-     world, the game opens its normal setup screens for climate, map and
-     settings. Completing those screens generates the room's world. Once
-     it has loaded and everyone is ready, multiplayer starts automatically.
-   - **Your mods**, at the bottom of both pages and of the room's: the
-     mods you have installed. Turn on or off those only you play with
-     (only you see them); those every player needs are marked so and stay
-     as the room has them. In a room, it also lists the room's own mods,
-     from its start save, and whether you have each. You can change your
-     choice until the room's game starts.
-5. **The room.** On the left, the room's name (a lock if it has a
-   password), its **invite code** to send your friends (**Copy** beside it
-   puts it on the clipboard), and its players
-   as picture cards of their banners (and their portrait beside it, if
-   they picked a character), each marked **Owner**, **You**, **Ready** or **Not ready**, **Away**,
-   and **Other mods** when their game differs from the owner's. On the
-   right, above the room's chat (type and press Enter or **Send**), the
-   save the room starts from:
-   - everyone sees it under **Starts from**: its name, and its climate
-     and year when the room knows them, "on its way to the room" until the
-     room has it, or "The world the owner's game has" without one;
-   - the owner picks it there under **Start from this save**, from the
-     same list as the Host page, until the game starts. A new pick goes up
-     to the room ("Sending mptest to the room: 42%", with a bar) and the
-     room's shared mods follow it; **Start the game** waits until the room
-     has it. Everyone is then asked to get ready again, since they agreed
-     to the save before: each guest is told the owner changed it, and
-     presses **Ready**. Picking the save first, when the room had none,
-     asks nobody again. A public room's card in the room list shows the
-     new save's climate and year.
+     room: you start its game and can remove players. With a new world,
+     once it has loaded and everyone is ready, multiplayer starts
+     automatically.
+   - **Your mods**, at the bottom of both pages: the mods only you play
+     with (only you see them), to turn on or off with the game's own
+     **Activate** button. Mods every player needs are the room's, picked
+     by its owner with the save.
+5. **The room.** Three tabs:
+   - **Room**: the world the room starts from, as a big card (its
+     picture, name, climate and year; the owner clicks it to pick another
+     save and its mods on the Load Game page, until the game starts);
+     the players as picture cards of their banners (and their portrait
+     beside it, if they picked a character), each marked **Owner**,
+     **You**, **Ready** or **Not ready**, **Away**, and how many of the
+     room's mods they lack; the room's **invite code** to send your
+     friends (**Copy** beside it puts it on the clipboard), its players,
+     play style, password, server and mods; and the room's chat (type and
+     press Enter or **Send**). A new save goes up to the room ("Sending
+     mptest to the room: 42%", with a bar), and **Start the game** waits
+     until the room has it. Everyone is then asked to get ready again,
+     since they agreed to the save and its mods before. Picking the save
+     first, when the room had none, asks nobody again.
+   - **The room's mods**: every mod the room's world runs, as tiles like
+     the game's mod selector's, each marked **Installed**, **Missing** or
+     **Another version**, and where it comes from. A missing mod from
+     Mod Hub has **Install**: it opens the mod's Mod Hub page in the game,
+     where you see what it is and **Subscribe**; Mod Hub downloads it with
+     your own account, and the tile follows it until it is installed.
+     **Install all missing** asks once for all of them, showing what each
+     is on Mod Hub, before subscribing. A mod not on Mod Hub says to ask
+     the owner where to get it. Not signed in to Mod Hub, the tab offers
+     the game's Mod Hub page to sign in. **Start the game** stays off,
+     naming who, while anyone's mods differ from the room's.
+   - **Only for you**: your own mods, as **Your mods** above. You can
+     change them until the room's game starts.
 6. **Get ready.** At the main menu you are marked ready by yourself: a
    guest at once, the owner once the room has the save picked in step 4
    or 5. **Ready** and **Not ready** set it by hand. When the owner
@@ -319,8 +331,10 @@ What the window says:
   until the launcher answers, then what happened. Anything refused, such
   as a wrong invite, a full room or a name that is too long, shows in red
   there, and the button can be pressed again.
-- "Your game differs from the room's" names the mods to add, remove or
-  update.
+- In a room, **The room's mods** tab shows which of the room's mods you
+  lack or have in another version, and installs those from Mod Hub;
+  outside one (a join refused because your game differs), "Your game
+  differs from the room's" names the mods to add, remove or update.
 - "This game has no link to the TPF3-MP launcher": the game was not
   started from the launcher. Close it and start it from there.
 - **Remove** (the bin, for the owner) and **Leave room** ask first.
@@ -678,7 +692,8 @@ before sharing it publicly if you want to be sure.
   the mods you have in another version. Everyone needs the owner's build
   and shared mods in the same order; personal mods are not compared. In the room, a **differ** pill next to a
   player shows whose game differs from the owner's; each player sees their
-  own list.
+  own list. In the game's Multiplayer page the room's mods tab shows the
+  same, mod by mod, and installs what you lack from Mod Hub.
 - **"too many players are connected from this network"**: the server
   limits connections per network. Close another game, or ask the operator.
 - **"that invite is for another server"**: an invite never takes you to

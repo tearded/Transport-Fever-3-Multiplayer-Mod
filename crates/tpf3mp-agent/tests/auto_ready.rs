@@ -500,7 +500,7 @@ async fn the_owner_naming_another_save_hands_it_over_and_readies_once_the_room_h
         .controls
         .send(Control::StartWorld {
             start: Some((second.clone(), named.clone())),
-            declare: Some(declared.clone()),
+            declare: Some(tpf3mp_agent::picker::Declaration::Content(declared.clone())),
         })
         .await
         .unwrap();
@@ -600,10 +600,7 @@ async fn the_owner_naming_the_same_save_again_only_describes_it() {
         .controls
         .send(Control::StartWorld {
             start: Some((save.clone(), described.clone())),
-            declare: Some(ContentManifest::new(
-                Text::new("40408").unwrap(),
-                Vec::new(),
-            )),
+            declare: None,
         })
         .await
         .unwrap();
@@ -611,9 +608,28 @@ async fn the_owner_naming_the_same_save_again_only_describes_it() {
         session.next().await,
         Request::StartWorld {
             world,
-            save: described
+            save: described.clone()
         },
         "the same save, unchanged: named again without reading it again"
+    );
+    // The same save picked again with other mods or settings: the room
+    // takes them first, then what it shows of the save.
+    let picked = ContentManifest::new(Text::new("40408").unwrap(), Vec::new());
+    session
+        .controls
+        .send(Control::StartWorld {
+            start: Some((save.clone(), described.clone())),
+            declare: Some(tpf3mp_agent::picker::Declaration::Content(picked.clone())),
+        })
+        .await
+        .unwrap();
+    assert_eq!(session.next().await, Request::DeclareContent(picked));
+    assert_eq!(
+        session.next().await,
+        Request::StartWorld {
+            world,
+            save: described
+        }
     );
     let _ = std::fs::remove_dir_all(save.parent().unwrap());
 }

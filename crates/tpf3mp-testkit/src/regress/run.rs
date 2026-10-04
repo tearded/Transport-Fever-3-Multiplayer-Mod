@@ -235,7 +235,7 @@ fn play(
         options,
         invite,
         password: None,
-        content: Some(toy_content()),
+        content: Some(tpf3mp_agent::picker::Declaration::Content(toy_content())),
         give_up_after: plan.deadline,
     };
     let name = link_name("regress");

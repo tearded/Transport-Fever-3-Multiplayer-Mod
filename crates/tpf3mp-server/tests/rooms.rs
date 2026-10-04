@@ -6,7 +6,7 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{FAST, RunningServer, content, join, modded, room};
+use common::{FAST, RunningServer, content, join, modded, room, room_of};
 use tpf3mp_agent::{ClientError, ClientEvent};
 use tpf3mp_proto::{
     Code, CreateRoom, Invite, JoinRoom, RequestError, RoomPhase, RoomSettings, Text,
@@ -555,5 +555,126 @@ async fn chat_reaches_everyone_in_the_room_at_a_measured_pace() {
         }
     }
     assert!(refused >= 2, "{refused} of 8 refused");
+    server.shut_down().await;
+}
+
+/// A member who comes back on a new connection in the lobby (a launcher
+/// restarted) hears the room's mods again: the new connection was told
+/// nothing yet.
+#[tokio::test]
+async fn a_member_back_on_a_new_connection_hears_the_rooms_mods_again() {
+    let server = RunningServer::start(|_| {}).await;
+    let ann = server.client("ann").await;
+    let mut bob = server.client("bob").await;
+    let mods = room_of(&["trains 1.2"]);
+    ann.client.declare_room(mods.clone()).await.unwrap();
+    let (invite, _) = ann.client.create_room(room("table", FAST)).await.unwrap();
+    bob.client.join_room(join(&invite)).await.unwrap();
+    assert_eq!(
+        bob.room_mods().await.map(|room| *room),
+        Some(mods.room_mods())
+    );
+    let identity = Arc::clone(&bob.identity);
+    drop(bob);
+    let mut again = server.client_as(identity, "bob").await;
+    again.client.join_room(join(&invite)).await.unwrap();
+    assert_eq!(
+        again.room_mods().await.map(|room| *room),
+        Some(mods.room_mods()),
+        "told again on the new connection"
+    );
+    server.shut_down().await;
+}
+
+/// The owner declares the room's mods with what players are told of them:
+/// every member hears the list on joining and whenever it changes, sees
+/// how each member's game differs, and is asked to get ready again when it
+/// changes. Nobody else may declare one, nor a list that does not hold
+/// together.
+#[tokio::test]
+async fn every_member_hears_the_rooms_mods_from_its_owner() {
+    let server = RunningServer::start(|_| {}).await;
+    let mut ann = server.client("ann").await;
+    let mut bob = server.client("bob").await;
+    let first = room_of(&["trains 1.2", "stations 3"]);
+    ann.client.declare_room(first.clone()).await.unwrap();
+    let (invite, _) = ann.client.create_room(room("table", FAST)).await.unwrap();
+    assert_eq!(
+        ann.room_mods().await.map(|room| *room),
+        Some(first.room_mods()),
+        "the owner hears the list too"
+    );
+    bob.client
+        .declare_content(modded(&["trains 1.2", "tpf3mp_1 1+0123456789abcdef"]))
+        .await
+        .unwrap();
+    bob.client.join_room(join(&invite)).await.unwrap();
+    let told = bob.room_mods().await.unwrap();
+    let ids: Vec<&str> = told.mods.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, ["trains", "stations", "tpf3mp_1"]);
+    // Ann sees what Bob's game lacks, in counts.
+    let view = ann
+        .room_where(|room| room.members.len() == 2 && room.members[1].differs.is_some())
+        .await;
+    let differs = view.members[1].differs.unwrap();
+    assert_eq!(
+        (
+            differs.missing,
+            differs.changed,
+            differs.extra,
+            differs.game
+        ),
+        (1, 0, 0, false),
+        "Bob lacks the stations"
+    );
+    assert_eq!(view.members[0].differs, None, "the owner's is the room's");
+
+    // Bob declares a list of his own: not his to declare.
+    assert_eq!(
+        bob.client.declare_room(room_of(&["trains 1.2"])).await,
+        Err(ClientError::Refused(RequestError::NotOwner))
+    );
+    // A list without TPF3-MP's own last does not hold together.
+    let mut broken = room_of(&["trains 1.2"]);
+    broken.manifest.mods.reverse();
+    assert_eq!(
+        ann.client.declare_room(broken).await,
+        Err(ClientError::Refused(RequestError::InvalidContent))
+    );
+
+    // Bob gets ready; Ann changes the room's mods: Bob hears the new list
+    // and is not ready any more.
+    bob.client.set_ready(true).await.unwrap();
+    bob.room_where(|room| {
+        room.members
+            .iter()
+            .all(|m| m.ready || m.player == room.owner)
+    })
+    .await;
+    let second = room_of(&["trains 1.2"]);
+    ann.client.declare_room(second.clone()).await.unwrap();
+    // The room's mods come first, then the view that asks Bob to get
+    // ready again: on one ordered stream, Bob has what he agrees to before
+    // he can.
+    assert_eq!(
+        bob.room_mods().await.map(|room| *room),
+        Some(second.room_mods())
+    );
+    let view = bob
+        .room_where(|room| room.members.iter().all(|m| !m.ready))
+        .await;
+    assert_eq!(view.members.len(), 2);
+    // Now Bob's game matches: no difference to show.
+    let view = ann
+        .room_where(|room| room.members.iter().all(|m| m.differs.is_none()))
+        .await;
+    assert_eq!(view.members[0].content, view.members[1].content);
+
+    // An owner's plain declaration leaves the room without a list.
+    ann.client
+        .declare_content(second.manifest.clone())
+        .await
+        .unwrap();
+    assert_eq!(bob.room_mods().await, None);
     server.shut_down().await;
 }

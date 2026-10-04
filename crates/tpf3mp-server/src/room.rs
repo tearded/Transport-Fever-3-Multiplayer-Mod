@@ -20,9 +20,10 @@ use tpf3mp_net::{bulk, close};
 use tpf3mp_proto::{
     BannerId, ChatText, ContentFingerprint, ContentManifest, Event, EventBody, FRAME_HEADER_LEN,
     FixedBytes, IntentRejection, Invite, LaneDigest, LoadingStage, MemberView, Payload, Platform,
-    PlayerId, RequestError, Resume, RoomId, RoomListing, RoomPhase, RoomSettings, RoomView,
-    RulesName, SavedWorld, Seal, Secret, ServerMessage, SnapshotId, Speed, StartSave, StartView,
-    TURN_MAX_FRAME, Text, Turn, TurnMessage, TurnStart, WorldOffer, decode_frame, encode_frame,
+    PlayerId, RequestError, Resume, RoomDeclaration, RoomId, RoomListing, RoomMods, RoomPhase,
+    RoomSettings, RoomView, RulesName, SavedWorld, Seal, Secret, ServerMessage, SnapshotId, Speed,
+    StartSave, StartView, TURN_MAX_FRAME, Text, Turn, TurnMessage, TurnStart, WorldOffer,
+    decode_frame, encode_frame,
 };
 use tpf3mp_snapshot::{Manifest, ManifestId};
 use tracing::{debug, error, info, warn};
@@ -129,11 +130,15 @@ pub(crate) struct NewMember {
     pub(crate) banner: Option<BannerId>,
 }
 
-/// What a player's game runs, as the player declared it.
+/// What a player's game runs, as the player declared it, and for a room's
+/// owner who declared them ([`tpf3mp_proto::Request::DeclareRoom`]), the
+/// room's mods.
 #[derive(Debug)]
 pub(crate) struct Declared {
     pub(crate) fingerprint: ContentFingerprint,
     pub(crate) manifest: ContentManifest,
+    /// The room's mods with a digest of them, to tell members once each.
+    pub(crate) room: Option<(RoomMods, [u8; 32])>,
 }
 
 impl Declared {
@@ -141,8 +146,68 @@ impl Declared {
         Self {
             fingerprint: manifest.fingerprint(),
             manifest,
+            room: None,
         }
     }
+
+    /// A running game's content as its log keeps it, the manifest alone,
+    /// after a restart: the room's mods are told again from it, each by its
+    /// id, so a newcomer still learns the whole list rather than what a
+    /// `ContentDiff` names. What players were told of each (name, source,
+    /// Mod Hub number) and the settings are not kept: the game's world
+    /// carries its own settings. A manifest that is no room's list (a
+    /// summarised tail, too many mods) tells none, as before.
+    pub(crate) fn restored(manifest: ContentManifest) -> Self {
+        let info = manifest
+            .mods
+            .iter()
+            .map(|listed| tpf3mp_proto::ModInfo {
+                name: Text::lossy(listed.id.as_str()),
+                source: Text::lossy(""),
+                modio: None,
+            })
+            .collect();
+        let declaration = RoomDeclaration {
+            manifest,
+            room: tpf3mp_proto::RoomConfig {
+                info,
+                params: Vec::new(),
+            },
+        };
+        match declaration.validate() {
+            Ok(()) => Self::with_room(declaration),
+            Err(_) => Self::new(declaration.manifest),
+        }
+    }
+
+    /// The owner's declaration of their content and the room's mods, which
+    /// the connection validated.
+    pub(crate) fn with_room(declaration: RoomDeclaration) -> Self {
+        let room = declaration.room_mods();
+        let digest = room_digest(&room);
+        Self {
+            fingerprint: declaration.manifest.fingerprint(),
+            manifest: declaration.manifest,
+            room: Some((room, digest)),
+        }
+    }
+
+    /// What members are told of the room's mods when this is the room's
+    /// content: the owner's list, when they declared one. Never one made up
+    /// from a manifest: a member told a list loads the room's world with
+    /// it, and the owner's game, without one, with its save's own.
+    fn told(&self) -> Option<(RoomMods, [u8; 32])> {
+        self.room.clone()
+    }
+}
+
+/// A digest of what members are told of the room's mods.
+fn room_digest(room: &RoomMods) -> [u8; 32] {
+    let digest = ring::digest::digest(
+        &ring::digest::SHA256,
+        &postcard::to_allocvec(room).unwrap_or_default(),
+    );
+    digest.as_ref().try_into().unwrap_or([0; 32])
 }
 
 pub(crate) type Reply<T = ()> = oneshot::Sender<Result<T, RequestError>>;
@@ -527,6 +592,9 @@ struct Member {
     /// The room's content and this member's when this member was last
     /// told they differ; `None` when it has not been told of a difference.
     told_diff: Option<(ContentFingerprint, ContentFingerprint)>,
+    /// The digest of the room's mods this member was last told, `Some(None)`
+    /// for none; `None` until told at all.
+    told_room: Option<Option<[u8; 32]>>,
     link: Option<MemberLink>,
     /// Whether this member's current link has an open turn stream.
     streaming: bool,
@@ -1048,7 +1116,7 @@ impl Room {
         let game_content = start
             .manifest
             .clone()
-            .map(Declared::new)
+            .map(Declared::restored)
             .filter(|declared| Some(declared.fingerprint) == content)
             .map(Arc::new);
         let members: Vec<Member> = game
@@ -1066,6 +1134,7 @@ impl Room {
                 content,
                 declared: None,
                 told_diff: None,
+                told_room: None,
                 link: None,
                 streaming: false,
                 pace: Pace::CatchingUp(None),
@@ -1234,6 +1303,7 @@ impl Room {
     }
 
     pub(crate) fn view(&self) -> RoomView {
+        let reference = self.reference_content();
         RoomView {
             id: self.id,
             name: self.name.clone(),
@@ -1258,6 +1328,13 @@ impl Room {
                     connected: member.link.is_some(),
                     banner: member.banner.clone(),
                     loading: member.loading,
+                    differs: match (&reference, &member.declared) {
+                        (Some(room), Some(own)) if room.fingerprint != own.fingerprint => room
+                            .manifest
+                            .compare(&own.manifest)
+                            .map(|diff| diff.status()),
+                        _ => None,
+                    },
                 })
                 .collect(),
             competitive: self.competitive,
@@ -1274,6 +1351,9 @@ impl Room {
         directory: Arc<Directory>,
     ) {
         info!(room = %self.id, "room opened");
+        // The owner hears the room's mods they declared, as every member
+        // who joins does.
+        self.tell_content();
         let mut ticker = tokio::time::interval(self.tick);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         while !self.closed {
@@ -1536,6 +1616,7 @@ impl Room {
             member.offered = None;
             // A new connection has not been told how its content differs.
             member.told_diff = None;
+            member.told_room = None;
             if let Some(declared) = new.content {
                 member.content = Some(declared.fingerprint);
                 member.declared = Some(declared);
@@ -3168,6 +3249,11 @@ impl Room {
 
     fn broadcast_view(&mut self) {
         self.refresh_summary();
+        // The room's mods before the view: on the same ordered stream, so a
+        // member asked by this view to get ready again has the mods and
+        // settings it agrees to before it can, and before any game starts.
+        let reference = self.reference_content();
+        self.tell_room_mods(reference.as_deref());
         let view = self.view();
         for index in 0..self.members.len() {
             self.push(index, ServerMessage::RoomUpdate(view.clone()));
@@ -3192,6 +3278,7 @@ impl Room {
     /// for each difference, and tells a member once it no longer differs.
     fn tell_content(&mut self) {
         let reference = self.reference_content();
+        self.tell_room_mods(reference.as_deref());
         for index in 0..self.members.len() {
             let member = &self.members[index];
             let differs = match (&reference, &member.declared) {
@@ -3212,9 +3299,34 @@ impl Room {
         }
     }
 
-    /// Tells a player refused for their content how it differs from the
-    /// game's, when both are known.
+    /// Tells each connected member the room's mods, `reference`'s, when they
+    /// changed since the member was last told: so that a member knows which
+    /// mods to have before declaring theirs.
+    fn tell_room_mods(&mut self, reference: Option<&Declared>) {
+        let told = reference.and_then(Declared::told);
+        let digest = told.as_ref().map(|(_, digest)| *digest);
+        for index in 0..self.members.len() {
+            let member = &self.members[index];
+            if member.told_room == Some(digest) || member.link.is_none() {
+                continue;
+            }
+            self.members[index].told_room = Some(digest);
+            let message = told.as_ref().map(|(room, _)| Box::new(room.clone()));
+            self.push(index, ServerMessage::RoomMods(message));
+        }
+    }
+
+    /// Tells a player refused for their content the game's mods, so that
+    /// they can declare those they have and try again, and how theirs
+    /// differ, when both are known.
     fn tell_refused(&self, new: &NewMember) {
+        if let Some((room, _)) = self.game_content.as_deref().and_then(Declared::told) {
+            // A full queue loses only this list; the refusal follows.
+            let _ = new
+                .link
+                .control
+                .try_send(ServerMessage::RoomMods(Some(Box::new(room))));
+        }
         if let (Some(room), Some(own)) = (&self.game_content, &new.content) {
             let diff = room.manifest.compare(&own.manifest);
             // A full queue loses only this explanation; the refusal follows.
@@ -3230,8 +3342,15 @@ impl Room {
         content: Arc<Declared>,
     ) -> Result<bool, RequestError> {
         let running = matches!(self.phase, Phase::Running(_));
+        let owner = self.owner == player;
+        if content.room.is_some() && !owner {
+            return Err(RequestError::NotOwner);
+        }
         let member = self.member_mut(player).ok_or(RequestError::NotInRoom)?;
         if running {
+            if content.room.is_some() {
+                return Err(RequestError::GameRunning);
+            }
             return if member.content == Some(content.fingerprint) {
                 member.declared = Some(content);
                 Ok(false)
@@ -3239,9 +3358,17 @@ impl Room {
                 Err(RequestError::GameRunning)
             };
         }
+        let digest = |declared: Option<&Arc<Declared>>| {
+            declared.and_then(|declared| declared.room.as_ref().map(|(_, digest)| *digest))
+        };
+        let room_changed = owner && digest(member.declared.as_ref()) != digest(Some(&content));
         let changed = member.content.replace(content.fingerprint) != Some(content.fingerprint);
         member.declared = Some(content);
-        Ok(changed)
+        if room_changed {
+            // The members agreed to the room's mods before: they changed.
+            self.unready_all();
+        }
+        Ok(changed || room_changed)
     }
 
     fn close_all(&mut self, code: quinn::VarInt, reason: &[u8]) {
@@ -3268,6 +3395,7 @@ impl Member {
             content: new.content.as_ref().map(|declared| declared.fingerprint),
             declared: new.content,
             told_diff: None,
+            told_room: None,
             link: Some(new.link),
             streaming: false,
             pace: Pace::CatchingUp(None),
@@ -3823,6 +3951,30 @@ mod tests {
 
     fn native() -> RulesName {
         RulesName::new(NATIVE).unwrap()
+    }
+
+    /// After a restart, a running game's room tells its mods again from the
+    /// manifest its log kept, each by its id, so a newcomer learns the
+    /// whole list; one that is no room's list tells none.
+    #[test]
+    fn a_restored_game_tells_its_mods_from_its_manifest() {
+        let listed = |id: &str| tpf3mp_proto::ModRef {
+            id: Text::new(id).unwrap(),
+            version: Text::new("1").unwrap(),
+        };
+        let manifest = ContentManifest::new(
+            Text::new("40408").unwrap(),
+            vec![listed("signals"), listed("trees"), listed("tpf3mp_1")],
+        );
+        let restored = Declared::restored(manifest.clone());
+        assert_eq!(restored.fingerprint, manifest.fingerprint());
+        let (room, _) = restored.told().expect("the room's mods told again");
+        let ids: Vec<&str> = room.mods.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["signals", "trees", "tpf3mp_1"]);
+        assert_eq!(room.manifest(), manifest);
+        // Without TPF3-MP last it is no room's list: none told, as before.
+        let other = ContentManifest::new(Text::new("40408").unwrap(), vec![listed("signals")]);
+        assert!(Declared::restored(other).told().is_none());
     }
 
     /// The native rules, recording what they apply.
@@ -4499,6 +4651,7 @@ mod tests {
             content: None,
             declared: None,
             told_diff: None,
+            told_room: None,
             link: None,
             streaming: false,
             pace: Pace::Loading,

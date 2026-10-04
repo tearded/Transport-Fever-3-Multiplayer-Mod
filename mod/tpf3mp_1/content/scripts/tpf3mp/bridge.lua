@@ -463,6 +463,21 @@ function Link:mods(names)
 	return lines(plan), lines(dropped), lines(added)
 end
 
+-- The settings of the room's mods its owner picked, by mod, by setting, the
+-- game's own under ""; nil from a hook without `modparams` or with none (the
+-- save's then stay).
+function Link:modParams()
+	if type(self.native.modparams) ~= "function" then return nil end
+	local ok, text = pcall(self.native.modparams)
+	if not ok or type(text) ~= "string" or text == "" then return nil end
+	local room = {}
+	for mod, key, value in string.gmatch(text, "([^\t\n]*)\t([^\t\n]+)\t(%-?%d+)") do
+		room[mod] = room[mod] or {}
+		room[mod][key] = math.floor(tonumber(value))
+	end
+	return room
+end
+
 -- This player's personal mods, by name, as a set; an empty set from a hook
 -- without `personal` or without the room's lists.
 function Link:personal()

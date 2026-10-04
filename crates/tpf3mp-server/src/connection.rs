@@ -604,11 +604,17 @@ impl Client {
                 })
                 .await
             }
-            Request::DeclareContent(manifest) => {
-                if !manifest.is_valid() {
-                    return Err(RequestError::InvalidContent);
-                }
-                let content = Arc::new(Declared::new(manifest));
+            Request::DeclareContent(_) | Request::DeclareRoom(_) => {
+                let content = match request {
+                    Request::DeclareContent(manifest) if manifest.is_valid() => {
+                        Declared::new(manifest)
+                    }
+                    Request::DeclareRoom(declaration) if declaration.validate().is_ok() => {
+                        Declared::with_room(*declaration)
+                    }
+                    _ => return Err(RequestError::InvalidContent),
+                };
+                let content = Arc::new(content);
                 self.content = Some(Arc::clone(&content));
                 if self.room.is_none() {
                     return Ok(Response::Done);

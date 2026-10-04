@@ -51,6 +51,7 @@ fn samples() -> Vec<(Check, Vec<u8>)> {
             mods: Some(tpf3mp_bridge::ModLists {
                 shared: BoundedVec::new(vec![Text::new("vehicles_pack").unwrap()]).unwrap(),
                 personal: BoundedVec::new(vec![Text::new("minimap").unwrap()]).unwrap(),
+                params: Vec::new(),
             }),
         },
         ToHook::Apply(Event {
@@ -144,6 +145,10 @@ fn samples() -> Vec<(Check, Vec<u8>)> {
                     owner: true,
                     you: true,
                     same_content: Some(true),
+                    differs: Some(tpf3mp_proto::ContentStatus {
+                        missing: 1,
+                        ..Default::default()
+                    }),
                     banner: None,
                     loading: None,
                 }])
@@ -186,11 +191,23 @@ fn samples() -> Vec<(Check, Vec<u8>)> {
             .unwrap(),
             room_mods: BoundedVec::new(vec![tpf3mp_bridge::LobbyRoomMod {
                 id: Text::new("vehicles_pack").unwrap(),
-                version: Text::new("3").unwrap(),
-                have: tpf3mp_bridge::LobbyHave::No,
+                name: Text::new("Fahrzeuge").unwrap(),
+                version: Text::new("3+m8264750").unwrap(),
+                yours: Some(Text::new("2+m1").unwrap()),
+                have: tpf3mp_bridge::LobbyHave::OtherVersion,
+                source: Text::new("mod.io").unwrap(),
+                modio: Some(6414521),
             }])
             .unwrap(),
             room_mods_more: 0,
+            room_mods_missing: 0,
+            room_mods_other: 1,
+            room_params: BoundedVec::new(vec![tpf3mp_bridge::LobbySetting {
+                id: Text::new("signals").unwrap(),
+                key: Text::new("distance").unwrap(),
+                value: 3,
+            }])
+            .unwrap(),
             rooms: None,
             log_session: Text::new("K7QM2X").unwrap(),
         })),
@@ -239,6 +256,25 @@ fn samples() -> Vec<(Check, Vec<u8>)> {
             map: Text::new("dry").unwrap(),
             year: 1925,
         }),
+        ToAgent::Lobby(LobbyAction::ChooseRoomMods {
+            save: Some(Text::new("Güterzug").unwrap()),
+            map: Text::new("dry").unwrap(),
+            year: 1925,
+            mods: BoundedVec::new(vec![tpf3mp_bridge::LobbySelected {
+                id: Text::new("revyn112_towns_de").unwrap(),
+                name: Text::new("Deutsche Städte").unwrap(),
+                source: Text::new("mod.io").unwrap(),
+                modio: Some(6414521),
+            }])
+            .unwrap(),
+            params: BoundedVec::new(vec![tpf3mp_bridge::LobbySetting {
+                id: Text::new("revyn112_towns_de").unwrap(),
+                key: Text::new("size").unwrap(),
+                value: -2,
+            }])
+            .unwrap(),
+        }),
+        ToAgent::Lobby(LobbyAction::RescanMods),
     ];
     let mut samples: Vec<(Check, Vec<u8>)> = Vec::new();
     samples.extend(

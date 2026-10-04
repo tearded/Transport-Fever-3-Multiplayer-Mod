@@ -14,6 +14,7 @@ use super::{LobbyState, parse_action};
 
 const FAKE_MENU: &str = include_str!("../../tests/lua/fake_menu.lua");
 const WINDOW: &str = include_str!("../../../../mod/tpf3mp_1/content/gui/menu/lobby.lua");
+const ROOM_MODS: &str = include_str!("../../../../mod/tpf3mp_1/content/gui/menu/roommods.lua");
 
 #[test]
 fn new_world_setup_selects_multiplayer_once_and_preserves_other_settings() {
@@ -53,6 +54,7 @@ fn new_world_setup_selects_multiplayer_once_and_preserves_other_settings() {
 fn menu() -> Lua {
     let lua = Lua::new();
     lua.globals().set("LOBBY_SOURCE", WINDOW).unwrap();
+    lua.globals().set("ROOMMODS_SOURCE", ROOM_MODS).unwrap();
     lua.globals()
         .set(
             "BANNERS_SOURCE",
@@ -153,6 +155,7 @@ fn member(n: u8, name: &str, owner: bool, you: bool, ready: bool) -> LobbyMember
         owner,
         you,
         same_content: Some(true),
+        differs: None,
         banner: None,
         loading: None,
     }
@@ -219,7 +222,7 @@ fn before_the_hook_answers_the_window_waits_and_can_be_closed() {
     let shown = texts(&lua);
     assert!(shown.contains("Waiting for the hook"), "{shown}");
     assert!(shown.contains("The hook did not answer"), "{shown}");
-    click(&lua, "Close");
+    call(&lua, "page_back", ());
     assert_eq!(lua.globals().get::<u32>("CLOSED").unwrap(), 1);
 }
 
@@ -274,34 +277,140 @@ fn a_game_without_its_launcher_says_so_and_offers_nothing() {
     assert!(!enabled(&lua, "Connect to the TPF3-MP server"));
 }
 
+/// A second pick from the Host page that ends without a save (the player
+/// goes back) keeps the save and mods picked before.
 #[test]
-fn the_save_picker_preserves_user_names_and_recovery_saves() {
+fn a_second_pick_left_without_a_save_keeps_the_first() {
     let lua = menu();
-    let mut view = online();
-    let kept = [
-        "tpf3mp_fixture",
-        "tpf3mp_01_2",
-        "tpf3mp_room_0",
-        "tpf3mp_room_4294967296",
-        "autosave_recovery",
-    ];
-    let mut saves = view.saves.to_vec();
-    saves.extend(kept.iter().map(|name| Text::new(*name).unwrap()));
-    view.saves = BoundedVec::new(saves).unwrap();
-    show(&lua, Some(&view));
+    show(&lua, Some(&online()));
     open(&lua, None);
     call(&lua, "click_card", "Host a room");
-    let (values, _) = offered(&lua, "Start from this save");
-    for name in kept {
-        assert!(
-            values.iter().any(|value| value == name),
-            "missing {name}: {values:?}"
-        );
-    }
+    let pick = r#"
+        assert(PAGE == "LoadGame")
+        unmount()
+        INSTALLED = { tpf3mp_1 = { name = "TPF3-MP", source = "StagingArea" } }
+        app.loadGame({ saveGameName = "tpf3mp_room_4294967296" }, false, {
+            mods = { { name = "tpf3mp_1" } },
+            modParams = {},
+            configDict = {},
+            metadata = { date = 1950 },
+        })
+        assert(LOBBY.endPick() == true)
+    "#;
+    call(&lua, "click_card", "Click to choose the save and mods");
+    lua.load(pick).exec().unwrap();
+    call(&lua, "render", ());
+    call(&lua, "tick", ());
+    assert!(texts(&lua).contains("tpf3mp_room_4294967296"));
+    // Again, and back without a save.
+    call(&lua, "click_card", "tpf3mp_room_4294967296");
+    lua.load("assert(PAGE == 'LoadGame'); unmount(); assert(LOBBY.endPick() == true)")
+        .exec()
+        .unwrap();
+    call(&lua, "render", ());
+    call(&lua, "tick", ());
+    let shown = texts(&lua);
     assert!(
-        !values
+        shown.contains("tpf3mp_room_4294967296") && shown.contains("Create room"),
+        "{shown}"
+    );
+}
+
+/// A Load Game page this mod does not know (a game patch) is left as it
+/// is: nothing is picked there, and the page says so.
+#[test]
+fn a_load_game_page_this_mod_does_not_know_is_left_alone_and_said() {
+    let lua = menu();
+    show(&lua, Some(&online()));
+    open(&lua, None);
+    call(&lua, "click_card", "Host a room");
+    lua.load("savegame_react_util.SavegameCard = nil")
+        .exec()
+        .unwrap();
+    call(&lua, "click_card", "Click to choose the save and mods");
+    lua.load("assert(PAGE == nil, tostring(PAGE))")
+        .exec()
+        .unwrap();
+    assert!(
+        texts(&lua).contains("The save can't be picked on this game's Load Game page"),
+        "{}",
+        texts(&lua)
+    );
+}
+
+/// Hosting, the save is picked as in the room, on the game's Load Game
+/// page, by any name the game gives it; its mods follow once the room is
+/// made.
+#[test]
+fn hosting_picks_the_save_and_its_mods_on_the_games_load_game_page() {
+    let lua = menu();
+    show(&lua, Some(&online()));
+    open(&lua, None);
+    call(&lua, "click_card", "Host a room");
+    call(&lua, "type_into", ("Ann's room", "Weekend"));
+    call(&lua, "click_card", "Click to choose the save and mods");
+    // The game drops the main page, and the window with it, while its Load
+    // Game page shows; the window is made anew when the main page is back.
+    lua.load(
+        r#"
+        assert(PAGE == "LoadGame")
+        unmount()
+        INSTALLED = { tpf3mp_1 = { name = "TPF3-MP", source = "StagingArea" } }
+        app.loadGame({ saveGameName = "tpf3mp_room_4294967296" }, false, {
+            mods = { { name = "tpf3mp_1" } },
+            modParams = {},
+            configDict = {},
+            metadata = { date = 1950 },
+        })
+        assert(LOBBY.endPick() == true)
+    "#,
+    )
+    .exec()
+    .unwrap();
+    call(&lua, "render", ());
+    call(&lua, "tick", ());
+    // Back on the Host page as it was, with the save picked.
+    let shown = texts(&lua);
+    assert!(
+        shown.contains("tpf3mp_room_4294967296") && shown.contains("Create room"),
+        "{shown}"
+    );
+    click(&lua, "Create room");
+    let actions: [LobbyAction; 1] = sent(&lua).try_into().unwrap();
+    let [
+        LobbyAction::Create {
+            start_save, room, ..
+        },
+    ] = actions
+    else {
+        panic!("not a create")
+    };
+    assert_eq!(room.as_str(), "Weekend", "the name typed before the pick");
+    assert_eq!(
+        start_save.as_ref().map(Text::as_str),
+        Some("tpf3mp_room_4294967296")
+    );
+    // Made: the mods the page held are the room's.
+    show(
+        &lua,
+        Some(&starting_from(
+            true,
+            Some(start("tpf3mp_room_4294967296", "", 0, true)),
+            None,
+        )),
+    );
+    call(&lua, "tick", ());
+    let actions = sent(&lua);
+    assert!(
+        matches!(&actions[..], [LobbyAction::ChooseRoomMods { save: None, mods, .. }] if mods.len() == 1),
+        "{actions:?}"
+    );
+    call(&lua, "tick", ());
+    assert!(
+        !sent(&lua)
             .iter()
-            .any(|v| v == "tpf3mp_room_41856" || v == "tpf3mp_41856_21")
+            .any(|a| matches!(a, LobbyAction::ChooseRoomMods { .. })),
+        "once"
     );
 }
 
@@ -312,16 +421,8 @@ fn a_room_is_created_with_the_rules_players_and_save_picked() {
     open(&lua, None);
     call(&lua, "click_card", "Host a room");
     assert!(texts(&lua).contains("Private: invite only"));
-    // The saves, the launcher's own first choice picked, and a way to load
-    // a world by hand.
-    let (values, chosen): (Vec<String>, String) = lua
-        .globals()
-        .get::<Function>("offered")
-        .unwrap()
-        .call("Start from this save")
-        .unwrap();
-    assert_eq!(values, ["", "newest", "mptest"]);
-    assert_eq!(chosen, "mptest");
+    // The launcher's own first choice picked.
+    assert!(texts(&lua).contains("mptest"));
     call(&lua, "type_into", ("Ann's room", "Alps"));
     call(&lua, "choose", ("Players", 6));
     call(&lua, "choose", ("Rules", "canonical"));
@@ -354,18 +455,12 @@ fn a_room_can_start_without_a_save_and_is_named_for_its_owner() {
     );
     open(&lua, None);
     call(&lua, "click_card", "Host a room");
-    let (_, chosen): (Vec<String>, String) = lua
-        .globals()
-        .get::<Function>("offered")
-        .unwrap()
-        .call("Start from this save")
-        .unwrap();
-    assert_eq!(
-        chosen, "",
-        "new worlds are the default without a chosen save"
+    let shown = texts(&lua);
+    assert!(
+        shown.contains("New world"),
+        "new worlds are the default without a chosen save: {shown}"
     );
-    call(&lua, "choose", ("Start from this save", ""));
-    assert!(texts(&lua).contains("Choose your map and settings on the next screen"));
+    assert!(shown.contains("Choose your map and settings on the next screen"));
     click(&lua, "Create room");
     let actions: [LobbyAction; 1] = sent(&lua).try_into().unwrap();
     let [
@@ -440,7 +535,7 @@ fn what_the_hook_refuses_is_shown_until_the_next_action() {
             ..online()
         }),
     );
-    click(&lua, "Back");
+    call(&lua, "page_back", ());
     click(&lua, "Disconnect");
     call(&lua, "tick", ());
     assert!(texts(&lua).contains("no room has that invite"));
@@ -464,7 +559,7 @@ fn in_the_room_the_owner_starts_once_everyone_is_ready() {
     for word in [
         "Friday trains",
         "K7QM2X",
-        "2 of 4 players  ·  1 ready",
+        "Players  ·  2 of 4  ·  1 ready",
         "Owner",
         "You",
         "Not ready",
@@ -533,7 +628,7 @@ fn offered(lua: &Lua, caption: &str) -> (Vec<String>, Option<String>) {
 }
 
 #[test]
-fn the_owner_picks_the_rooms_save_on_its_page() {
+fn the_owner_picks_the_rooms_save_and_mods_on_the_games_load_game_page() {
     let lua = menu();
     show(
         &lua,
@@ -544,16 +639,101 @@ fn the_owner_picks_the_rooms_save_on_its_page() {
         )),
     );
     open(&lua, None);
-    // The saves the Host page offers, newest first, the room's chosen, and
-    // a way to load a world by hand.
-    let (values, chosen) = offered(&lua, "Start from this save");
-    assert_eq!(values, ["newest", "mptest", ""]);
-    assert_eq!(chosen.as_deref(), Some("mptest"));
+    assert_eq!(
+        offered(&lua, "Start from this save").1,
+        None,
+        "no list of saves"
+    );
     assert!(enabled(&lua, "Start the game"), "the room has its save");
-    // The same one again sends nothing.
-    call(&lua, "choose", ("Start from this save", "mptest"));
-    assert_eq!(sent(&lua), []);
-    call(&lua, "choose", ("Start from this save", "newest"));
+    call(&lua, "click_card", "Click to change the save and mods");
+    // On the game's own page, which says what it does here.
+    lua.load(
+        r#"
+        assert(PAGE == "LoadGame", tostring(PAGE))
+        local page = LOAD_PAGE()
+        assert(page.title == "The room's save and mods", page.title)
+        assert(page.button.text == "Use for the room", page.button.text)
+        assert(not page.button.classes:find("load-savegame-sound", 1, true), page.button.classes)
+        assert(page.button.classes:find("loadSavegameButton", 1, true), page.button.classes)
+        assert(page.card.params.save == true and page.card.params.onClickMain == "details")
+        INSTALLED = {
+            signals = { name = "Auto Signals", source = "mod.io", hub = "6414521" },
+            tpf3mp_1 = { name = "TPF3-MP", source = "StagingArea" },
+        }
+        app.setWaitForStartReadyGame()
+        app.loadGame({ saveGameName = "newest" }, false, {
+            mods = { { name = "signals" }, { name = "tpf3mp_1" } },
+            modParams = { [""] = { ["economy.industryDevelopment.closureProbability"] = 2 }, signals = { distance = 5 } },
+            configDict = { { "climate", "::/climates/dry/dry.clima" } },
+            metadata = { date = 1925 },
+        })
+        assert(LOADS == nil and WAITS == nil, "nothing loads")
+        assert(PAGE == "Main", tostring(PAGE))
+        -- The page is the game's again, as is its load.
+        local page = LOAD_PAGE()
+        assert(page.title == "Load Game" and page.button.text == "Load Game")
+        assert(page.button.classes:find("load-savegame-sound", 1, true))
+        assert(page.card.params.save == nil)
+        assert(LOBBY.endPick() == true, "main_page.tl opens the window again")
+        assert(LOBBY.endPick() == false, "once")
+    "#,
+    )
+    .exec()
+    .unwrap();
+    call(&lua, "tick", ());
+    let setting = |id: &str, key: &str, value: i64| tpf3mp_bridge::LobbySetting {
+        id: Text::new(id).unwrap(),
+        key: Text::new(key).unwrap(),
+        value,
+    };
+    assert_eq!(
+        sent(&lua),
+        [LobbyAction::ChooseRoomMods {
+            save: Some(Text::new("newest").unwrap()),
+            map: Text::new("dry").unwrap(),
+            year: 1925,
+            mods: BoundedVec::new(vec![
+                tpf3mp_bridge::LobbySelected {
+                    id: Text::new("signals").unwrap(),
+                    name: Text::new("Auto Signals").unwrap(),
+                    source: Text::new("mod.io").unwrap(),
+                    modio: Some(6414521),
+                },
+                tpf3mp_bridge::LobbySelected {
+                    id: Text::new("tpf3mp_1").unwrap(),
+                    name: Text::new("TPF3-MP").unwrap(),
+                    source: Text::new("StagingArea").unwrap(),
+                    modio: None,
+                },
+            ])
+            .unwrap(),
+            params: BoundedVec::new(vec![
+                setting("", "economy.industryDevelopment.closureProbability", 2),
+                setting("signals", "distance", 5),
+            ])
+            .unwrap(),
+        }]
+    );
+    assert!(texts(&lua).contains("Taking the save and mods for the room..."));
+    call(&lua, "tick", ());
+    assert_eq!(sent(&lua), [], "sent once");
+}
+
+#[test]
+fn a_save_loaded_straight_from_the_pages_list_keeps_its_own_mods() {
+    let lua = menu();
+    show(&lua, Some(&starting_from(true, None, None)));
+    open(&lua, None);
+    call(&lua, "click_card", "Click to change the save and mods");
+    lua.load(
+        r#"
+        app.loadGame({ saveGameName = "newest.sav" }, false, nil)
+        assert(LOBBY.endPick() == true)
+    "#,
+    )
+    .exec()
+    .unwrap();
+    call(&lua, "tick", ());
     assert_eq!(
         sent(&lua),
         [LobbyAction::ChooseStart {
@@ -562,43 +742,434 @@ fn the_owner_picks_the_rooms_save_on_its_page() {
             year: 0,
         }]
     );
-    assert!(texts(&lua).contains("Changing the save..."));
-    call(&lua, "choose", ("Start from this save", ""));
-    let actions = sent(&lua);
-    assert!(
-        matches!(&actions[..], [LobbyAction::ChooseStart { save, .. }] if save.as_str().is_empty()),
-        "none: {actions:?}"
-    );
 }
 
+/// The room may start from a new world instead of a save: the page's list
+/// of saves starts with a tile for it.
 #[test]
-fn a_pick_carries_the_map_and_year_the_game_read_of_the_save() {
+fn a_new_world_is_picked_from_the_tile_before_the_saves() {
     let lua = menu();
-    lua.load(
-        r#"LOBBY.saveDetails = function(name)
-            if name == "newest" then return { map = "dry", year = 1925 } end
-            return { map = "", year = 0 }
-        end"#,
-    )
-    .exec()
-    .unwrap();
     show(
         &lua,
         Some(&starting_from(
             true,
-            Some(start("mptest", "temperate", 1850, true)),
+            Some(start("mptest", "", 0, true)),
             None,
         )),
     );
     open(&lua, None);
-    call(&lua, "choose", ("Start from this save", "newest"));
-    assert_eq!(
-        sent(&lua),
-        [LobbyAction::ChooseStart {
-            save: Text::new("newest").unwrap(),
-            map: Text::new("dry").unwrap(),
-            year: 1925,
-        }]
+    assert!(!has_button(&lua, "New world"), "picked on the page now");
+    call(&lua, "click_card", "Click to change the save and mods");
+    lua.load(
+        r#"
+        local tiles = LOAD_PAGE().tiles
+        assert(#tiles == 2, "the new world's tile and the save's")
+        assert(tiles[1].tile.title == "New world", tostring(tiles[1].tile and tiles[1].tile.title))
+        tiles[1].tile.onClickMain()
+        assert(PAGE == "Main" and LOADS == nil)
+        assert(LOBBY.endPick() == true)
+        assert(#LOAD_PAGE().tiles == 1, "the page is the game's again")
+    "#,
+    )
+    .exec()
+    .unwrap();
+    call(&lua, "tick", ());
+    assert!(
+        matches!(sent(&lua).as_slice(), [LobbyAction::ChooseStart { save, .. }] if save.as_str().is_empty()),
+        "a new world"
+    );
+}
+
+#[test]
+fn leaving_the_load_game_page_puts_it_back_and_picks_nothing() {
+    let lua = menu();
+    show(&lua, Some(&starting_from(true, None, None)));
+    open(&lua, None);
+    call(&lua, "click_card", "Click to change the save and mods");
+    lua.load(
+        r#"
+        assert(LOBBY.endPick() == true, "Back to the main menu: the window again")
+        local page = LOAD_PAGE()
+        assert(page.title == "Load Game" and page.button.text == "Load Game")
+        app.loadGame({ saveGameName = "newest" }, false, nil)
+        assert(LOADS == 1, "the game's own load again")
+        assert(LOBBY.endPick() == false)
+    "#,
+    )
+    .exec()
+    .unwrap();
+    call(&lua, "tick", ());
+    assert_eq!(sent(&lua), []);
+}
+
+#[test]
+fn a_guest_picks_neither_save_nor_mods() {
+    let lua = menu();
+    show(
+        &lua,
+        Some(&starting_from(
+            false,
+            Some(start("Güterzug", "dry", 1900, true)),
+            None,
+        )),
+    );
+    open(&lua, None);
+    assert!(!texts(&lua).contains("Click to change the save and mods"));
+    assert!(!has_button(&lua, "New world"));
+}
+
+/// A room whose mods this guest (Bob) partly lacks: Auto Signals from Mod
+/// Hub, Trees from somewhere else, and TPF3-MP's own, which Bob has.
+fn lacking_mods() -> LobbyView {
+    let mut view = starting_from(false, Some(start("Güterzug", "dry", 1900, true)), None);
+    let room_mod = |id: &str, name: &str, have, source: &str, modio: Option<u64>| {
+        tpf3mp_bridge::LobbyRoomMod {
+            id: Text::new(id).unwrap(),
+            name: Text::lossy(name),
+            version: Text::new("3+m77").unwrap(),
+            yours: None,
+            have,
+            source: Text::lossy(source),
+            modio,
+        }
+    };
+    view.room_mods = BoundedVec::new(vec![
+        room_mod(
+            "signals",
+            "Auto Signals",
+            tpf3mp_bridge::LobbyHave::No,
+            "mod.io",
+            Some(6414521),
+        ),
+        room_mod(
+            "trees",
+            "Trees",
+            tpf3mp_bridge::LobbyHave::No,
+            "UserMods",
+            None,
+        ),
+        room_mod(
+            "tpf3mp_1",
+            "TPF3-MP",
+            tpf3mp_bridge::LobbyHave::Yes,
+            "StagingArea",
+            None,
+        ),
+    ])
+    .unwrap();
+    view.room_mods_missing = 2;
+    view
+}
+
+/// Refused by a running room for its mods, a player sees the room's mods
+/// outside it, and installs the missing ones before joining again.
+#[test]
+fn a_player_refused_for_its_mods_installs_them_before_joining_again() {
+    let lua = menu();
+    let mut view = lacking_mods();
+    view.room = None;
+    show(&lua, Some(&view));
+    open(&lua, Some("join"));
+    click(&lua, "Mods (2 missing)");
+    let shown = texts(&lua);
+    assert!(
+        shown.contains("Auto Signals") && shown.contains("Missing"),
+        "{shown}"
+    );
+    assert!(has_button(&lua, "Install"), "{shown}");
+}
+
+#[test]
+fn a_guest_sees_which_of_the_rooms_mods_it_lacks() {
+    let lua = menu();
+    show(&lua, Some(&lacking_mods()));
+    open(&lua, None);
+    let shown = texts(&lua);
+    assert!(shown.contains("3 mods  ·  2 missing"), "{shown}");
+    call(&lua, "tab", "The room's mods (3) · 2 missing");
+    let shown = texts(&lua);
+    for word in [
+        "Auto Signals",
+        "Trees",
+        "Missing",
+        "Mod Hub",
+        "UserMods",
+        "Installed",
+    ] {
+        assert!(shown.contains(word), "{word}: {shown}");
+    }
+}
+
+/// A tile's Details button is the game's own, once, however often the
+/// window draws.
+#[test]
+fn a_tiles_details_button_shows_once_however_often_it_is_drawn() {
+    let lua = menu();
+    show(&lua, Some(&lacking_mods()));
+    open(&lua, None);
+    call(&lua, "tab", "The room's mods (3) · 2 missing");
+    for _ in 0..5 {
+        call(&lua, "tick", ());
+    }
+    let details: u32 = lua.load("return count_buttons('Details')").eval().unwrap();
+    assert_eq!(details, 1, "the one tile with a button has one Details");
+}
+
+#[test]
+fn a_guest_installs_the_rooms_missing_mods_from_mod_hub() {
+    let lua = menu();
+    lua.load(
+        r#"HUB.mods["6414521"] = { title = "Auto Signals", author = "tearded", installSize = 10 }"#,
+    )
+    .exec()
+    .unwrap();
+    show(&lua, Some(&lacking_mods()));
+    open(&lua, None);
+    call(&lua, "tab", "The room's mods (3) · 2 missing");
+    // Looked up first, then asked: nothing is subscribed yet.
+    click(&lua, "Install all missing (1)");
+    let shown = texts(&lua);
+    // Asked in place of the tiles, as Mod Hub names it: title and author.
+    assert!(
+        shown.contains("Subscribe to Auto Signals on Mod Hub?")
+            && shown.contains("by tearded")
+            && !shown.contains("Install all missing"),
+        "{shown}"
+    );
+    lua.load("assert(#HUB.subscribed == 0)").exec().unwrap();
+    // No: back to the tiles, nothing subscribed.
+    click(&lua, "Cancel");
+    assert!(!texts(&lua).contains("Subscribe to"));
+    lua.load("assert(#HUB.subscribed == 0)").exec().unwrap();
+    click(&lua, "Install all missing (1)");
+    click(&lua, "Subscribe & install");
+    lua.load(r#"assert(HUB.subscribed[1] == "6414521" and #HUB.subscribed == 1)"#)
+        .exec()
+        .unwrap();
+    assert!(has_button(&lua, "Installing..."));
+    call(&lua, "tick", ());
+    assert_eq!(sent(&lua), [], "still downloading");
+    // Installed, under the room's id: the launcher looks again.
+    lua.load(
+        r#"
+        HUB.state["6414521"] = "Installed"
+        INSTALLED.signals = { name = "Auto Signals", source = "mod.io", hub = "6414521" }
+    "#,
+    )
+    .exec()
+    .unwrap();
+    call(&lua, "tick", ());
+    assert_eq!(sent(&lua), [LobbyAction::RescanMods]);
+    // Until the launcher finds it, the room does not count it: said so, and
+    // it can look again.
+    assert!(texts(&lua).contains("Installed, not found yet"));
+    click(&lua, "Look again");
+    assert_eq!(sent(&lua), [LobbyAction::RescanMods]);
+    // Found: the room's row says so.
+    let mut found = lacking_mods();
+    let mut rows = found.room_mods.to_vec();
+    rows[0].have = tpf3mp_bridge::LobbyHave::Yes;
+    found.room_mods = BoundedVec::new(rows).unwrap();
+    found.room_mods_missing = 1;
+    show(&lua, Some(&found));
+    call(&lua, "tick", ());
+    let shown = texts(&lua);
+    assert!(
+        shown.contains("Installed") && !shown.contains("not found yet"),
+        "{shown}"
+    );
+}
+
+/// Mod Hub answers for several mods before the window draws again: each
+/// answer counts, and the player is asked about all of them at once.
+#[test]
+fn every_mod_hub_answer_counts_however_many_come_at_once() {
+    let lua = menu();
+    lua.load(
+        r#"
+        HUB.mods["6414521"] = { title = "Auto Signals", author = "tearded", installSize = 2097152 }
+        HUB.mods["6415791"] = { title = "Signal Distance", author = "tearded" }
+    "#,
+    )
+    .exec()
+    .unwrap();
+    let mut view = lacking_mods();
+    let mut rows = view.room_mods.to_vec();
+    rows[1].modio = Some(6415791);
+    rows[1].source = Text::lossy("mod.io");
+    view.room_mods = BoundedVec::new(rows).unwrap();
+    show(&lua, Some(&view));
+    open(&lua, None);
+    call(&lua, "tab", "The room's mods (3) · 2 missing");
+    click(&lua, "Install all missing (2)");
+    let shown = texts(&lua);
+    assert!(
+        shown.contains("Subscribe to these 2 on Mod Hub?")
+            && shown.contains("Auto Signals")
+            && shown.contains("2.0 MB")
+            && shown.contains("The room calls it Trees"),
+        "{shown}"
+    );
+    click(&lua, "Subscribe & install");
+    lua.load(r#"assert(#HUB.subscribed == 2, #HUB.subscribed)"#)
+        .exec()
+        .unwrap();
+}
+
+/// A tile's Install shows the mod on the game's own Mod Hub page, where the
+/// player sees what it is and subscribes; an install begun there is
+/// followed once the page is closed.
+#[test]
+fn a_tiles_install_shows_the_mod_on_the_games_mod_hub_page() {
+    let lua = menu();
+    show(&lua, Some(&lacking_mods()));
+    open(&lua, None);
+    call(&lua, "tab", "The room's mods (3) · 2 missing");
+    click(&lua, "Install");
+    lua.load(
+        r#"
+        local page = assert(WINDOWS.ModDetailsWindow, "the game's Mod Hub page")
+        assert(page.title == "Auto Signals", page.title)
+        local p = page.modManagerParams
+        assert(p.modId.value == "6414521" and p.context.backendId == HUB.backend)
+        assert(p.context.wc and p.onClose == page.onClose and MODAL)
+        assert(#HUB.subscribed == 0, "nothing subscribed by the lobby")
+    "#,
+    )
+    .exec()
+    .unwrap();
+    // Closed without subscribing: nothing to follow.
+    lua.load(
+        "WINDOWS.ModDetailsWindow.onClose(); assert(WINDOWS.ModDetailsWindow == nil and not MODAL)",
+    )
+    .exec()
+    .unwrap();
+    call(&lua, "tick", ());
+    assert!(has_button(&lua, "Install"));
+    // Subscribed on the page: followed until installed, then found again.
+    click(&lua, "Install");
+    lua.load(
+        r#"
+        HUB.subscribed[1] = "6414521"
+        HUB.state["6414521"] = "Downloading"
+        WINDOWS.ModDetailsWindow.onClose()
+    "#,
+    )
+    .exec()
+    .unwrap();
+    call(&lua, "tick", ());
+    call(&lua, "tick", ());
+    assert!(has_button(&lua, "Installing..."), "{}", texts(&lua));
+    lua.load(
+        r#"
+        HUB.state["6414521"] = "Installed"
+        INSTALLED.signals = { name = "Auto Signals", source = "mod.io", hub = "6414521" }
+    "#,
+    )
+    .exec()
+    .unwrap();
+    call(&lua, "tick", ());
+    assert_eq!(sent(&lua), [LobbyAction::RescanMods]);
+}
+
+/// Without the game's window container, the lobby asks itself.
+#[test]
+fn without_the_games_mod_hub_page_the_lobby_asks_itself() {
+    let lua = menu();
+    lua.load(r#"NO_WINDOWS = true; HUB.mods["6414521"] = { title = "Auto Signals" }"#)
+        .exec()
+        .unwrap();
+    show(&lua, Some(&lacking_mods()));
+    open(&lua, None);
+    call(&lua, "tab", "The room's mods (3) · 2 missing");
+    click(&lua, "Install");
+    assert!(texts(&lua).contains("Subscribe to Auto Signals on Mod Hub?"));
+}
+
+#[test]
+fn a_mod_hub_mod_installed_under_another_id_is_not_the_rooms() {
+    let lua = menu();
+    lua.load(
+        r#"
+        HUB.mods["6414521"] = { title = "Something else" }
+        HUB.state["6414521"] = "Installed"
+        INSTALLED.other_mod = { name = "Other", source = "mod.io", hub = "6414521" }
+    "#,
+    )
+    .exec()
+    .unwrap();
+    show(&lua, Some(&lacking_mods()));
+    open(&lua, None);
+    call(&lua, "tab", "The room's mods (3) · 2 missing");
+    click(&lua, "Install all missing (1)");
+    click(&lua, "Subscribe & install");
+    call(&lua, "tick", ());
+    assert_eq!(sent(&lua), [], "nothing to find again");
+    let why: String = lua
+        .load("local s = '' ; for _i, n in ipairs(LOG) do s = s .. n end ; return s")
+        .eval()
+        .unwrap();
+    assert!(has_button(&lua, "Install"), "offered again: {why}");
+    assert!(texts(&lua).contains("Install failed"));
+}
+
+#[test]
+fn signed_out_of_mod_hub_the_guest_is_sent_to_sign_in() {
+    let lua = menu();
+    lua.load("HUB.signedIn = false").exec().unwrap();
+    show(&lua, Some(&lacking_mods()));
+    open(&lua, None);
+    call(&lua, "tab", "The room's mods (3) · 2 missing");
+    assert!(texts(&lua).contains("Sign in to Mod Hub to install them"));
+    assert!(!enabled(&lua, "Install"));
+    click(&lua, "Mod Hub");
+    assert_eq!(lua.globals().get::<u32>("MODHUB").unwrap(), 1);
+}
+
+#[test]
+fn a_players_card_says_how_their_mods_differ() {
+    let lua = menu();
+    let mut bob = member(2, "Bob", false, false, false);
+    bob.same_content = Some(false);
+    bob.differs = Some(tpf3mp_proto::ContentStatus {
+        missing: 2,
+        changed: 1,
+        extra: 0,
+        game: false,
+        reordered: false,
+        unlisted: false,
+    });
+    show(
+        &lua,
+        Some(&in_room(
+            vec![member(1, "Ann", true, true, true), bob.clone()],
+            true,
+        )),
+    );
+    open(&lua, None);
+    let shown = texts(&lua);
+    assert!(shown.contains("2 mods missing, 1 other version"), "{shown}");
+    // Ready, but with other mods: the server would refuse the start.
+    let mut view = in_room(vec![member(1, "Ann", true, true, true), bob], true);
+    view.room.as_mut().unwrap().members = BoundedVec::new(
+        view.room
+            .as_ref()
+            .unwrap()
+            .members
+            .iter()
+            .cloned()
+            .map(|mut m| {
+                m.ready = true;
+                m
+            })
+            .collect(),
+    )
+    .unwrap();
+    show(&lua, Some(&view));
+    call(&lua, "tick", ());
+    assert!(
+        !enabled(&lua, "Start the game"),
+        "said before the server would refuse"
     );
 }
 
@@ -648,8 +1219,6 @@ fn start_waits_while_the_owners_save_goes_up() {
         !enabled(&lua, "Start the game"),
         "everyone is ready, but the save is on its way"
     );
-    let (_, chosen) = offered(&lua, "Start from this save");
-    assert_eq!(chosen.as_deref(), Some("newest"), "the pick on its way");
     // Uploaded, but the room not told yet that it has it.
     show(
         &lua,
@@ -689,13 +1258,15 @@ fn a_guest_sees_the_rooms_save_but_cannot_pick_it() {
     );
     open(&lua, None);
     let shown = texts(&lua);
-    assert!(shown.contains("Starts from"), "{shown}");
     assert!(shown.contains("Güterzug · Dry · 1900"), "{shown}");
-    assert_eq!(offered(&lua, "Start from this save").1, None, "no picker");
+    assert!(
+        !texts(&lua).contains("Click to change the save and mods"),
+        "no picker"
+    );
     // Without one handed over, the owner's game has the world.
     show(&lua, Some(&starting_from(false, None, None)));
     call(&lua, "tick", ());
-    assert!(texts(&lua).contains("The world the owner's game has."));
+    assert!(texts(&lua).contains("The world the owner's game has"));
 }
 
 #[test]
@@ -1114,15 +1685,15 @@ fn the_first_page_leads_to_join_or_host_and_back() {
     show(&lua, Some(&online()));
     open(&lua, None);
     let shown = texts(&lua);
-    assert!(shown.contains("Online on EU"), "{shown}");
+    assert!(shown.contains("Host a room"), "{shown}");
     assert!(!shown.contains("Room name") && !shown.contains("Public rooms on EU"));
     call(&lua, "click_card", "Host a room");
     assert!(texts(&lua).contains("Room name"));
-    click(&lua, "Back");
+    call(&lua, "page_back", ());
     assert!(!texts(&lua).contains("Room name"));
     call(&lua, "click_card", "Join a room");
     assert!(texts(&lua).contains("Public rooms on EU"));
-    click(&lua, "Back");
+    call(&lua, "page_back", ());
     assert!(texts(&lua).contains("Host a room"));
     // In a room, the room's page, whatever was picked.
     show(
@@ -1160,31 +1731,30 @@ fn your_mods_are_chosen_from_join_host_and_the_room() {
             id: Text::new("trees_pack").unwrap(),
             version: Text::new("2").unwrap(),
             have: tpf3mp_bridge::LobbyHave::No,
+            name: Text::lossy("Pack"),
+            yours: None,
+            source: Text::lossy("StagingArea"),
+            modio: None,
         }])
         .unwrap(),
         room_mods_more: 3,
+        room_mods_missing: 0,
+        room_mods_other: 0,
+        room_params: tpf3mp_proto::BoundedVec::empty(),
         ..view
     };
     show(&lua, Some(&mods(online())));
     open(&lua, Some("join"));
     click(&lua, "Your mods (0 chosen)");
     let shown = texts(&lua);
-    for word in [
-        "Minimap",
-        "only you see it",
-        "Vehicles",
-        "every player needs it",
-        "trees_pack",
-        "You lack it",
-        "and 3 more",
-    ] {
+    for word in ["Minimap", "only you see it"] {
         assert!(shown.contains(word), "{word}: {shown}");
     }
     assert!(
-        !enabled(&lua, "Needed"),
-        "a shared mod cannot be turned off"
+        !shown.contains("Vehicles"),
+        "a shared mod is the room's, not one of your own: {shown}"
     );
-    click(&lua, "Off");
+    click(&lua, "Activate");
     assert_eq!(
         sent(&lua),
         [LobbyAction::ChooseMod {
@@ -1192,18 +1762,26 @@ fn your_mods_are_chosen_from_join_host_and_the_room() {
             chosen: true,
         }]
     );
-    click(&lua, "Back");
+    call(&lua, "page_back", ());
     assert!(texts(&lua).contains("Public rooms on EU"));
-    // In the room's lobby too, but not once its game runs.
+    // In the room's lobby too, on its own tab, beside the room's mods; but
+    // not once its game runs.
     let mut room = mods(in_room(vec![member(1, "Ann", true, true, true)], true));
     show(&lua, Some(&room));
     call(&lua, "tick", ());
-    click(&lua, "Your mods (0 chosen)");
-    assert!(enabled(&lua, "Off"));
+    call(&lua, "tab", "The room's mods (4)");
+    let shown = texts(&lua);
+    for word in ["Pack", "Missing", "and 3 more"] {
+        assert!(shown.contains(word), "{word}: {shown}");
+    }
+    call(&lua, "tab", "Only for you (1)");
+    click(&lua, "Activate");
+    assert_eq!(sent(&lua).len(), 1);
     room.room.as_mut().unwrap().running = true;
     show(&lua, Some(&room));
     call(&lua, "tick", ());
-    assert!(!enabled(&lua, "Off"));
+    click(&lua, "Activate");
+    assert_eq!(sent(&lua), [], "the game runs: its mods hold");
 }
 
 #[test]
@@ -1218,7 +1796,7 @@ fn the_server_is_shown_changed_and_put_back_from_the_first_page() {
     open(&lua, None);
     click(&lua, "Server...");
     let shown = texts(&lua);
-    assert!(shown.contains("Now: EU (default)"), "{shown}");
+    assert!(shown.contains("EU (default)"), "{shown}");
     assert!(shown.contains("Invites only join rooms on your own server."));
     assert!(
         !has_button(&lua, "Reset to default"),
@@ -1256,7 +1834,7 @@ fn the_server_is_shown_changed_and_put_back_from_the_first_page() {
     call(&lua, "tick", ());
     let shown = texts(&lua);
     assert!(
-        shown.contains("Now: another server") && !shown.contains("lan.example"),
+        shown.contains("another server") && !shown.contains("lan.example"),
         "the address only in the field: {shown}"
     );
     click(&lua, "Reset to default");
@@ -1586,10 +2164,10 @@ fn the_host_picks_co_op_or_competitive_from_two_pictures() {
         })
         .collect();
     assert!(
-        styles
-            .iter()
-            .any(|(text, picture)| text.starts_with("> Co-op")
-                && picture == "::/gui/menu/images/campaign.tga"),
+        styles.iter().any(|(text, picture)| text.starts_with(
+            "Co-op
+Picked"
+        ) && picture == "::/gui/menu/images/campaign.tga"),
         "co-op is picked first: {styles:?}"
     );
     assert!(
@@ -1599,7 +2177,11 @@ fn the_host_picks_co_op_or_competitive_from_two_pictures() {
                 && picture.ends_with("m03_loadscreen.tga"))
     );
     call(&lua, "click_card", "Competitive");
-    assert!(texts(&lua).contains("Each player founds a company of their own"));
+    assert!(
+        texts(&lua).contains("Competitive\nPicked"),
+        "{}",
+        texts(&lua)
+    );
     click(&lua, "Create room");
     let actions: [LobbyAction; 1] = sent(&lua).try_into().unwrap();
     let [LobbyAction::Create { competitive, .. }] = actions else {
@@ -1706,7 +2288,11 @@ fn generating_a_world_waits_for_room_creation_before_opening_stock_setup() {
     show(&lua, Some(&online()));
     open(&lua, None);
     call(&lua, "click_card", "Host a room");
-    call(&lua, "choose", ("Start from this save", ""));
+    call(&lua, "click_card", "Click to choose the save and mods");
+    lua.load("LOAD_PAGE().tiles[1].tile.onClickMain(); assert(LOBBY.endPick())")
+        .exec()
+        .unwrap();
+    call(&lua, "tick", ());
     click(&lua, "Create room");
     assert!(
         lua.globals()
@@ -1759,7 +2345,11 @@ fn switching_from_a_saved_world_restores_stock_world_setup() {
     let mut view = starting_from(true, Some(start("mptest", "temperate", 1850, true)), None);
     show(&lua, Some(&view));
     open(&lua, None);
-    call(&lua, "choose", ("Start from this save", ""));
+    call(&lua, "click_card", "Click to change the save and mods");
+    lua.load("LOAD_PAGE().tiles[1].tile.onClickMain(); assert(LOBBY.endPick())")
+        .exec()
+        .unwrap();
+    call(&lua, "tick", ());
     assert!(
         matches!(sent(&lua).as_slice(), [LobbyAction::ChooseStart { save, .. }] if save.as_str().is_empty())
     );
@@ -1779,7 +2369,10 @@ fn switching_from_a_saved_world_restores_stock_world_setup() {
     .unwrap();
     show(&lua, Some(&view));
     call(&lua, "tick", ());
-    assert!(!enabled(&lua, "Start the game"));
+    assert!(
+        !has_button(&lua, "Start the game"),
+        "not ready: the one button sets the world up"
+    );
     click(&lua, "Set up world");
     assert_eq!(lua.globals().get::<u32>("GENERATED").unwrap(), 1);
 }
@@ -1809,4 +2402,69 @@ fn the_loader_can_close_the_lobby_before_menu_callbacks_are_suspended() {
     open(&lua, None);
     assert_eq!(lua.globals().get::<u32>("CLOSED").unwrap(), 0);
     assert!(enabled(&lua, "Leave room"));
+}
+
+/// The window is one of the game's menu pages: "Multiplayer" in its top
+/// bar, whose Back steps back to where the player came from, and out of
+/// the window last.
+#[test]
+fn the_page_back_steps_back_then_leaves() {
+    let lua = menu();
+    show(&lua, Some(&online()));
+    open(&lua, Some("join"));
+    let title: String = lua.load("return page_title()").eval().unwrap();
+    assert_eq!(title, "Multiplayer");
+    assert!(texts(&lua).contains("Public rooms on EU"));
+    call(&lua, "page_back", ());
+    assert!(
+        !texts(&lua).contains("Public rooms on EU"),
+        "back to the first page"
+    );
+    assert_eq!(
+        lua.globals().get::<u32>("CLOSED").unwrap(),
+        0,
+        "the first page"
+    );
+    call(&lua, "page_back", ());
+    assert_eq!(
+        lua.globals().get::<u32>("CLOSED").unwrap(),
+        1,
+        "out of the window"
+    );
+}
+
+/// Back from the Join with code form closes the form, back to the room
+/// list, and only then leaves the page.
+#[test]
+fn the_page_back_closes_the_join_with_code_form_first() {
+    let lua = menu();
+    show(&lua, Some(&online()));
+    open(&lua, Some("join"));
+    click(&lua, "Join with code");
+    assert!(texts(&lua).contains("Invite code"));
+    call(&lua, "page_back", ());
+    assert!(texts(&lua).contains("Public rooms on EU"), "the list again");
+    assert_eq!(lua.globals().get::<u32>("CLOSED").unwrap(), 0);
+}
+
+/// The launcher's latest notice shows for a few seconds, then goes; its
+/// errors stay.
+#[test]
+fn a_notice_goes_after_a_few_seconds_and_an_error_stays() {
+    let lua = menu();
+    let mut view = online();
+    view.notice = Some(Text::new("the game session ended: you left the room").unwrap());
+    show(&lua, Some(&view));
+    open(&lua, None);
+    assert!(texts(&lua).contains("you left the room"));
+    for _ in 0..25 {
+        call(&lua, "tick", ());
+    }
+    assert!(!texts(&lua).contains("you left the room"), "gone");
+    view.error = Some(Text::new("the server is gone").unwrap());
+    show(&lua, Some(&view));
+    for _ in 0..25 {
+        call(&lua, "tick", ());
+    }
+    assert!(texts(&lua).contains("the server is gone"), "an error stays");
 }

@@ -158,6 +158,7 @@ fn member(
         owner,
         you,
         content,
+        differs: None,
         banner: None,
         loading: None,
     }
@@ -326,6 +327,7 @@ fn screens() {
         .map(|member| Member {
             ready: true,
             content: MemberContent::Same,
+            differs: None,
             ..member
         })
         .collect();

@@ -355,7 +355,13 @@ Dev B:
 - [ ] Roadside stops and signals, the side included, never rebuilding an
   edge a line runs on.
 - [ ] The room's required mods from Mod Hub IDs; a missing mod is
-  installed from Mod Hub, never received from another player.
+  installed from Mod Hub, never received from another player. *Added (D28,
+  proposed):* built on `feat/lobby-mods`: the owner picks the room's save,
+  mods and settings on the game's Load Game page, the room tells every
+  member its mods (protocol 18), and a member installs a missing Mod Hub
+  mod from the lobby with their own game ([MODS.md](MODS.md),
+  [LOBBY.md](LOBBY.md)). Tick once the owner approves D28; the new world
+  path is still open.
 - [ ] *Added, open for the team:* a rule for mods that send commands from
   the GUI (GW Big City and Startup Fortune do, once per save). Every
   player's game sends them: forwarded, the room gets one city per player;

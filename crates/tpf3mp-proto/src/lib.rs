@@ -20,6 +20,7 @@ mod control;
 mod diagnostics;
 mod ids;
 pub mod lua;
+mod room_mods;
 mod snapshot;
 mod text;
 mod turn;
@@ -35,11 +36,11 @@ pub use content::{
 };
 pub use control::{
     AUTH_DOMAIN, AUTH_EXPORTER_LABEL, BANNERS, BannerId, ChatText, ClientMessage,
-    ContentFingerprint, CreateRoom, GameMessage, Hello, IntentRejection, JoinRoom, LaneDigest,
-    ListedRoom, LoadingStage, MAX_CHECKPOINT_LANES, MAX_PREVIEW, MAX_ROOM_MEMBERS, MemberView,
-    PORTRAITS, ROOMS_PER_PAGE, Reject, RejectReason, Request, RequestError, Response, Resume,
-    RoomListing, RoomPage, RoomPhase, RoomSettings, RoomView, RulesName, RulesOffer, Secret,
-    ServerMessage, Speed, StartSave, StartView, Welcome, is_banner, is_portrait,
+    ContentFingerprint, ContentStatus, CreateRoom, GameMessage, Hello, IntentRejection, JoinRoom,
+    LaneDigest, ListedRoom, LoadingStage, MAX_CHECKPOINT_LANES, MAX_PREVIEW, MAX_ROOM_MEMBERS,
+    MemberView, PORTRAITS, ROOMS_PER_PAGE, Reject, RejectReason, Request, RequestError, Response,
+    Resume, RoomListing, RoomPage, RoomPhase, RoomSettings, RoomView, RulesName, RulesOffer,
+    Secret, ServerMessage, Speed, StartSave, StartView, Welcome, is_banner, is_portrait,
 };
 pub use diagnostics::{
     DiagnosticBatch, DiagnosticEvent, DiagnosticLevel, DiagnosticTarget, DiagnosticText, LogSource,
@@ -48,6 +49,11 @@ pub use diagnostics::{
 pub use ids::{
     CODE_LEN, Code, CodeError, Invite, InviteError, LogSession, PlayerId, RoomId, SessionId,
     Signature,
+};
+pub use room_mods::{
+    GAME_SETTINGS, MAX_ROOM_DECLARATION_BYTES, MAX_ROOM_MODS, MAX_ROOM_PARAMS, MODIO_SOURCE,
+    ModInfo, ModParam, ModParams, RoomConfig, RoomDeclaration, RoomMod, RoomMods, RoomModsError,
+    is_mod_id,
 };
 pub use snapshot::{
     BULK_REQUEST_MAX_FRAME, BULK_RESPONSE_MAX_FRAME, BulkOpen, BulkRequest, BulkResponse,
@@ -80,8 +86,12 @@ pub use turn::{Event, EventBody, Seal, Turn, TurnMessage, TurnStart};
 /// game's logs among them, and the launcher's run ([`Request::Telemetry`],
 /// [`LogSession`]); version 17 relays what each player's build tool shows
 /// to the other members ([`GameMessage::Preview`],
-/// [`ServerMessage::Preview`]).
-pub const PROTOCOL_VERSION: u32 = 17;
+/// [`ServerMessage::Preview`]); version 18 lets the room's owner declare the
+/// room's mods with what players are told of them and their settings
+/// ([`Request::DeclareRoom`]), tells every member the room's mods
+/// ([`ServerMessage::RoomMods`]) and how each member's game differs
+/// ([`MemberView::differs`]).
+pub const PROTOCOL_VERSION: u32 = 18;
 
 /// Application protocol name negotiated during the TLS handshake.
 pub const ALPN: &[u8] = b"tpf3mp";

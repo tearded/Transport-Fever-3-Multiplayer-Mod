@@ -27,9 +27,11 @@ local function savegameId(app, api, name)
 	return id
 end
 
--- The save's details with the mods of `plan` (a list of names), or nil and
--- why a mod of it is not here.
-local function withMods(app, api, data, plan)
+-- The save's details with the mods of `plan` (a list of names) and the
+-- room's settings of them and of the game, `params` (by mod, by setting, the
+-- game's own under ""; other mods' stay the save's), or nil and why a mod of
+-- it is not here.
+local function withMods(app, api, data, plan, params)
 	local modRep = app.getUserProfile():getModRep()
 	local mods = {}
 	for _, name in ipairs(plan) do
@@ -42,6 +44,12 @@ local function withMods(app, api, data, plan)
 	end
 	local info = api.type.SaveGameDetails.new(data.info)
 	info.mods = mods
+	if params then
+		local all = {}
+		for mod, of in pairs(info.modParams or {}) do all[mod] = of end
+		for mod, of in pairs(params) do all[mod] = of end
+		info.modParams = all
+	end
 	return info
 end
 
@@ -71,7 +79,7 @@ function worldload.step(load, app, api, link)
 		for _, m in ipairs(data.info.mods or {}) do names[#names + 1] = m.name end
 		local plan = link:mods(names)
 		if plan then
-			local ok, made, why = pcall(withMods, app, api, data, plan)
+			local ok, made, why = pcall(withMods, app, api, data, plan, link:modParams())
 			if not ok then return nil, "the room's mods for the save failed: " .. tostring(made) end
 			if made == nil then return nil, why end
 			info = made

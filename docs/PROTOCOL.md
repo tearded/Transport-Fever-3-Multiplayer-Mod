@@ -195,6 +195,44 @@ A room has a name, an owner, a player limit, settings, members, and a phase:
   and counting the rest. It says so again whenever that changes, and sends
   `ContentDiff(None)` once the member matches. The game's manifest is kept
   in its log, so a restored game can still say how a newcomer differs.
+- **The room's mods** (protocol 18). In the lobby the owner declares with
+  `DeclareRoom` instead of `DeclareContent`: a `RoomDeclaration`, their
+  manifest and beside it a `RoomConfig`, what players are told of each of
+  its mods in its order (`ModInfo`: a name for players of up to 48 bytes,
+  where the owner's game has it from, `source`, up to 16, and its Mod Hub
+  number, `modio`, for a mod from Mod Hub) and the settings the room's
+  world loads them with (`ModParams`: per mod its `modParams` by name, up
+  to 64 bytes, each a whole number; the id `""`, `GAME_SETTINGS`, carries
+  the game's own: difficulty, costs, the economy's). The room takes it
+  whole or not at all: every mod listed (no `Unlisted` tail), at most 256,
+  each valid and once, TPF3-MP's own exactly once and last, a Mod Hub
+  number only for a mod from `mod.io`, settings only for the room's mods
+  and the game's own, at most 512, each mod once, all within 60 KiB;
+  otherwise `InvalidContent`. Only the owner sends it (`NotOwner`), only
+  in the lobby (`GameRunning`). It counts as the owner's content
+  declaration, and the room tells every member the room's mods with
+  `ServerMessage::RoomMods(Some(RoomMods))`: the game's build, each mod
+  with the owner's version and its `ModInfo`, and the settings. A member
+  receives it on joining the lobby, whenever it changes, and before a join
+  to a running game is refused, so it learns which mods to have before it
+  declares its own. It comes before the `RoomUpdate` of the same change,
+  on the same ordered stream, so a member asked to get ready again has
+  the mods and settings it agrees to before it can. Every connection of a
+  member is told once, `None` included, also on rejoining with a new
+  connection; a client joining a
+  running game begins it only once told, as the room's mods and settings
+  come on the control stream and the game's turns on another. When the mods change, every member is marked not
+  ready. An owner's plain `DeclareContent` leaves the room without a list
+  (`RoomMods(None)`), and the room only compares content as before. Each
+  member's view (`MemberView::differs`) says in counts how its game
+  differs from the room's (`ContentStatus`: mods missing, in another
+  version, extra; another build; reordered; a differing unlisted tail),
+  `None` while it matches or has not declared, so the owner sees whom the
+  start waits for. Starting is unchanged: every fingerprint must still be
+  equal. The log keeps only the game's manifest (no format change): a
+  game restored after a restart tells its mods again from it, each by its
+  id, with no names, Mod Hub numbers or settings (its world carries its
+  own settings); a manifest that is no room's list tells none.
 - **Starting.** In the lobby, members declare their content and toggle
   **ready**. The owner can start the game only when every member is ready,
   all fingerprints are equal, and the world the owner handed over, if any,

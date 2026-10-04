@@ -55,10 +55,21 @@ const MAX_STRING: u32 = 4096;
 pub struct SaveMod {
     /// The mod's id, as `app.loadGame`'s `info.mods` names it.
     pub id: String,
-    /// Where the game had it from: `StagingArea`, `DLC`, ...
+    /// Where the game had it from: `StagingArea`, `DLC`, `mod.io`, ...
     pub source: String,
+    /// Its hub id: `<source>,<id>`, or a mod.io mod's mod.io number.
+    pub hub: String,
     /// Its name for players.
     pub name: String,
+}
+
+impl SaveMod {
+    /// The mod's mod.io number, for a mod the save had from Mod Hub.
+    pub fn modio_id(&self) -> Option<u64> {
+        (self.source == "mod.io")
+            .then(|| self.hub.parse().ok())
+            .flatten()
+    }
 }
 
 /// The mods the save at `path` lists, in its order.
@@ -172,7 +183,15 @@ fn entry_at(bytes: &[u8], mut pos: usize) -> Option<(SaveMod, usize)> {
     if !is_mod_id(&id) || source.is_empty() || !hub_holds || severity > 2 {
         return None;
     }
-    Some((SaveMod { id, source, name }, pos))
+    Some((
+        SaveMod {
+            id,
+            source,
+            hub,
+            name,
+        },
+        pos,
+    ))
 }
 
 fn list_at(bytes: &[u8], at: usize) -> Option<Vec<SaveMod>> {
@@ -323,6 +342,9 @@ pub(crate) mod tests {
         );
         assert_eq!(mods[4].source, "mod.io");
         assert_eq!(mods[4].name, "Deutsche Städte und Gemeinden");
+        assert_eq!(mods[4].modio_id(), Some(6414521));
+        assert_eq!(mods[3].hub, "StagingArea,tpf3mp_1");
+        assert_eq!(mods[3].modio_id(), None);
     }
 
     #[test]

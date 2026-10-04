@@ -157,6 +157,7 @@ pub fn split(
         Some(ModLists {
             shared: BoundedVec::new(names(&shared)?).ok()?,
             personal: BoundedVec::new(names(&personal)?).ok()?,
+            params: Vec::new(),
         })
     })();
     Ok(Split {

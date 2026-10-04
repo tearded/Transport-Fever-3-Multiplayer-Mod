@@ -40,8 +40,11 @@ into the suspended game before any of its code runs (D11), detours that body
    module's cache key, so the rest of the menu sees the same `MainPage`
    value it always did.
 3. The mod's `main_page.tl` is the game's file with marked `TPF3-MP:`
-   additions (below), and a `Tpf3mpLobbyWindow` opened through the menu's
-   own window container (as the Deluxe Edition window is).
+   additions (below), and the Multiplayer page, `Tpf3mpLobbyPage`: a keyed
+   child (`tpf3mp-lobby`) laid over the main page as the game lays its
+   own pages, while the menu's cards stay mounted under it, hidden by the
+   game's `title-icon-only` class (their node refs must stay attached, or
+   the game asserts "Could not initialize all node refs").
 
 **Before the game runs.** The game loads its main menu within seconds of
 starting, so the entry must be armed first. The launcher starts the game
@@ -80,42 +83,61 @@ A game Steam started has no hook and keeps the plain menu.
   game's top-bar icons are, 100 px greyscale, white on black, for the game
   to tint (`gui/tpf3mp/icons/menu_multiplayer_50@2x.tga` and its 50 px
   copy, from `tools/art/icons/menu_icon.py`).
-- **The Multiplayer window** (`gui/menu/lobby.lua`), 940 by 660, in the
-  game's own classes: the `primary` and `secondary` buttons, the
-  `font-scale-*` sizes, and the default style sheet's colours and tapes
-  (`success`, `warning`, `error`, `info`). Along its top, the connection
-  and the steps to playing together; under them, what is under way until
-  the launcher answers, or what went wrong, or what just happened; the
-  room's world while it comes and loads, with a progress bar; how the
-  game differs from the room's. Then one of three views:
-  - not connected: the name, and **Connect to EU**;
-  - connected: a first page with two big cards, **Join a room** and
-    **Host a room**, each opening its own page with Back to the first.
-    Join: **Public rooms**, the server's room list
-    (D26 proposed; PROTOCOL.md, "Rooms"), as cards in the main menu's
-    style (the game's `menu_icon_react_util.CardButton`, class
-    `small-rectangle-card`), each with its climate's picture (the game's
-    own, `app.res.climateRep`, else its New Game card's), name,
-    players/limit, companies, year and a lock for a password; a click
-    joins, asking for a password first. The window asks for it when shown
-    and every 10 seconds; under it, joining with an invite. Host: its name, the save it starts
-    from, players, private or public (a public room is listed with the
-    save's climate and year, read as the Load Game page reads them:
-    `app.findAllSavegames`, `app.getSavegameInfo`), rules and a password.
-    **Your mods** opens from Join, Host and the room: the player's
-    installed mods to turn on or off (`choose_mod`), and in a room the
-    room's own and whether the player has each. **Your banner** opens
-    from the first page: the game's pictures a player shows on their card
-    in a room, and under **Characters** the campaign's portraits this game
-    has ("Portraits" below), both sent as `set_banner`;
-  - in a room: its name, invite (with **Copy**, which the hook puts on
-    the clipboard: `crate::clipboard`) and counts, the players as cards
-    of their banners (a portrait, if they picked one, beside the card) with their marks
-    (owner, you, ready, away, other mods) and, for the owner, a Remove
-    button that asks first; the chat; **Leave room** (asks first),
-    **Ready** or **Not ready**, and, for the owner, **Start the game**,
-    which waits until everyone is ready. Once the room's game runs, the
-    chat and Leave stay and Ready and Start go.
+- **The Multiplayer page** (`gui/menu/lobby.lua`), laid out as the game's
+  own pages: its top bar with Back and the title
+  (`menu_icon_react_util.makePage`), one big card
+  (`makeMainOuterCard`, 1600 by 700) with a header (the page's name, the
+  connection, the player's name and server), and a footer row of buttons
+  of one size: the one that moves on (`primary`) on the right, leaving
+  and taking back being ready red (`error-tape`), the rest secondary. The
+  game's Back key and the top bar's Back step back one page, out of the
+  page last. Under the header: what is under way until the launcher
+  answers, what went wrong (until the next action), and a notice of what
+  just happened, which fades after a few seconds; the room's world while
+  it comes and loads, with a progress bar. No flavour text. The pages:
+  - not connected: the name, and **Connect**;
+  - the first page: two big cards in the main menu's style (the game's
+    `CardButton` with its cut corners), **Join a room** and **Host a
+    room**; **Disconnect**, **Server...** and **Your banner** in the
+    footer, the log session on the right;
+  - **Join**: **Public rooms**, the server's room list (D26 proposed;
+    PROTOCOL.md, "Rooms"), as cards in the main menu's style, each with
+    its climate's picture (the game's own, `app.res.climateRep`, else its
+    New Game card's), name, players/limit, companies, year and a lock for
+    a password; a click joins, asking for a password first. The page asks
+    for the list when shown and every 10 seconds; **Previous**, **Next**,
+    **Refresh**. **Join with code** opens a page laid out as Host's: the
+    picture of joining on the left; on the right the invite code, large
+    (as the room's page shows it), the room's password, and the server
+    and name it joins with; **Cancel** and **Join**;
+  - **Host**: the room's world as a big card (the save's own picture as
+    the Load Game page shows it, else its climate's; **New world**
+    without one), a click picks it on the game's Load Game page ("The
+    room's save and mods" below); **How you play**, two picture cards,
+    Co-op and Competitive; the room's name, players, private or public
+    (a public room is listed with the save's climate and year), rules
+    and a password; **Create room**;
+  - **Server...** and **Your banner** (the game's pictures a player shows
+    on their card, and under **Characters** the campaign's portraits this
+    game has, "Portraits" below, both sent as `set_banner`);
+  - **in a room**, three tabs of the game's `TabWidget`:
+    - **Room**: the world as a big card (for the owner, a click picks
+      another save and its mods); the players as cards of their banners
+      (a portrait, if they picked one, beside the card) with their marks
+      (owner, you, ready, away, how many of the room's mods they lack or
+      have in another version) and, for the owner, a Remove in a card's
+      corner that asks first; the room's card: the invite code, large,
+      with **Copy** (the hook puts it on the clipboard:
+      `crate::clipboard`), players, play style, password, server and the
+      room's mods; the chat. **Leave room** (asks first), **Ready** or
+      **Not ready**, and, for the owner, **Start the game**, which waits
+      until everyone is ready and is off, naming who, while a member's
+      mods differ. Once the room's game runs, the chat and Leave stay;
+    - **The room's mods (n)**, with how many are missing: a tile each, as
+      the game's mod selector shows mods ("The room's mods" below);
+    - **Only for you (n)**: this player's personal mods (D25), with the
+      game's own Activate button (`choose_mod`); outside a room the same
+      page opens from **Your mods** in the footer.
 
   `crates/tpf3mp-hook/src/lobby/window_tests.rs` draws the window in every
   view against a stand-in for the menu (`tests/lua/fake_menu.lua`), clicks
@@ -125,6 +147,91 @@ The pause menu has no Multiplayer entry: in the room's game, the game
 bar's line and the Multiplayer window it opens are the room's (PLAYING.md,
 "While you play"), and a copy of the pause menu would be one more game file
 to carry over on every patch.
+
+## The room's save and mods
+
+The owner picks the room's save, its mods and their settings on the
+game's own **Load Game** page (`gui/menu/load_game_page.tl`), from the Host
+page's world card or the room's: its save tiles, its details with the
+**Mods** and **Gameplay Settings** tabs (the game's mod selector, with its
+order, dependencies, warnings and presets), as the player knows them.
+`roommods.lua` (`roommods.begin`) swaps a few of the page's module helpers
+for the time of the pick; the page reads them at each draw:
+
+- its title says what it picks for (`menu_icon_react_util.makePage`);
+- its Load Game button reads **Use for the room** and plays no game-start
+  sound (`makePrimaryButton`, by its class `loadSavegameButton`);
+- a save tile opens its details instead of loading
+  (`savegame_react_util.SavegameCard`);
+- the list of saves starts with a **New world** tile
+  (`tile_list_react_util.TileList`): the room then starts from a world the
+  game's New Game page makes;
+- its load (`app.loadGame`, after `app.setWaitForStartReadyGame`) takes
+  the save and what the page holds for it (its mods, in the game's
+  activation order, each with its name and source from the game's
+  `ModRep`, and the settings, `modParams`, the game's own under `""`)
+  instead of loading.
+
+The page's own nodes are never replaced by others: the game's react
+asserts and closes the game when a node's recipe changes between draws
+(`oldNode->recipeId == newNode->recipeId`, seen 2026-10-04 when a text
+turned into the mod selector), and `pcall` cannot catch it. So each swap
+returns the same recipes, with other parameters.
+
+Everything is put back as soon as the pick ends: picked, or the page left
+(`roommods.finish`, which `main_page.tl` calls when the main page mounts
+again, and which reopens the Multiplayer page). Should one of the helpers
+not be as the mod knows it (a game patch), nothing is swapped, the pick
+does not begin, and the page says so. The window sends the pick as
+`choose_room_mods` (bridge version 25) with the save, its map and year:
+in a room at once; on the Host page once the room is made. MODS.md,
+"Choosing mods", says what the launcher makes of it.
+
+## The room's mods, and installing from Mod Hub
+
+The room's mods tab shows each of the room's mods as the game's mod
+selector shows mods (`tile_list_react_util.TileElement`): its logo from
+Mod Hub (`mod_manager_react_util.ModImage`; the game's placeholder for a
+mod without one), its name, whether this player has it (**Installed**,
+**Missing**, **Another version**), where it comes from (Mod Hub, a local
+mod, a DLC, built in), and the game's Details button, which says its id,
+versions and source. **Only missing** hides the rest.
+
+A guest installs a missing Mod Hub mod from there, with their own game and
+Mod Hub account; mods never pass between players, and the launcher never
+talks to mod.io (D28 proposed):
+
+- **Install** on a tile opens the game's own Mod Hub page of the mod
+  (`mod_manager_react_util.ModDetailsWindow`, as the game's Mod Hub opens
+  a mod's tile; `roommods.showDetails`), after the game's own access check
+  (`checkModManagerAccess`, which says itself why not): its pictures,
+  description, author and the game's **Subscribe**. Closed, an install
+  begun there is followed on the tile.
+- **Install all missing (n)** looks each up in this player's Mod Hub
+  first (`getModDetailsAsync`) and asks once, in place of the tiles: each
+  mod as Mod Hub names it, with its logo, author, size and number, a
+  **Mod Hub page** button, **Cancel** and **Subscribe & install**
+  (`subscribeModAsync`). The owner's Mod Hub number is only their claim,
+  so the player sees what it resolves to before anything is subscribed;
+  a mod whose name differs from the room's is marked.
+- Without the game's window container (an older menu) a tile's Install
+  asks the same way.
+- Not signed in to Mod Hub, the tab says so and offers the game's Mod Hub
+  page (`onModHub`, back to the Multiplayer page). Without Mod Hub, it
+  says it is not available.
+- While Mod Hub downloads, the tile says **Installing...**. Once the game
+  has it installed, the install counts only when the installed mod's id
+  is the room's (`roommods.installedId`); then the launcher is asked to
+  find the installed mods again (`rescan_mods`). Until it does, the tile
+  says **Installed, not found yet** with **Look again**. The game takes a
+  new mod at its main menu without a restart (seen 2026-10-04: Signal
+  Distance subscribed, downloaded and found within about three seconds).
+- Answers from Mod Hub can arrive several before the page draws again;
+  each one changes what the one before it changed (`changeInstalls`), so
+  none is lost.
+
+A mod not from Mod Hub cannot be installed from the lobby: its tile says to
+ask the owner where to get it.
 
 ## The build profile
 

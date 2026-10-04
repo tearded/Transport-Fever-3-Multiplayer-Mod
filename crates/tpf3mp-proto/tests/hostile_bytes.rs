@@ -70,6 +70,7 @@ fn room_view() -> RoomView {
                 connected: true,
                 banner: Some(Text::new("m03").unwrap()),
                 loading: None,
+                differs: None,
             },
             MemberView {
                 player: player(2),
@@ -80,6 +81,14 @@ fn room_view() -> RoomView {
                 connected: false,
                 banner: None,
                 loading: None,
+                differs: Some(tpf3mp_proto::ContentStatus {
+                    missing: 2,
+                    changed: 1,
+                    extra: 0,
+                    game: false,
+                    reordered: false,
+                    unlisted: false,
+                }),
             },
         ],
         competitive: false,
@@ -109,6 +118,44 @@ fn lanes() -> Vec<LaneDigest> {
 
 /// A valid message of every kind a peer sends, with the check for its type.
 /// A game with a few mods, as players declare it.
+/// A room's owner's declaration: `manifest`'s mods and TPF3-MP's own, one
+/// from Mod Hub, with a setting.
+fn room_declaration() -> tpf3mp_proto::RoomDeclaration {
+    let mut manifest = manifest();
+    manifest.mods.push(ModRef {
+        id: Text::new(tpf3mp_proto::OWN_MOD).unwrap(),
+        version: Text::new("1+0123456789abcdef").unwrap(),
+    });
+    let info = |name: &str, modio: Option<u64>| tpf3mp_proto::ModInfo {
+        name: Text::new(name).unwrap(),
+        source: Text::new(if modio.is_some() {
+            "mod.io"
+        } else {
+            "StagingArea"
+        })
+        .unwrap(),
+        modio,
+    };
+    tpf3mp_proto::RoomDeclaration {
+        manifest,
+        room: tpf3mp_proto::RoomConfig {
+            info: vec![
+                info("Züge", Some(6414521)),
+                info("Bahnhöfe", None),
+                info("Karten", None),
+                info("TPF3-MP", None),
+            ],
+            params: vec![tpf3mp_proto::ModParams {
+                id: Text::new("trains").unwrap(),
+                params: vec![tpf3mp_proto::ModParam {
+                    key: Text::new("speed").unwrap(),
+                    value: -3,
+                }],
+            }],
+        },
+    }
+}
+
 fn manifest() -> ContentManifest {
     ContentManifest::new(
         Text::new("35924").unwrap(),
@@ -165,6 +212,10 @@ fn samples() -> Vec<(Check, Vec<u8>)> {
         ClientMessage::Request {
             id: 11,
             request: Request::DeclareContent(manifest()),
+        },
+        ClientMessage::Request {
+            id: 12,
+            request: Request::DeclareRoom(Box::new(room_declaration())),
         },
         ClientMessage::Request {
             id: 9,
@@ -264,6 +315,8 @@ fn samples() -> Vec<(Check, Vec<u8>)> {
             ContentManifest::new(Text::new("35925").unwrap(), Vec::new()).compare(&manifest()),
         ),
         ServerMessage::ContentDiff(None),
+        ServerMessage::RoomMods(Some(Box::new(room_declaration().room_mods()))),
+        ServerMessage::RoomMods(None),
     ];
     let turns = [
         TurnMessage::Start(TurnStart {

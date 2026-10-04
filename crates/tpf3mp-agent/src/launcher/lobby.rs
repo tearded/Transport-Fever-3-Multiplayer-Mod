@@ -25,8 +25,30 @@ use tracing::{debug, info, warn};
 use super::api::{self, Action, Connection, MemberContent, ModClass, ModHave, Phase, State, World};
 use crate::bridge::{BridgeFault, HookLink};
 
-/// The lobby the menu's window shows, from what the launcher shows.
+/// The lobby the menu's window shows, from what the launcher shows: as much
+/// of the room's mods as fits one message, [`LobbyView::room_mods_more`]
+/// counting the rest.
 pub(crate) fn view(state: &State) -> LobbyView {
+    let mut view = whole_view(state);
+    while !view.room_mods.is_empty() && encode(&ToHook::Lobby(Box::new(view.clone()))).is_err() {
+        let mut rows = view.room_mods.clone().into_inner();
+        let cut = rows.len().div_ceil(8).max(1);
+        rows.truncate(rows.len() - cut);
+        view.room_mods_more = view
+            .room_mods_more
+            .saturating_add(u32::try_from(cut).unwrap_or(u32::MAX));
+        view.room_mods = BoundedVec::new(rows).unwrap_or_default();
+    }
+    if encode(&ToHook::Lobby(Box::new(view.clone()))).is_err() {
+        // Never seen: the owner's selector then starts from the save's
+        // settings again.
+        warn!("the room's mod settings do not fit the game's lobby: left out");
+        view.room_params = BoundedVec::empty();
+    }
+    view
+}
+
+fn whole_view(state: &State) -> LobbyView {
     let chat: Vec<LobbyLine> = state
         .chat
         .iter()
@@ -63,6 +85,7 @@ pub(crate) fn view(state: &State) -> LobbyView {
                             MemberContent::Differs => Some(false),
                             MemberContent::Unknown => None,
                         },
+                        differs: member.differs,
                         banner: member.banner.as_deref().and_then(banner),
                         loading: member.loading,
                     })
@@ -186,7 +209,11 @@ pub(crate) fn view(state: &State) -> LobbyView {
                 .take(MAX_LOBBY_ROOM_MODS)
                 .map(|m| LobbyRoomMod {
                     id: Text::lossy(&m.id),
+                    name: Text::lossy(&m.name),
                     version: Text::lossy(&m.version),
+                    yours: m.yours.as_deref().map(Text::lossy),
+                    source: Text::lossy(&m.source),
+                    modio: m.modio,
                     have: match m.have {
                         ModHave::Yes => LobbyHave::Yes,
                         ModHave::No => LobbyHave::No,
@@ -198,6 +225,24 @@ pub(crate) fn view(state: &State) -> LobbyView {
         .unwrap_or_default(),
         room_mods_more: u32::try_from(state.room_mods.len().saturating_sub(MAX_LOBBY_ROOM_MODS))
             .unwrap_or(u32::MAX),
+        room_mods_missing: count(&state.room_mods, ModHave::No),
+        room_mods_other: count(&state.room_mods, ModHave::OtherVersion),
+        // A setting that cannot be named whole is left out.
+        room_params: BoundedVec::new(
+            state
+                .room_params
+                .iter()
+                .filter_map(|p| {
+                    Some(tpf3mp_bridge::LobbySetting {
+                        id: ModName::new(&p.id).ok()?,
+                        key: Text::new(p.key.as_str()).ok()?,
+                        value: p.value,
+                    })
+                })
+                .take(tpf3mp_proto::MAX_ROOM_PARAMS)
+                .collect(),
+        )
+        .unwrap_or_default(),
         log_session: Text::lossy(state.log_session.as_deref().unwrap_or_default()),
         rooms: state.rooms.as_ref().map(|list| LobbyRoomList {
             page: list.page,
@@ -232,6 +277,11 @@ fn save(name: &str) -> Option<SaveName> {
     (name.len() <= MAX_SAVE_NAME)
         .then(|| Text::new(name).ok())
         .flatten()
+}
+
+/// How many of the room's mods this player has as `have`.
+fn count(rows: &[api::RoomModRow], have: ModHave) -> u16 {
+    u16::try_from(rows.iter().filter(|m| m.have == have).count()).unwrap_or(u16::MAX)
 }
 
 /// The launcher action a button of the menu's window stands for. Connect
@@ -293,6 +343,35 @@ pub(crate) fn action(action: LobbyAction, state: &State) -> Action {
             map: map.as_str().to_owned(),
             year,
         },
+        LobbyAction::ChooseRoomMods {
+            save,
+            map,
+            year,
+            mods,
+            params,
+        } => Action::ChooseRoomMods {
+            save: save.map(|s| s.as_str().to_owned()).unwrap_or_default(),
+            map: map.as_str().to_owned(),
+            year,
+            mods: mods
+                .iter()
+                .map(|m| api::SelectedMod {
+                    id: m.id.as_str().to_owned(),
+                    name: m.name.as_str().to_owned(),
+                    source: m.source.as_str().to_owned(),
+                    modio: m.modio,
+                })
+                .collect(),
+            params: params
+                .iter()
+                .map(|p| api::ModSetting {
+                    id: p.id.as_str().to_owned(),
+                    key: p.key.as_str().to_owned(),
+                    value: p.value,
+                })
+                .collect(),
+        },
+        LobbyAction::RescanMods => Action::RescanMods,
     }
 }
 
@@ -607,6 +686,7 @@ pub(crate) mod tests {
                         owner: true,
                         you: true,
                         content: MemberContent::Same,
+                        differs: None,
                         banner: None,
                         loading: None,
                     },
@@ -619,6 +699,7 @@ pub(crate) mod tests {
                         owner: false,
                         you: false,
                         content: MemberContent::Unknown,
+                        differs: None,
                         banner: None,
                         loading: None,
                     },
@@ -683,12 +764,43 @@ pub(crate) mod tests {
             room_mods: (0..40)
                 .map(|n| api::RoomModRow {
                     id: format!("pack{n}"),
+                    name: format!("Pack {n}"),
                     version: "1".into(),
+                    yours: (n != 0).then(|| "1".into()),
                     have: if n == 0 { ModHave::No } else { ModHave::Yes },
+                    source: "mod.io".into(),
+                    modio: Some(6_000_000 + n),
                 })
                 .collect(),
             ..State::default()
         }
+    }
+
+    /// As many of the room's mods as a room runs, each with the longest of
+    /// everything: the view still fits one message, listing what fits and
+    /// counting the rest, and its mods line counts them all.
+    #[test]
+    fn the_rooms_mods_are_listed_as_far_as_they_fit() {
+        let mut state = state();
+        state.room_mods = (0..MAX_LOBBY_ROOM_MODS)
+            .map(|n| api::RoomModRow {
+                id: format!("{n:03}{}", "i".repeat(93)),
+                name: "n".repeat(48),
+                version: "v".repeat(32),
+                yours: Some("y".repeat(32)),
+                have: ModHave::OtherVersion,
+                source: "StagingArea".into(),
+                modio: None,
+            })
+            .collect();
+        let view = view(&state);
+        assert!(encode(&ToHook::Lobby(Box::new(view.clone()))).is_ok());
+        assert!(!view.room_mods.is_empty());
+        assert_eq!(
+            view.room_mods.len() + view.room_mods_more as usize,
+            MAX_LOBBY_ROOM_MODS
+        );
+        assert_eq!(usize::from(view.room_mods_other), MAX_LOBBY_ROOM_MODS);
     }
 
     #[test]
@@ -703,9 +815,12 @@ pub(crate) mod tests {
         assert_eq!(minimap.id.as_str(), "schbrongx_minimap");
         assert_eq!(minimap.class, LobbyModClass::Personal);
         assert!(minimap.chosen && minimap.choosable);
-        assert_eq!(view.room_mods.len(), MAX_LOBBY_ROOM_MODS);
+        assert_eq!(view.room_mods.len(), 40, "every one of the room's mods");
         assert_eq!(view.room_mods[0].have, LobbyHave::No);
-        assert_eq!(view.room_mods_more, 8);
+        assert_eq!(view.room_mods[0].modio, Some(6_000_000));
+        assert_eq!(view.room_mods[1].name.as_str(), "Pack 1");
+        assert_eq!(view.room_mods_more, 0);
+        assert_eq!((view.room_mods_missing, view.room_mods_other), (1, 0));
         assert_eq!(
             action(
                 LobbyAction::ChooseMod {

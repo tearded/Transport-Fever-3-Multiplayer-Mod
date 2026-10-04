@@ -1158,3 +1158,56 @@ Rejected:
 - **Mods must change first**: the rule works for the mods as they are;
   a mod that wants to be exact may still build only for its own player's
   builds.
+
+## D28 (2026-10-04, *proposed*): the room's owner picks its mods on the game's own pages, and members install what they lack from Mod Hub
+
+*Proposed, for the owner (Juliansgith) to approve or refuse. Nothing here is
+decided until then.* The user asked on 2026-10-04 for the lobby to show a
+room's mods, what each player lacks, and to install missing Mod Hub mods
+from it, "as native as possible"; they decided that a mod's settings travel
+with the room and that Mod Hub mods are compared by the file installed.
+
+- **The owner picks the room's save, its mods and their settings on the
+  game's own Load Game page**, opened from the room: the page's details
+  tabs (Mods, Gameplay Settings) are the game's, and what they hold for
+  the save becomes the room's instead of loading it (LOBBY.md, "The
+  room's save and mods"). The room's mods are that list, not the start
+  save's; TPF3-MP's own is always among them, last.
+- **The owner declares content and the room's mods together**
+  (`DeclareRoom`, protocol 18): the manifest, and beside it what players
+  are told of each mod (name, source, Mod Hub number) and the settings,
+  the game's own included. The room takes it whole or refuses it, and
+  tells every member (`RoomMods`), before refusing a join to a running
+  game too. The content fingerprint stays the only gate for starting and
+  joining.
+- **Every game loads the room's world with the room's mods in the room's
+  order and the room's settings**, then its player's personal mods (D25),
+  adding a mod the save lacks when the owner picked it.
+- **A member installs a missing Mod Hub mod through their own game and
+  Mod Hub account**, on the game's own Mod Hub page of the mod, or asked
+  once for all, showing what their own Mod Hub resolves for the number.
+  Mods never pass between players, and the launcher never talks to
+  mod.io. The owner's Mod Hub number is a claim: a mod installed for it
+  counts only when its id is the room's.
+- **A Mod Hub mod's version names the file installed** (its `revision`,
+  `+m` and Mod Hub's file id), so two downloads of one revision with
+  different files differ; one whose file cannot be read matches no other
+  (fail closed).
+
+Rejected:
+
+- **The game's mod selector page in our own window**: it worked, but the
+  Load Game page already holds the save, its mods and settings in the
+  player's habits, and a second copy of the page drifts on every patch.
+- **The owner loads the save and the room takes what loaded**: the
+  owner's game would enter the world before the room starts.
+- **Our own mod list instead of the game's**: duplicates the game's
+  activation order, dependencies, severities and presets.
+- **The launcher downloads from mod.io's REST API**: needs an API key in
+  the package and the player's login; the game already holds both.
+
+Touches: PLAN.md, Part 3, "The room's required mods from Mod Hub IDs; a
+missing mod is installed from Mod Hub, never received from another player":
+this builds it. Not covered yet: the new world path (a room started from a
+new world keeps the mods the game's New Game page picks), and the game's
+experimental economy settings (`configDict`), which do not travel.

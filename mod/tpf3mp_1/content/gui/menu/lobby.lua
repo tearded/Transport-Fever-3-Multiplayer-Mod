@@ -29,6 +29,11 @@ local react = ug_require "::/gui/main/react.lua"
 local builtin = ug_require "::/gui/main/builtin.lua"
 local gui_react_util = ug_require "::/gui/main/gui_react_util.tl"
 local button_react_util = ug_require "::/gui/main/button_react_util.tl"
+local menu_icon_react_util = ug_require "::/gui/menu/menu_icon_react_util.tl"
+local content_card = ug_require "::/gui/main/content_card.tl"
+local tile_list_react_util = ug_require "::/gui/main/tile_list_react_util.tl"
+local mod_manager_react_util = ug_require "::/gui/menu/mod_manager_react_util.tl"
+local roommods = ug_require "tpf3mp_1::/gui/menu/roommods.lua"
 
 local lobby = {}
 
@@ -62,10 +67,23 @@ local ICON = {
 	multiplayer = "tpf3mp_1::/gui/tpf3mp/icons/menu_multiplayer_50.tga",
 }
 
--- The window's content size and the two columns of each view. The window
--- itself is centred on the menu (main_page.tl's Tpf3mpLobbyWindow).
-local WIDTH, HEIGHT = 960, 620
-local LEFT, RIGHT = 440, 440
+-- The page's content size and the two columns of each view: the game's own
+-- card on its menu pages, as its Load Game page has it (main_menu_sizes.lua:
+-- 1646 by 774, less the card's and its body's padding and the header).
+local WIDTH, HEIGHT = 1600, 700
+local LEFT, RIGHT = 880, 660
+-- The room tab's columns (left as the Load Game page's three fifths), the
+-- world's picture, the players' and the chat's scrolled heights.
+-- A mod's tile, as the game's mod selector shows one, five to a row, and
+-- how high the mod tabs scroll their tiles. (One table: the window's
+-- function may hold only so many upvalues.)
+local SIZE = {
+	ROOM_LEFT = 670, ROOM_RIGHT = 860,
+	PREVIEW_HEIGHT = 262, PLAYERS_HEIGHT = 190,
+	TILE_WIDTH = 280, TILE_HEIGHT = 158, TILE_COLUMNS = 5,
+	MODS_HEIGHT = 450,
+}
+local MOD_PLACEHOLDER = "::/gui/menu/images/mod_placeholder.tga"
 local FIELD = 400
 -- Player counts a room can be created for, as the launcher offers them.
 local MIN_PLAYERS, MAX_PLAYERS, DEFAULT_PLAYERS = 2, 16, 4
@@ -75,6 +93,9 @@ local POLL = 0.4
 local PENDING_POLLS = 20
 -- How many polls Copy says "Copied" for: about two seconds.
 local COPIED_POLLS = 5
+-- How many polls the launcher's latest notice shows for: about eight
+-- seconds. Its errors show until they are gone.
+local NOTICE_POLLS = 20
 
 -- Whether the save `name` is one of the hook's own copies of a room's world
 -- (docs/HOOKS.md, "The room's world"), which it removes once their game
@@ -161,26 +182,35 @@ local function jsonString(text)
 	end) .. '"'
 end
 
+-- `value` as JSON: a boolean, a whole number, a string, a list (a table
+-- with items at 1.., or an empty one) or an object (string keys, sorted).
+local function jsonValue(value)
+	if type(value) == "boolean" then
+		return value and "true" or "false"
+	elseif type(value) == "number" then
+		return string.format("%d", value)
+	elseif type(value) == "table" then
+		local parts = {}
+		if #value > 0 or next(value) == nil then
+			for _i, item in ipairs(value) do parts[#parts + 1] = jsonValue(item) end
+			return "[" .. table.concat(parts, ",") .. "]"
+		end
+		local keys = {}
+		for key in pairs(value) do keys[#keys + 1] = tostring(key) end
+		table.sort(keys)
+		for _i, key in ipairs(keys) do
+			parts[#parts + 1] = jsonString(key) .. ":" .. jsonValue(value[key])
+		end
+		return "{" .. table.concat(parts, ",") .. "}"
+	end
+	return jsonString(value)
+end
+lobby.jsonValue = jsonValue
+
 -- Sends one action, given as a table with an `action` field and its fields.
 -- Returns nil when the hook took it, or why it did not.
 local function act(fields)
-	local parts = {}
-	local keys = {}
-	for key in pairs(fields) do keys[#keys + 1] = key end
-	table.sort(keys)
-	for _i, key in ipairs(keys) do
-		local value = fields[key]
-		local encoded
-		if type(value) == "boolean" then
-			encoded = value and "true" or "false"
-		elseif type(value) == "number" then
-			encoded = string.format("%d", value)
-		else
-			encoded = jsonString(value)
-		end
-		parts[#parts + 1] = jsonString(key) .. ":" .. encoded
-	end
-	local json = "{" .. table.concat(parts, ",") .. "}"
+	local json = jsonValue(fields)
 	if type(resolveutil) ~= "table" then
 		say("action " .. tostring(fields.action) .. " not sent: no loader")
 		return "the game's loader is not there"
@@ -485,7 +515,7 @@ end
 local CARDS_PER_ROW = 3
 local CARD_WIDTH, CARD_HEIGHT = 272, 156
 -- The first page's two cards, Join and Host.
-local CHOICE_WIDTH, CHOICE_HEIGHT = 420, 240
+local CHOICE_WIDTH, CHOICE_HEIGHT = 768, 500
 -- Polls between two asks for the room list while it is shown.
 local LIST_POLLS = 25
 
@@ -581,6 +611,11 @@ function lobby.saveDetails(name)
 					end
 				end
 				if data.info.metadata then read.year = yearOf(data.info.metadata) end
+				-- Its picture, as the Load Game page's tile shows it.
+				pcall(function()
+					local shot = data.info.metadata.screenshot
+					read.shot = { data = shot.image_native:clone(), width = shot.width, height = shot.height }
+				end)
 			end
 		elseif not ok then
 			read.async = nil
@@ -621,12 +656,14 @@ lobby.portraitName = banners.portraitName
 lobby.portraitPicture = banners.portrait
 
 -- A room member's size as a card, two to a row of the players' column.
-local MEMBER_WIDTH, MEMBER_HEIGHT = 208, 128
+local MEMBER_WIDTH, MEMBER_HEIGHT = 316, 181
 local PORTRAIT_SIZE = 44
 
 -- A picture card in the main menu's style: title and a line under it, a
--- word on the right; `onClick` nil for a card that only shows.
-local function pictureCard(picture, title, line, right, onClick, enabled, width, height, marks)
+-- word on the right; `onClick` nil for a card that only shows. `shape` is
+-- the menu's card class: its small card (the default, of a fixed size), or
+-- "bottom-left", a big card's cut corner, as large as `width` and `height`.
+local function pictureCard(picture, title, line, right, onClick, enabled, width, height, marks, shape)
 	local card
 	if cards then
 		card = cards.CardButton{
@@ -635,7 +672,9 @@ local function pictureCard(picture, title, line, right, onClick, enabled, width,
 			tooltip = title,
 			images = { picture },
 			initialImageIndex = 1,
-			class = "small-rectangle-card",
+			class = shape or "small-rectangle-card",
+			-- A big card is cut to its size, whatever its picture's.
+			clipper = shape ~= nil,
 			enabled = enabled ~= false,
 			extraChildren = marks or {},
 		}
@@ -667,13 +706,16 @@ function lobby.memberStage(member, playing)
 end
 
 -- A room member as a card: their banner, name, and what marks them.
-function lobby.memberCard(member, playing)
+-- `extra`: more of the card's corners (the owner's Remove), as layout
+-- children of its picture.
+function lobby.memberCard(member, playing, extra)
 	local marks = {}
 	if member.you then marks[#marks + 1] = _("You") end
 	if member.owner then marks[#marks + 1] = _("Owner") end
 	if not member.connected then marks[#marks + 1] = _("Away") end
 	marks[#marks + 1] = lobby.memberStage(member, playing)
-	if member.content == "differs" then marks[#marks + 1] = _("Other mods") end
+	local differs = lobby.memberDiffers(member)
+	if differs then marks[#marks + 1] = differs end
 	local ready = member.ready and not playing and (member.loading or "") == "" and builtin.FloatingLayoutChild{
 		h = 0.95,
 		v = 0.06,
@@ -685,9 +727,12 @@ function lobby.memberCard(member, playing)
 	-- A member who picked a portrait: it beside their card, which shows
 	-- their key's banner (tpf3mp/banners.lua).
 	local portrait = lobby.portraitOf(member)
+	local corners = {}
+	if ready then corners[#corners + 1] = ready end
+	for _i, child in ipairs(extra or {}) do corners[#corners + 1] = child end
 	local card = pictureCard(lobby.bannerPicture(lobby.bannerOf(member)), member.name,
 		table.concat(marks, " · "), member.you and _("You") or nil, nil, true,
-		portrait and MEMBER_WIDTH - PORTRAIT_SIZE - 8 or MEMBER_WIDTH, MEMBER_HEIGHT, ready and { ready } or {})
+		portrait and MEMBER_WIDTH - PORTRAIT_SIZE - 8 or MEMBER_WIDTH, MEMBER_HEIGHT, corners)
 	if not portrait then return card end
 	return row({ icon(portrait, PORTRAIT_SIZE), gap(8), card })
 end
@@ -712,25 +757,222 @@ lobby.COOP_PICTURE = COOP_PICTURE
 lobby.COMPETITIVE_PICTURE = COMPETITIVE_PICTURE
 
 -- One play style as a card: picked, it says so.
+-- The game's own parts the window is built of. (One table: the window's
+-- function may hold only so many upvalues.)
+local native = {
+	cards = content_card,
+	tiles = tile_list_react_util,
+	mods = mod_manager_react_util,
+}
+
+-- One of the game's cards (content_card.tl): its title over `children`.
+function native.card(title, children, sheet)
+	return builtin.Component{
+		meta = { styleSheet = sheet },
+		mouseTransparent = true,
+		layout = builtin.BoxLayout{
+			orientation = builtin.type.Orientation.Vertical,
+			children = { native.cards.ContentCard{ title = title, extraChildrenPermanent = children } },
+		},
+	}
+end
+lobby.card = native.card
+
+-- A line of a card: what on the left, its value on the right, as the game
+-- lays out a save's details.
+function native.entry(name, value, width)
+	return row({ label(name, "font-scale-body"), gui_react_util.makeHorizontalSpacer(), value },
+		style{ size = { (width or SIZE.ROOM_RIGHT) - 44, 32 } })
+end
+
+-- A tab of the game's tab widget.
+function native.tabOf(value, text, item)
+	return builtin.TabWidgetChild{
+		indicator = builtin.TextView{ meta = { class = "font-scale-tab-widget-indicator" }, text = text },
+		item = item,
+		value = value,
+	}
+end
+
+-- A button of the room's footer, all of one size: `class` "primary" for
+-- the one that moves the room on, "error-tape" (red) for leaving and
+-- taking back being ready.
+function native.foot(text, onClick, class, enabled, tooltip)
+	return builtin.Button{
+		meta = {
+			class = class or "secondary",
+			enabled = enabled ~= false,
+			tooltip = tooltip,
+			styleSheet = style{ size = { 200, -1 } },
+		},
+		content = builtin.TextView{ meta = { class = "font-scale-body" }, text = text },
+		onClick = onClick,
+	}
+end
+function native.wide(text, onClick, enabled, tooltip)
+	return native.foot(text, onClick, "primary", enabled, tooltip)
+end
+
+-- A button on a tile, as the game's tiles have them.
+function native.tileButton(text, onClick, enabled, tooltip)
+	return builtin.Button{
+		meta = { class = "card-and-details, secondary", enabled = enabled ~= false, tooltip = tooltip },
+		content = builtin.TextView{ meta = { class = "font-scale-title-4" }, text = text },
+		onClick = onClick,
+	}
+end
+
+-- The picture of the world the room starts from, for a card: the owner's
+-- save's own, as the Load Game page shows it (its image, as the card takes
+-- one), else its climate's.
+function lobby.startPicture(room)
+	local start = room.start
+	local shot = start and room.you_own and lobby.saveDetails(start.name).shot
+	if shot then
+		return {
+			data_native = shot.data,
+			size = api.type.Vec2i.new(shot.width, shot.height),
+			scaling = builtin.type.ImageViewScaling.AutoZoom,
+		}
+	end
+	return lobby.fullPicture(start and lobby.bigClimatePicture(start.map) or COOP_PICTURE)
+end
+
+-- A climate's picture for a big card: the main menu's own of it (its New
+-- Game card's), which fills one; the climate's small icon only for one it
+-- has none of.
+function lobby.bigClimatePicture(map)
+	return CLIMATE_PICTURES[map] or lobby.climatePicture(map)
+end
+
+-- A picture by its path, at the size of a save's picture, so that a big
+-- card shows any picture as large as a save's.
+function lobby.fullPicture(path)
+	return {
+		path = path,
+		size = api.type.Vec2i.new(1920, 1080),
+		scaling = builtin.type.ImageViewScaling.AutoZoom,
+	}
+end
+
+-- A mod's picture on its tile: its Mod Hub logo, as the game's mod selector
+-- shows it, else the game's placeholder. Always the game's ModImage, so a
+-- mod installed meanwhile changes only what it shows.
+function lobby.modImage(id, modio)
+	local logo = roommods.logo(id, modio or "")
+	return builtin.Component{
+		meta = { styleSheet = style{ size = { SIZE.TILE_WIDTH, SIZE.TILE_HEIGHT } } },
+		mouseTransparent = true,
+		layout = builtin.BoxLayout{ children = {
+			native.mods.ModImage{
+				context = { backendId = logo and logo.backend or -1 },
+				request = logo and logo.request or nil,
+				imagePath = MOD_PLACEHOLDER,
+			},
+		} },
+	}
+end
+
+-- A Mod Hub download's size, as people read it.
+function lobby.sizeText(bytes)
+	bytes = tonumber(bytes) or 0
+	if bytes <= 0 then return nil end
+	if bytes < 1024 * 1024 then return string.format(_("%d KB"), math.max(1, math.ceil(bytes / 1024))) end
+	return string.format(_("%.1f MB"), bytes / (1024 * 1024))
+end
+
+-- The question before a Mod Hub install, in place of the room's mods: each
+-- mod asked about as Mod Hub names it (its logo, title, author and size,
+-- for the player to check it is the mod meant, as the owner's number is
+-- only a claim), then No or Yes. `asking`: { id, modio, name, details }.
+-- `hubPage(a)` shows one on the game's Mod Hub page.
+function lobby.installCard(asking, install, cancel, enabled, hubPage)
+	local ids, entries = {}, {}
+	for _i, a in ipairs(asking) do
+		ids[#ids + 1] = a.id
+		local d = a.details
+		local facts = {}
+		if d.author ~= "" then facts[#facts + 1] = string.format(_("by %s"), d.author) end
+		facts[#facts + 1] = lobby.sizeText(d.size)
+		facts[#facts + 1] = string.format(_("Mod Hub %s"), a.modio)
+		local lines = {
+			row({ label(d.title ~= "" and d.title or a.id, "font-scale-title-3"), gui_react_util.makeHorizontalSpacer() }),
+			gap(6),
+			row({ label(table.concat(facts, "  ·  "), "font-scale-body"), gui_react_util.makeHorizontalSpacer() }),
+		}
+		if d.title ~= "" and a.name ~= "" and d.title ~= a.name then
+			lines[#lines + 1] = gap(4)
+			lines[#lines + 1] = row({ note(string.format(_("The room calls it %s"), a.name), "warning"),
+				gui_react_util.makeHorizontalSpacer() })
+		end
+		lines[#lines + 1] = gap(10)
+		lines[#lines + 1] = row({ button(_("Mod Hub page"), function() hubPage(a) end, nil, enabled,
+			_("Its description and pictures on Mod Hub")), gui_react_util.makeHorizontalSpacer() })
+		if #entries > 0 then entries[#entries + 1] = gap(12) end
+		-- The words beside the logo, from its top left.
+		entries[#entries + 1] = row({ lobby.modImage(a.id, a.modio), gap(20),
+			column(lines, style{ size = { WIDTH - 64 - SIZE.TILE_WIDTH - 40, SIZE.TILE_HEIGHT } }) })
+	end
+	local question = #asking == 1
+		and string.format(_("Subscribe to %s on Mod Hub?"), asking[1].details.title ~= "" and asking[1].details.title
+			or asking[1].id)
+		or string.format(_("Subscribe to these %d on Mod Hub?"), #asking)
+	return native.card(_("Install from Mod Hub"), { column({
+		label(question, "font-scale-title-2"),
+		gap(14),
+		builtin.ScrollArea{
+			meta = { styleSheet = style{ size = { WIDTH - 64, SIZE.MODS_HEIGHT - 110 } } },
+			horizontalPolicy = builtin.type.ScrollBarPolicy.AlwaysOff,
+			verticalPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
+			content = column(entries),
+		},
+		gap(12),
+		row({
+			note(_("Mod Hub subscribes your account to them, then downloads and installs them.")),
+			gui_react_util.makeHorizontalSpacer(),
+			native.foot(_("Cancel"), cancel),
+			gap(8),
+			native.foot(_("Subscribe & install"), function() install(ids) end, "primary", enabled),
+		}, style{ size = { WIDTH - 64, AUTO } }),
+	}) })
+end
+
 function lobby.styleCard(competitive, picked, onClick, enabled)
 	local title = competitive and _("Competitive") or _("Co-op")
-	return pictureCard(competitive and COMPETITIVE_PICTURE or COOP_PICTURE,
-		picked and ("> " .. title) or title,
-		picked and _("Picked") or nil, nil, onClick, enabled, 190, 104)
+	-- The one picked is marked as a ready player's card is.
+	local mark = picked and builtin.FloatingLayoutChild{
+		h = 0.95,
+		v = 0.06,
+		item = builtin.ImageView{
+			meta = { mouseTransparent = true, styleSheet = style{ size = { 22, 22 } } },
+			path = ICON.ready,
+		},
+	} or nil
+	local card = pictureCard(competitive and COMPETITIVE_PICTURE or COOP_PICTURE, title,
+		picked and _("Picked") or " ", nil, onClick, enabled, 300, 170, mark and { mark } or {})
+	-- What it means, on the card's tooltip.
+	return builtin.Component{
+		meta = { tooltip = competitive and _("Each player founds a company of their own in the game.")
+			or _("Everyone plays for the room's one company.") },
+		layout = builtin.BoxLayout{ children = { card } },
+	}
 end
 
 -- A big choice of the first page (Join, Host), as a card in the main
 -- menu's style.
-function lobby.choiceCard(title, line, picture, onClick, enabled)
+-- `shape` is a big card's cut corner ("bottom-left", "top-right"), as the
+-- main menu's big cards have them.
+function lobby.choiceCard(title, line, picture, onClick, enabled, shape)
 	local card
 	if cards then
 		card = cards.CardButton{
 			bottomComponent = cards.makeCardLabelBottomComponent(title, line, nil, nil, true),
 			onClick = onClick,
-			tooltip = line,
+			tooltip = line or title,
 			images = { picture },
 			initialImageIndex = 1,
-			class = "small-rectangle-card",
+			class = shape or "small-rectangle-card",
+			clipper = shape ~= nil,
 			enabled = enabled,
 			extraChildren = {},
 		}
@@ -798,12 +1040,84 @@ end
 
 -- The window's content, rendered inside the Tpf3mpLobbyWindow recipe. ------
 
+-- The room's save and mods, picked on the game's Load Game page
+-- (roommods.lua): main_page.tl sends the owner there and back. What they
+-- picked waits here until the window is back to send it.
+local pendingPick = nil
+-- What the Host page held when its owner went to pick on the Load Game
+-- page: the game drops the main page, and this window with it, while that
+-- page shows, and the window comes back to it as it was.
+local keptForPick = nil
+function lobby.beginPick(setPage)
+	return roommods.begin(setPage, function(choice) pendingPick = choice end)
+end
+-- Ends a pick under way; whether one was (the window then opens again).
+function lobby.endPick()
+	return roommods.finish() ~= nil
+end
+-- The window asked the main menu to come back to it after another page
+-- (Mod Hub, to sign in): once.
+local reopen = false
+function lobby.leaveFor(again)
+	reopen = again and true or false
+end
+function lobby.takeReopen()
+	local again = reopen
+	reopen = false
+	return again
+end
+
+-- How the player's game stands to the room's mods, in a line and a tone:
+-- nil while the room names none.
+function lobby.roomModsLine(state)
+	local total = #(state.room_mods or {}) + (tonumber(state.room_mods_more) or 0)
+	if total == 0 then return nil end
+	local missing, other = tonumber(state.room_mods_missing) or 0, tonumber(state.room_mods_other) or 0
+	if missing == 0 and other == 0 then
+		return string.format(_("%d mods  ·  you have them all"), total), "success"
+	end
+	local parts = { string.format(_("%d mods"), total) }
+	if missing > 0 then parts[#parts + 1] = string.format(_("%d missing"), missing) end
+	if other > 0 then parts[#parts + 1] = string.format(_("%d in another version"), other) end
+	return table.concat(parts, "  ·  "), "error"
+end
+
+-- How a member's game differs from the room's mods, in words; nil when it
+-- does not, or the room does not know.
+function lobby.memberDiffers(member)
+	local parts = {}
+	local missing, changed, extra = tonumber(member.missing) or 0, tonumber(member.changed) or 0,
+		tonumber(member.extra) or 0
+	if missing > 0 then
+		parts[#parts + 1] = missing == 1 and _("1 mod missing") or string.format(_("%d mods missing"), missing)
+	end
+	if changed > 0 then
+		parts[#parts + 1] = changed == 1 and _("1 other version") or string.format(_("%d other versions"), changed)
+	end
+	if extra > 0 then
+		parts[#parts + 1] = extra == 1 and _("1 mod too many") or string.format(_("%d mods too many"), extra)
+	end
+	if #parts == 0 then return member.content == "differs" and _("Other mods") or nil end
+	return table.concat(parts, ", ")
+end
+
 -- `focus` is what the card that opened the window is about: "join" puts
 -- the invite first.
-function lobby.content(onClose, focus, onNewGame)
+-- `onPick` sends the owner to the game's Load Game page to pick the room's
+-- save and mods; `onModHub` to the game's Mod Hub, to sign in.
+-- `commonParams` are the menu's, for its page and top bar.
+function lobby.content(onClose, focus, onNewGame, onPick, onModHub, commonParams)
 	-- The hook calls this before loading, then lets the menu render one frame.
 	-- Polling room state alone races the loader, which suspends menu callbacks.
 	resolveutil.__tpf3mp_before_load = onClose
+	-- Back from a pick begun on the Host page: that page, as it was. Taken
+	-- once, when the window is made.
+	local keptRef = react.useRef(false)
+	if keptRef:get() == false then
+		keptRef:set(keptForPick)
+		keptForPick = nil
+	end
+	local kept = keptRef:get() or {}
 	local stateS = react.useState(nil)
 	local problemS = react.useState(nil)
 	-- An action on its way: { text, polls left, the state it was sent in }.
@@ -812,25 +1126,50 @@ function lobby.content(onClose, focus, onNewGame)
 	local refusedS = react.useState(nil)
 	-- A question before kicking or leaving: { kind, id, name }.
 	local confirmS = react.useState(nil)
-	local name = react.useRef("")
-	local roomName = react.useRef("")
+	local name = react.useRef(kept.name or "")
+	local roomName = react.useRef(kept.roomName or "")
 	local invite = react.useRef("")
-	local createPassword = react.useRef("")
+	local createPassword = react.useRef(kept.password or "")
 	local joinPassword = react.useRef("")
 	local chatText = react.useRef("")
-	local playersS = react.useState(DEFAULT_PLAYERS)
-	local rulesS = react.useState(nil)
-	local saveS = react.useState(nil)
+	local playersS = react.useState(kept.players or DEFAULT_PLAYERS)
+	local rulesS = react.useState(kept.rules)
+	local saveS = react.useState(kept.save)
 	-- The room page's pick of its start save while the game reads its map
 	-- and year: { save, polls }.
 	local pickS = react.useState(nil)
 	-- The start save this window already told the room the map and year of.
 	local describedRef = react.useRef(nil)
+	-- What the Host page's pick held besides its save (the mods and their
+	-- settings): the room takes them once it is made.
+	local hostChoiceRef = react.useRef(kept.choice)
 	-- The page shown: "choose" (Join or Host), "join" (the public rooms
 	-- and an invite) or "host" (the room's settings); in a room, always the
 	-- room's. Your mods show over it while modsS is on.
-	local pageS = react.useState(nil)
+	local pageS = react.useState(kept.page)
 	local modsS = react.useState(false)
+	-- In a room, the tab shown: "room", "mods" (the room's) or "own".
+	local roomTabS = react.useState(focus == "mods" and "mods" or "room")
+	-- The room's mods tab shows only those this player lacks.
+	local onlyMissingS = react.useState(false)
+	-- The mod whose details a tile's gear asked for: { id, text }.
+	local detailS = react.useState(nil)
+	-- Installs from Mod Hub, by the room mod's id: { number, step, why,
+	-- details } with step "looking" (Mod Hub looks it up), "ask" (the
+	-- player confirms), "subscribing", "downloading", "done" or "failed".
+	local installsS = react.useState({})
+	-- The installs as last changed, drawn or not: Mod Hub may answer for
+	-- several mods before the window draws again, and each answer changes
+	-- what the one before it changed.
+	local installsNow = react.useRef(nil)
+	local function changeInstalls(change)
+		local now = {}
+		for id, one in pairs(installsNow:get() or installsS:old()) do now[id] = one end
+		-- `change` returns false when it changed nothing.
+		if change(now) == false then return end
+		installsNow:set(now)
+		installsS:set(now)
+	end
 	-- The banner picker, from the first page.
 	local bannerS = react.useState(false)
 	-- The Join page's Join with code popup.
@@ -840,9 +1179,9 @@ function lobby.content(onClose, focus, onNewGame)
 	local serverS = react.useState(false)
 	local serverText = react.useRef(nil)
 	local serverErrorS = react.useState(nil)
-	local publicS = react.useState("private")
+	local publicS = react.useState(kept.public or "private")
 	-- The Host page's play style: co-op (false) or competitive.
-	local competitiveS = react.useState(false)
+	local competitiveS = react.useState(kept.competitive or false)
 	local joiningS = react.useState(nil)
 	local listAtRef = react.useRef(LIST_POLLS)
 	-- An explicit click may need a connection first. Keep that intention
@@ -851,6 +1190,8 @@ function lobby.content(onClose, focus, onNewGame)
 	local generate = react.useRef(false)
 	local lastSnapshot = react.useRef(nil)
 	local copiedS = react.useState(0)
+	-- The launcher's latest notice, and how many polls it shows for still.
+	local noticeS = react.useState({ text = nil, left = 0 })
 
 	-- What the view shows, in one string: when it changes, an action sent
 	-- has been answered.
@@ -882,6 +1223,12 @@ function lobby.content(onClose, focus, onNewGame)
 		if copiedS:old() > 0 then copiedS:set(copiedS:old() - 1) end
 		local state, why, snapshot = fetchState()
 		if state then
+			local shown = noticeS:old()
+			if state.notice ~= shown.text then
+				noticeS:set({ text = state.notice, left = NOTICE_POLLS })
+			elseif shown.left > 0 then
+				noticeS:set({ text = shown.text, left = shown.left - 1 })
+			end
 			if problemS:old() ~= nil then problemS:set(nil) end
 			local pending = pendingS:old()
 			if pending then
@@ -935,6 +1282,70 @@ function lobby.content(onClose, focus, onNewGame)
 					pickS:set({ save = pick.save, polls = pick.polls + 1 })
 				end
 			end
+			-- What the owner picked on the game's Load Game page goes to the
+			-- room once the window is back.
+			if pendingPick then
+				local choice = pendingPick
+				pendingPick = nil
+				if owning then
+					local fields
+					if choice.mods then
+						fields = { action = "choose_room_mods", save = choice.save, map = choice.map or "",
+							year = choice.year or 0, mods = choice.mods, params = choice.params }
+					else
+						fields = { action = "choose_start", save = choice.save, map = "", year = 0 }
+					end
+					local refused = act(fields)
+					refusedS:set(refused)
+					if not refused then
+						pendingS:set({ _("Taking the save and mods for the room..."), PENDING_POLLS, signature(state) })
+					end
+				elseif not room and pageOf(state) == "host" then
+					-- Hosting: the save goes into the room's settings, its mods
+					-- to the room once it is made.
+					saveS:set(choice.save)
+					hostChoiceRef:set(choice.mods and choice or nil)
+				else
+					refusedS:set(_("Only the room's owner picks its save and mods, while it is in its lobby."))
+				end
+			end
+			local carried = hostChoiceRef:get()
+			if carried and owning and room.start and room.start.name == carried.save then
+				hostChoiceRef:set(nil)
+				refusedS:set(act({ action = "choose_room_mods", mods = carried.mods, params = carried.params }))
+			end
+			-- Installs from Mod Hub under way: once the game has the mod, and
+			-- it is the room's (the owner's Mod Hub number is only a claim),
+			-- the launcher finds the installed mods again.
+			local found = false
+			changeInstalls(function(updated)
+				local changed = false
+				for id, install in pairs(updated) do
+					if install.step == "subscribing" or install.step == "downloading" then
+						local at = roommods.installState(install.number)
+						if at == "installed" then
+							local name = roommods.installedId(install.number)
+							if name == id then
+								updated[id] = { number = install.number, step = "done" }
+								found = true
+							else
+								updated[id] = { number = install.number, step = "failed",
+									why = string.format(_("Mod Hub's mod is %s, not the room's %s"),
+										name ~= "" and name or "?", id) }
+							end
+							changed = true
+						elseif at == "failed" then
+							updated[id] = { number = install.number, step = "failed", why = _("the download failed") }
+							changed = true
+						elseif at == "downloading" and install.step ~= "downloading" then
+							updated[id] = { number = install.number, step = "downloading", details = install.details }
+							changed = true
+						end
+					end
+				end
+				return changed
+			end)
+			if found then refusedS:set(act({ action = "rescan_mods" })) end
 			-- The room names its start save without its map and year when the
 			-- room was made private: this window tells it what the game read,
 			-- once, so every player sees them.
@@ -977,6 +1388,7 @@ function lobby.content(onClose, focus, onNewGame)
 		if not refused and doing then
 			pendingS:set({ doing, PENDING_POLLS, signature(stateS:old()) })
 		end
+		return refused
 	end
 
 	local busy = pendingS:old() ~= nil or queued:get() ~= nil
@@ -990,32 +1402,51 @@ function lobby.content(onClose, focus, onNewGame)
 			send(fields, doing)
 		else
 			queued:set({ fields = fields, doing = doing, name = typed, error = current.error, left = 75 })
-			send({ action = "connect", name = typed }, _("Connecting..."))
-			if refusedS:old() then queued:set(nil) end
+			-- Refused (what was just set shows only from the next draw on):
+			-- nothing waits for a connection.
+			if send({ action = "connect", name = typed }, _("Connecting...")) then queued:set(nil) end
 		end
 	end
 
-	-- The frame every view shares: the title and the connection, the steps,
+	-- The page's Back, top left (and the game's Back key): a step back to
+	-- where the player came from, out of the window last.
+	local function topBack()
+		if modsS:old() then
+			modsS:set(false)
+		elseif codeS:old() then
+			codeS:set(false)
+		elseif joiningS:old() then
+			joiningS:set(nil)
+		elseif bannerS:old() then
+			bannerS:set(false)
+		elseif serverS:old() then
+			serverS:set(false)
+			serverErrorS:set(nil)
+			serverText:set(nil)
+		elseif stateS:old() and not stateS:old().room and pageOf(stateS:old()) ~= "choose" then
+			queued:set(nil)
+			generate:set(false)
+			joiningS:set(nil)
+			pageS:set("choose")
+		else
+			onClose()
+		end
+	end
+
+	-- The page every view shares, as the game's own menu pages are made
+	-- (load_game_page.tl): the top bar with Back and "Multiplayer", and the
+	-- game's card, with a header (the view's title and the connection) over
 	-- a line for what went wrong, what is under way or what just happened,
-	-- the room's world when it is coming, the view, and a footer with the
-	-- view's buttons.
+	-- the room's world when it is coming, the view, and the view's buttons at
+	-- the bottom right.
 	local function frame(title, status, body, footer)
-		local children = {
-			row({
-				icon(ICON.multiplayer, 28),
-				gap(10),
-				label(title, "font-scale-title-3"),
-				gui_react_util.makeHorizontalSpacer(),
-				status,
-			}, style{ size = { WIDTH - 40, 36 } }),
-			gap(10),
-		}
+		local children = {}
 		local problem = hideAddress(refusedS:old() or (state and state.error))
 		if problem then
 			children[#children + 1] = row({ icon(ICON.alert, 18), gap(6), label(problem, "font-scale-body, error") })
 		elseif pendingS:old() then
 			children[#children + 1] = row({ icon(ICON.loading, 18), gap(6), label(pendingS:old()[1], "font-scale-body, info") })
-		elseif state and state.notice then
+		elseif state and state.notice and noticeS:old().text == state.notice and noticeS:old().left > 0 then
 			children[#children + 1] = note(hideAddress(state.notice))
 		else
 			children[#children + 1] = gap(18)
@@ -1039,7 +1470,9 @@ function lobby.content(onClose, focus, onNewGame)
 				},
 			})
 		end
-		if state and state.differences then
+		-- How this game differs from the room's shows on the room's mods
+		-- tab, mod by mod; here only what is not about its mods.
+		if state and state.differences and not (state.room_mods and #state.room_mods > 0) then
 			children[#children + 1] = gap(4)
 			children[#children + 1] = label(_("Your game differs from the room's: ") .. state.differences,
 				"font-scale-body, warning")
@@ -1047,8 +1480,23 @@ function lobby.content(onClose, focus, onNewGame)
 		children[#children + 1] = gap(14)
 		children[#children + 1] = body
 		children[#children + 1] = gui_react_util.makeVerticalSpacer()
-		children[#children + 1] = row(spaced(footer), style{ size = { WIDTH - 40, 40 } })
-		return column(children, style{ size = { WIDTH, HEIGHT }, padding = { 16, 20, 16, 20 } })
+		children[#children + 1] = row(spaced(footer), style{ size = { WIDTH + 2, 44 } })
+		local header = {
+			gap(12),
+			icon(ICON.multiplayer, 28),
+			gap(10),
+			label(title, "font-scale-title-3"),
+			gui_react_util.makeHorizontalSpacer(),
+			status,
+			gap(12),
+		}
+		return menu_icon_react_util.makePage(commonParams, _("Multiplayer"), topBack,
+			menu_icon_react_util.makeMainOuterCard(true, {
+				menu_icon_react_util.makeTabAnalogue(
+					{ row(header, style{ size = { WIDTH, 48 } }) },
+					{ column(children, style{ size = { WIDTH, HEIGHT }, padding = { 12, 20, 12, 20 } }) }
+				),
+			}), {})
 	end
 
 	-- No answer from the hook yet.
@@ -1058,7 +1506,7 @@ function lobby.content(onClose, focus, onNewGame)
 			_("Multiplayer"),
 			note(_("Waiting for the hook...")),
 			label(why and (_("The hook did not answer: ") .. tostring(why)) or "", "font-scale-body, error"),
-			{ gui_react_util.makeHorizontalSpacer(), button(_("Close"), onClose) }
+			{ gui_react_util.makeHorizontalSpacer() }
 		)
 	end
 
@@ -1104,81 +1552,329 @@ function lobby.content(onClose, focus, onNewGame)
 		status = badge(_("Not connected"), "warning")
 	end
 
-	local function back(to)
-		return button(_("Back"), function()
-			queued:set(nil)
-			generate:set(false)
-			joiningS:set(nil)
-			pageS:set(to)
-		end)
-	end
 	local function modsButton()
-		local chosen = 0
-		for _i, m in ipairs(state.mods or {}) do
-			if m.chosen and m.choosable then chosen = chosen + 1 end
+		local missing = (tonumber(state.room_mods_missing) or 0) + (tonumber(state.room_mods_other) or 0)
+		local text
+		if missing > 0 then
+			text = string.format(_("Mods (%d missing)"), missing)
+		else
+			local chosen = 0
+			for _i, m in ipairs(state.mods or {}) do
+				if m.chosen and m.choosable then chosen = chosen + 1 end
+			end
+			text = string.format(_("Your mods (%d chosen)"), chosen)
 		end
-		return button(string.format(_("Your mods (%d chosen)"), chosen), function() modsS:set(true) end, nil,
+		return native.foot(text, function() modsS:set(true) end, nil,
 			#(state.mods or {}) > 0 or #(state.room_mods or {}) > 0)
 	end
 
-	-- Your mods: over whichever page opened it, with Back to it.
-	if modsS:old() and page ~= "choose" then
-		local playing = room and room.phase == "playing"
-		local rows = {}
-		for _i, m in ipairs(state.mods or {}) do
-			local tone = (m.class == "shared" and "info") or (m.class == "carried" and "warning") or "success"
-			local cells = {}
-			if m.choosable then
-				cells[#cells + 1] = button(m.chosen and _("On") or _("Off"), function()
-					send({ action = "choose_mod", id = m.id, chosen = not m.chosen }, nil)
-				end, m.chosen and "primary" or "secondary", canAct and not playing, m.reason)
-			else
-				cells[#cells + 1] = button(_("Needed"), function() end, "secondary", false, m.reason)
+	-- Installs the room's mods in `list` from Mod Hub: each looked up in
+	-- this player's Mod Hub first, then confirmed (the owner's number is
+	-- only a claim of where to get it).
+	local function lookUp(list)
+		changeInstalls(function(updated)
+			for _i, m in ipairs(list) do updated[m.id] = { number = m.modio, step = "looking" } end
+		end)
+		for _i, m in ipairs(list) do
+			roommods.lookUp(m.modio, function(details, why)
+				changeInstalls(function(now)
+					if details then
+						now[m.id] = { number = m.modio, step = "ask", details = details }
+					else
+						now[m.id] = { number = m.modio, step = "failed", why = why }
+					end
+				end)
+			end)
+		end
+	end
+	local function install(ids)
+		local asked = {}
+		changeInstalls(function(updated)
+			for _i, id in ipairs(ids) do
+				local one = updated[id]
+				if one and one.step == "ask" then
+					updated[id] = { number = one.number, step = "subscribing", details = one.details }
+					asked[#asked + 1] = { id = id, number = one.number }
+				end
 			end
-			cells[#cells + 1] = gap(10)
-			cells[#cells + 1] = label(m.name, m.choosable and "font-scale-body" or "font-scale-body, info")
-			cells[#cells + 1] = gap(8)
-			cells[#cells + 1] = badge(m.class == "shared" and _("every player needs it")
-				or m.class == "carried" and _("carried by the room") or _("only you see it"), tone)
-			rows[#rows + 1] = row(cells)
-			rows[#rows + 1] = gap(6)
+		end)
+		for _i, one in ipairs(asked) do
+			local id = one.id
+			roommods.install(one.number, function(why)
+				if why then
+					changeInstalls(function(now) now[id] = { number = one.number, step = "failed", why = why } end)
+				end
+			end)
 		end
-		if #rows == 0 then rows[1] = note(_("No mods installed besides the room's.")) end
-		local needs = {}
-		for _i, m in ipairs(state.room_mods or {}) do
-			local have = (m.have == "yes" and badge(_("You have it"), "success"))
-				or (m.have == "other_version" and badge(_("Another version"), "warning"))
-				or badge(_("You lack it"), "error")
-			needs[#needs + 1] = row({ label(m.id, "font-scale-body"), gap(6),
-				note(m.version ~= "" and ("v" .. m.version) or ""), gap(10), have })
-			needs[#needs + 1] = gap(4)
+	end
+	-- The game's own Mod Hub page of one of the room's mods, to see it and
+	-- subscribe there; once closed, an install it began is followed as one
+	-- begun here. False when the game could not show it.
+	local function hubPage(m)
+		return roommods.showDetails(commonParams, m.modio, m.name ~= "" and m.name or m.id, function()
+			if roommods.installState(m.modio) ~= "none" then
+				changeInstalls(function(now)
+					local one = now[m.id]
+					if one and one.step ~= "ask" and one.step ~= "failed" then return false end
+					now[m.id] = { number = m.modio, step = "subscribing" }
+				end)
+			end
+		end)
+	end
+	-- The room's save and mods, on the game's Load Game page; said here
+	-- when the game's page is not one this mod can pick on.
+	local function pickWorld()
+		local hosting = stateS:old() and pageOf(stateS:old()) == "host" and {
+			page = "host",
+			name = name:get(),
+			roomName = roomName:get(),
+			password = createPassword:get(),
+			players = playersS:old(),
+			rules = rulesS:old(),
+			public = publicS:old(),
+			competitive = competitiveS:old(),
+			-- A save picked before, with its mods: kept should this pick
+			-- end without one.
+			save = saveS:old(),
+			choice = hostChoiceRef:get(),
+		} or nil
+		onPick()
+		if roommods.isPicking() then
+			keptForPick = hosting
+		else
+			refusedS:set(_("The save can't be picked on this game's Load Game page: see the game's log"))
 		end
-		if (state.room_mods_more or 0) > 0 then
-			needs[#needs + 1] = note(string.format(_("and %d more"), state.room_mods_more))
-		end
-		local children = {
-			row({ button(_("Back"), function() modsS:set(false) end), gap(16),
-				heading(_("Your mods"), playing and _("The room's game has started: your choice holds for its next world.")
-					or _("Turn on the mods only you play with; the room's own every player needs.")) }),
-			builtin.ScrollArea{
-				meta = { styleSheet = style{ size = { WIDTH - 40, #needs > 0 and 200 or HEIGHT - 220 } } },
-				horizontalPolicy = builtin.type.ScrollBarPolicy.AlwaysOff,
-				verticalPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
-				content = column(rows),
+	end
+	-- No: the mods asked about go back to their Install.
+	local function cancelAsking()
+		changeInstalls(function(now)
+			for id, one in pairs(now) do
+				if one.step == "ask" then now[id] = nil end
+			end
+		end)
+	end
+
+	-- The game's tiles for `elements`, scrolled as its own pages scroll them.
+	local function tiles(elements, height, empty)
+		if #elements == 0 then return note(empty) end
+		return builtin.ScrollArea{
+			meta = { class = "tile-list-scroll", styleSheet = style{ size = { WIDTH - 40, height } } },
+			horizontalPolicy = builtin.type.ScrollBarPolicy.AlwaysOff,
+			verticalPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
+			content = builtin.Component{
+				layout = builtin.BoxLayout{
+					orientation = builtin.type.Orientation.Vertical,
+					children = { native.tiles.TileList{ elements = elements, numRows = -1, numCols = SIZE.TILE_COLUMNS } },
+				},
 			},
 		}
-		if #needs > 0 then
-			children[#children + 1] = gap(10)
-			children[#children + 1] = heading(_("The room's mods"), _("Every player needs these, from the room's start save."))
-			children[#children + 1] = builtin.ScrollArea{
-				meta = { styleSheet = style{ size = { WIDTH - 40, 140 } } },
-				horizontalPolicy = builtin.type.ScrollBarPolicy.AlwaysOff,
-				verticalPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
-				content = column(needs),
+	end
+	local calloutRef = commonParams and commonParams.calloutContainerRef
+
+	-- The room's mods as the game's mod selector shows mods: a tile each,
+	-- with whether this player has it, and Mod Hub's to install.
+	local function roomModsPanel()
+		local playing = room and room.phase == "playing"
+		local owner = room and room.you_own
+		local hub = roommods.hubState()
+		local installs = installsS:old()
+		local elements, missing, asking, looking = {}, {}, {}, 0
+		for _i, m in ipairs(state.room_mods or {}) do
+			local one = installs[m.id]
+			local versions = m.version ~= "" and ("v" .. m.version) or _("no version")
+			if m.yours ~= "" and m.yours ~= m.version then
+				versions = string.format(_("room v%s, yours v%s"), m.version, m.yours)
+			end
+			local details = table.concat({ m.id, versions, m.source ~= "" and m.source or "?" }, "  ·  ")
+			local icons = {}
+			if m.have == "yes" then
+				icons[#icons + 1] = { path = ICON.ready, label = _("Installed"), tooltip = details, secondary = false }
+			elseif one and one.step == "done" then
+				-- The game has it, the launcher does not find it (yet): not
+				-- the room's until it does.
+				icons[#icons + 1] = { path = ICON.alert, label = _("Installed, not found yet"), tooltip = details,
+					secondary = false, critical = false }
+			elseif m.have == "other_version" then
+				icons[#icons + 1] = { path = ICON.alert, label = _("Another version"), tooltip = details,
+					secondary = false, critical = false }
+			else
+				icons[#icons + 1] = { path = ICON.alert, label = _("Missing"), tooltip = details, secondary = false,
+					critical = false }
+			end
+			icons[#icons + 1] = {
+				path = m.modio ~= "" and "::/gui/menu/icons/mod_management/source_modio.tga" or ICON.save,
+				label = m.source == "mod.io" and "Mod Hub" or (m.source ~= "" and m.source or "?"),
+				tooltip = details,
+				secondary = true,
 			}
+			local buttons = {}
+			if m.have ~= "yes" and not owner then
+				if m.modio == "" then
+					icons[1].tooltip = details .. "\n" .. _("Not on Mod Hub: ask the owner where to get it")
+				elseif one and one.step == "looking" then
+					looking = looking + 1
+					buttons[1] = native.tileButton(_("Looking up..."), function() end, false)
+				elseif one and one.step == "ask" then
+					asking[#asking + 1] = { id = m.id, modio = m.modio, name = m.name, details = one.details }
+				elseif one and (one.step == "subscribing" or one.step == "downloading") then
+					buttons[1] = native.tileButton(_("Installing..."), function() end, false)
+				elseif one and one.step == "done" then
+					buttons[1] = native.tileButton(_("Look again"), function()
+						refusedS:set(act({ action = "rescan_mods" }))
+					end, canAct, _("Find the installed mods again"))
+				else
+					if one and one.step == "failed" then
+						icons[1].tooltip = details .. "\n" .. tostring(one.why)
+						icons[1].label = _("Install failed")
+					end
+					missing[#missing + 1] = { id = m.id, modio = m.modio }
+					-- The game's Mod Hub page of it, to see and subscribe; asked
+					-- here when the game cannot show it.
+					buttons[1] = native.tileButton(_("Install"), function()
+						if not hubPage(m) then lookUp({ { id = m.id, modio = m.modio } }) end
+					end, canAct and hub == "ok" and not playing, _("Its Mod Hub page, to see it and subscribe"))
+				end
+			end
+			local shown = not onlyMissingS:old() or m.have ~= "yes"
+			if shown then
+				elements[#elements + 1] = native.tiles.TileElement{
+					meta = { localKey = "room-mod-" .. m.id },
+					title = m.name ~= "" and m.name or m.id,
+					tileTooltip = details,
+					infoIcons = icons,
+					createImage = function() return lobby.modImage(m.id, m.modio) end,
+					-- A new list each time: the game's tile adds its Details
+					-- button to the list it is given.
+					createButtons = function()
+						local fresh = {}
+						for i, b in ipairs(buttons) do fresh[i] = b end
+						return fresh
+					end,
+					onClickDetails = function()
+						detailS:set({ id = m.id, text = (m.name ~= "" and m.name or m.id) .. ":  " .. details })
+					end,
+					calloutContainerRef = calloutRef,
+				}
+			end
 		end
-		return frame(_("Your mods"), status, column(children),
-			{ gui_react_util.makeHorizontalSpacer(), button(_("Close"), onClose) })
+
+		-- Asked to install, once Mod Hub answered for all: the mods as Mod
+		-- Hub names them, in place of the tiles, until the player says yes
+		-- or no.
+		if #asking > 0 and looking == 0 then return lobby.installCard(asking, install, cancelAsking, canAct, hubPage) end
+
+		local line, tone = lobby.roomModsLine(state)
+		local top = {}
+		if line then top[#top + 1] = badge(line, tone) end
+		top[#top + 1] = gap(12)
+		local detail = detailS:old()
+		top[#top + 1] = detail and note(detail.text) or gap(1)
+		top[#top + 1] = gui_react_util.makeHorizontalSpacer()
+		top[#top + 1] = button(onlyMissingS:old() and _("Show all") or _("Only missing"),
+			function() onlyMissingS:set(not onlyMissingS:old()) end, nil, true)
+		top[#top + 1] = gap(8)
+		if #missing > 0 and hub == "ok" then
+			top[#top + 1] = primary(string.format(_("Install all missing (%d)"), #missing), function()
+				lookUp(missing)
+			end, canAct and not playing, _("Look them up on Mod Hub, then install them"))
+		elseif #missing > 0 and hub == "signed_out" then
+			top[#top + 1] = note(_("Sign in to Mod Hub to install them"), "warning")
+			top[#top + 1] = gap(8)
+			top[#top + 1] = button(_("Mod Hub"), onModHub, nil, onModHub ~= nil)
+		elseif #missing > 0 then
+			top[#top + 1] = note(_("Mod Hub is not available"), "warning")
+		end
+		local children = { row(top, style{ size = { WIDTH - 40, 40 } }), gap(8) }
+		children[#children + 1] = tiles(elements, SIZE.MODS_HEIGHT,
+			onlyMissingS:old() and _("You have all of the room's mods.") or _("The room names no mods yet."))
+		if (state.room_mods_more or 0) > 0 then
+			children[#children + 1] = note(string.format(_("and %d more"), state.room_mods_more))
+		end
+		return column(children)
+	end
+
+	-- This player's own mods, the ones only they play with: the game's tiles
+	-- with its Activate button.
+	local function ownModsPanel(height)
+		local playing = room and room.phase == "playing"
+		local elements = {}
+		for _i, m in ipairs(state.mods or {}) do
+			if m.choosable then
+				elements[#elements + 1] = native.tiles.TileElement{
+					meta = { localKey = "own-mod-" .. m.id },
+					title = m.name,
+					tileTooltip = m.reason,
+					infoIcons = { {
+						path = m.class == "carried" and ICON.multiplayer or ICON.player,
+						label = m.class == "carried" and _("carried by the room") or _("only you see it"),
+						tooltip = m.reason,
+						secondary = false,
+					} },
+					createImage = function() return lobby.modImage(m.id, "") end,
+					createButtons = function()
+						return { native.mods.ModActivateButton{
+							active = m.chosen,
+							missing = false,
+							onValueChange = function(value)
+								if canAct and not playing then
+									send({ action = "choose_mod", id = m.id, chosen = value }, nil)
+								end
+							end,
+						} }
+					end,
+					onClickDetails = function()
+						detailS:set({ id = m.id, text = m.name .. " (" .. m.id .. "):  " .. tostring(m.reason) })
+					end,
+					calloutContainerRef = calloutRef,
+				}
+			end
+		end
+		local detail = detailS:old()
+		return column({
+			row({
+				note(playing and _("The room's game has started: your choice holds for its next world.")
+					or (detail and detail.text) or ""),
+			}, style{ size = { WIDTH - 40, 40 } }),
+			gap(8),
+			tiles(elements, height or SIZE.MODS_HEIGHT, _("No mods of your own besides the room's.")),
+		})
+	end
+
+	-- Your mods, outside a room: over whichever page opened it, with Back
+	-- to it.
+	if modsS:old() and page ~= "choose" and not room then
+		-- A running room that refused this game for its mods told them:
+		-- they show, to install what is missing, before joining again.
+		if #(state.room_mods or {}) > 0 then
+			local missing = (tonumber(state.room_mods_missing) or 0) + (tonumber(state.room_mods_other) or 0)
+			local count = #state.room_mods + (tonumber(state.room_mods_more) or 0)
+			return frame(_("Mods"), status, builtin.TabWidget{
+				orientation = builtin.type.TabOrientation.North,
+				deselectAllowed = false,
+				showIndicators = true,
+				value = roomTabS:old() == "own" and "own" or "mods",
+				tabs = {
+					native.tabOf("mods", missing > 0 and string.format(_("The room's mods (%d) · %d missing"), count,
+						missing) or string.format(_("The room's mods (%d)"), count), roomModsPanel()),
+					native.tabOf("own", _("Only for you"), ownModsPanel()),
+				},
+				onValueChange = function(value) roomTabS:set(value) end,
+			}, { gui_react_util.makeHorizontalSpacer() })
+		end
+		return frame(_("Your mods"), status, ownModsPanel(HEIGHT - 150), { gui_react_util.makeHorizontalSpacer() })
+	end
+
+	-- The small buttons of a page's footer on its left, then what is on its
+	-- right, as the room's footer lays them out.
+	local function footerOf(left, right)
+		local smalls = {}
+		for _i, item in ipairs(left) do
+			if #smalls > 0 then smalls[#smalls + 1] = gap(8) end
+			smalls[#smalls + 1] = item
+		end
+		local footer = { row(smalls), gui_react_util.makeHorizontalSpacer() }
+		for _i, item in ipairs(right or {}) do footer[#footer + 1] = item end
+		return footer
 	end
 
 	-- Your banner, from the first page: the picture the others see on your
@@ -1191,7 +1887,7 @@ function lobby.content(onClose, focus, onNewGame)
 			if #cellsRow > 0 then cellsRow[#cellsRow + 1] = gap(10) end
 			cellsRow[#cellsRow + 1] = pictureCard(banner[2], picked and _("Yours") or " ", nil, nil, function()
 				send({ action = "set_banner", banner = banner[1] }, nil)
-			end, canAct, 196, 110)
+			end, canAct, MEMBER_WIDTH, MEMBER_HEIGHT)
 			if #cellsRow >= 7 then
 				rows[#rows + 1] = row(cellsRow)
 				rows[#rows + 1] = gap(10)
@@ -1205,40 +1901,45 @@ function lobby.content(onClose, focus, onNewGame)
 		for _i, id in ipairs(state.portraits or {}) do
 			if banners.portrait(id) then portraits[#portraits + 1] = id end
 		end
+		local cardsShown = {
+			native.card(_("Banners"), {
+				builtin.ScrollArea{
+					meta = { styleSheet = style{ size = { WIDTH - 64, #portraits > 0 and 300 or HEIGHT - 170 } } },
+					horizontalPolicy = builtin.type.ScrollBarPolicy.AlwaysOff,
+					verticalPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
+					content = column(rows),
+				},
+			}),
+		}
 		if #portraits > 0 then
-			rows[#rows + 1] = gap(16)
-			rows[#rows + 1] = heading(_("Characters"), _("A character of the campaign, beside your name."))
-			rows[#rows + 1] = gap(10)
+			local prows = {}
 			cellsRow = {}
 			for _i, id in ipairs(portraits) do
 				if #cellsRow > 0 then cellsRow[#cellsRow + 1] = gap(10) end
 				cellsRow[#cellsRow + 1] = lobby.portraitCard(id, state.banner == id, function()
 					send({ action = "set_banner", banner = id }, nil)
 				end, canAct)
-				if #cellsRow >= 9 then
-					rows[#rows + 1] = row(cellsRow)
-					rows[#rows + 1] = gap(10)
+				if #cellsRow >= 17 then
+					prows[#prows + 1] = row(cellsRow)
+					prows[#prows + 1] = gap(10)
 					cellsRow = {}
 				end
 			end
-			if #cellsRow > 0 then rows[#rows + 1] = row(cellsRow) end
+			if #cellsRow > 0 then prows[#prows + 1] = row(cellsRow) end
+			cardsShown[#cardsShown + 1] = gap(8)
+			cardsShown[#cardsShown + 1] = native.card(_("Characters"), {
+				builtin.ScrollArea{
+					meta = { styleSheet = style{ size = { WIDTH - 64, HEIGHT - 520 } } },
+					horizontalPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
+					verticalPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
+					content = column(prows),
+				},
+			})
 		end
-		return frame(_("Your banner"), status, column({
-			row({
-				button(_("Back"), function() bannerS:set(false) end),
-				gap(16),
-				heading(_("Your banner"), _("The picture the others see on your card in a room.")),
-				gui_react_util.makeHorizontalSpacer(),
-				button(_("Default"), function() send({ action = "set_banner", banner = "" }, nil) end, nil,
-					canAct and state.banner ~= nil and state.banner ~= ""),
-			}),
-			builtin.ScrollArea{
-				meta = { styleSheet = style{ size = { WIDTH - 40, HEIGHT - 220 } } },
-				horizontalPolicy = builtin.type.ScrollBarPolicy.AlwaysOff,
-				verticalPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
-				content = column(rows),
-			},
-		}), { gui_react_util.makeHorizontalSpacer(), button(_("Close"), onClose) })
+		return frame(_("Your banner"), status, column(cardsShown), footerOf({
+			native.foot(_("Default"), function() send({ action = "set_banner", banner = "" }, nil) end, nil,
+				canAct and state.banner ~= nil and state.banner ~= "", _("The banner your key gives")),
+		}))
 	end
 
 	-- The server this launcher plays on, from the first page: shown,
@@ -1258,36 +1959,29 @@ function lobby.content(onClose, focus, onNewGame)
 		end
 		-- The launcher's own errors show at the top, as on every page.
 		local problem = serverErrorS:old()
+		local width = SIZE.ROOM_RIGHT
 		local children = {
-			row({
-				button(_("Back"), function()
-					serverS:set(false)
-					serverErrorS:set(nil)
-					serverText:set(nil)
-				end),
-				gap(16),
-				heading(_("Server"), string.format(_("Now: %s%s"), serverName(state),
-					onDefault and _(" (default)") or "")),
-			}),
+			native.entry(_("Playing on"), label(serverName(state) .. (onDefault and _(" (default)") or "")), width),
+			gap(8),
 			field(_("Server address (host:port)"), serverText, state.server_default ~= "" and state.server_default or "host:port",
 				{ maxLength = 128, onEnter = function(value) if usable then use(value) end end }),
 			problem and label(problem, "font-scale-body, error") or gap(1),
 			gap(8),
+			note(_("Changing the server disconnects you and connects to the new one. Invites only join rooms on your own server.")),
 		}
-		local buttons = {
-			primary(_("Use this server"), function() use(serverText:get() or "") end, usable),
-		}
+		local right = {}
 		if not onDefault then
-			buttons[#buttons + 1] = gap(8)
-			buttons[#buttons + 1] = button(_("Reset to default"), function() use("") end, nil, usable)
+			right[#right + 1] = native.foot(_("Reset to default"), function() use("") end, nil, usable)
+			right[#right + 1] = gap(8)
 		end
-		children[#children + 1] = row(buttons)
-		children[#children + 1] = gap(12)
-		children[#children + 1] = note(_("Changing the server disconnects you and connects to the new one. Invites only join rooms on your own server."))
-		children[#children + 1] = gap(12)
-		children[#children + 1] = logSession()
-		return frame(_("Server"), status, column(children, style{ size = { LEFT + 100, AUTO } }),
-			{ gui_react_util.makeHorizontalSpacer(), button(_("Close"), onClose) })
+		right[#right + 1] = native.foot(_("Use this server"), function() use(serverText:get() or "") end, "primary", usable)
+		return frame(_("Server"), status, row({
+			native.card(_("Server"), { column(children, style{ size = { width - 24, 190 } }) }),
+			gap(16),
+			native.card(_("Diagnostics"), { column({
+				logSession(),
+			}, style{ size = { SIZE.ROOM_LEFT - 24, 190 } }) }),
+		}), footerOf({}, right))
 	end
 
 	-- A friend's invite is a complete journey, including first connection.
@@ -1300,21 +1994,16 @@ function lobby.content(onClose, focus, onNewGame)
 			connectedAction({ action = "join", invite = code, password = joinPassword:get() or "" }, _("Joining the room..."))
 		end
 		return frame(_("Join a friend"), status, row({
-			column({
-				heading(_("Your next journey, together"), _("Three details. One shared world.")), gap(16),
+			native.card(_("Join a friend"), { column({
 				field(_("Your name"), name, state.name ~= "" and state.name or _("Your name"), { maxLength = 32 }),
 				field(_("Invite code"), invite, "K7QM2X", { maxLength = 16 }),
 				field(_("Password (optional)"), joinPassword, "", { password = true, maxLength = 64 }),
-				gap(12), primary(_("Join room"), joinFriend, canAct and not busy),
-			}, style{ size = { LEFT, 390 } }), gap(30),
-			column({ icon(ICON.multiplayer, 64), gap(20), heading(_("Meet in your friend's world")),
-				note(_("Ask your friend for the code shown in their lobby.")), gap(10),
-				note(_("We connect you and load the room's world together.")),
-			}, style{ size = { RIGHT, AUTO } }),
-		}), { back("choose"), gui_react_util.makeHorizontalSpacer(), button(_("Close"), onClose) })
+			}, style{ size = { SIZE.ROOM_RIGHT - 24, AUTO } }) }),
+		}), footerOf({}, { native.foot(_("Join room"), joinFriend, "primary", canAct and not busy) }))
 	end
 
-	-- The first page: identity, then a clear choice of hosting or discovery.
+	-- The first page: identity, then a clear choice of hosting or discovery,
+	-- as two of the main menu's big cards.
 	if page == "choose" then
 		local connecting = state.connection == "connecting"
 		local function connect()
@@ -1324,7 +2013,7 @@ function lobby.content(onClose, focus, onNewGame)
 		end
 		local top
 		if connected then
-			top = note(string.format(_("Online on %s. Join a room someone hosts, or host your own."), serverName(state)))
+			top = gap(1)
 		else
 			top = row({
 				label(_("Your name"), "font-scale-body"),
@@ -1332,10 +2021,14 @@ function lobby.content(onClose, focus, onNewGame)
 				input(name, state.name ~= "" and state.name or _("Your name"), 260,
 					{ maxLength = 32, acceptOnFocusLoss = true }),
 				gap(10),
-				primary(connecting and _("Connecting...") or string.format(_("Connect to %s"), serverName(state)),
-					connect, canAct and not connecting and not busy),
+				native.foot(connecting and _("Connecting...") or string.format(_("Connect to %s"), serverName(state)),
+					connect, "primary", canAct and not connecting and not busy),
 			}, style{ size = { WIDTH - 40, 42 } })
 		end
+		local lefts = {}
+		if connected then lefts[#lefts + 1] = native.foot(_("Disconnect"), disconnect, "error-tape", canAct) end
+		lefts[#lefts + 1] = native.foot(_("Server..."), function() serverS:set(true) end, nil, canAct)
+		lefts[#lefts + 1] = native.foot(_("Your banner"), function() bannerS:set(true) end, nil, canAct)
 		return frame(
 			_("Build something together"),
 			status,
@@ -1343,26 +2036,18 @@ function lobby.content(onClose, focus, onNewGame)
 				top,
 				gap(24),
 				row({
-					lobby.choiceCard(_("Join a room"),
-						_("Browse the public rooms, or join a friend's with its invite"),
-						"::/gui/menu/images/m05_ingame.tga", function() pageS:set("join") end, canAct and not busy),
+					gui_react_util.makeHorizontalSpacer(),
+					lobby.choiceCard(_("Join a room"), nil,
+						"::/gui/menu/images/m05_ingame.tga", function() pageS:set("join") end, canAct and not busy,
+						"bottom-left"),
 					gap(24),
-					lobby.choiceCard(_("Host a room"),
-						_("Create a new world or continue a saved journey"),
-						"::/gui/menu/images/m02_ingame.tga", function() pageS:set("host") end, canAct and not busy),
+					lobby.choiceCard(_("Host a room"), nil,
+						"::/gui/menu/images/m02_ingame.tga", function() pageS:set("host") end, canAct and not busy,
+						"top-right"),
+					gui_react_util.makeHorizontalSpacer(),
 				}, style{ size = { WIDTH - 40, CHOICE_HEIGHT } }),
 			}, style{ size = { WIDTH - 40, CHOICE_HEIGHT + 70 } }),
-			{
-				connected and button(_("Disconnect"), disconnect, nil, canAct) or gap(1),
-				gap(8),
-				button(_("Server..."), function() serverS:set(true) end, nil, canAct),
-				gap(8),
-				button(_("Your banner"), function() bannerS:set(true) end, nil, canAct),
-				gui_react_util.makeHorizontalSpacer(),
-				logSession(),
-				gap(12),
-				button(_("Close"), onClose),
-			}
+			footerOf(lefts, { logSession() })
 		)
 	end
 
@@ -1379,11 +2064,15 @@ function lobby.content(onClose, focus, onNewGame)
 	-- Join: the public rooms, as cards, and an invite.
 	if page == "join" then
 		if not connected then
-			return frame(_("Discover public rooms"), status, column({
-				heading(_("Find your next shared journey"), _("Connect to see rooms you can join.")), gap(16),
-				field(_("Your name"), name, state.name ~= "" and state.name or _("Your name"), { maxLength = 32 }),
-				primary(_("Browse rooms"), function() connectedAction({ action = "list_rooms", page = 0 }, _("Finding rooms...")) end, canAct and not busy),
-			}, style{ size = { LEFT, 220 } }), { back("choose"), gui_react_util.makeHorizontalSpacer(), button(_("Close"), onClose) })
+			return frame(_("Discover public rooms"), status, row({
+				native.card(_("Your name"), { column({
+					field(_("Your name"), name, state.name ~= "" and state.name or _("Your name"), { maxLength = 32 }),
+				}, style{ size = { SIZE.ROOM_RIGHT - 24, AUTO } }) }),
+			}), footerOf({ modsButton() }, {
+				native.foot(_("Browse rooms"), function()
+					connectedAction({ action = "list_rooms", page = 0 }, _("Finding rooms..."))
+				end, "primary", canAct and not busy),
+			}))
 		end
 		local list = state.rooms
 		local found = list and list.list or {}
@@ -1418,32 +2107,24 @@ function lobby.content(onClose, focus, onNewGame)
 		end
 		local children = {
 			row({
-				back("choose"),
-				gap(16),
-				heading(string.format(_("Public rooms on %s"), serverName(state)),
-					_("Click a room to join it.")),
 				gui_react_util.makeHorizontalSpacer(),
 				button(_("Previous"), function() askPage(at - 1) end, nil, canAct and at > 0),
 				gap(6),
 				button(_("Next"), function() askPage(at + 1) end, nil, canAct and list ~= nil and list.more),
 				gap(6),
 				button(_("Refresh"), function() askPage(at) end, nil, canAct),
-				gap(6),
-				button(_("Join with code"), function()
-					joiningS:set(nil)
-					codeS:set(true)
-				end, nil, canAct),
-			}),
+			}, style{ size = { WIDTH - 64, 36 } }),
+			gap(6),
 			builtin.ScrollArea{
-				meta = { styleSheet = style{ size = { WIDTH - 40, HEIGHT - 290 } } },
+				meta = { styleSheet = style{ size = { WIDTH - 64, HEIGHT - 250 } } },
 				horizontalPolicy = builtin.type.ScrollBarPolicy.AlwaysOff,
 				verticalPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
 				content = column(rows),
 			},
-			gap(10),
 		}
 		local joining = joiningS:old()
 		if joining then
+			children[#children + 1] = gap(8)
 			children[#children + 1] = row({
 				label(string.format(_("%s has a password:"), joining.name), "font-scale-body"),
 				gap(8),
@@ -1457,34 +2138,68 @@ function lobby.content(onClose, focus, onNewGame)
 				button(_("Cancel"), function() joiningS:set(nil) end),
 			})
 		end
-		local body = column(children)
-		-- Join with code: a popup over the room list, with the invite, a
-		-- password and Join or Cancel.
+		local body = native.card(string.format(_("Public rooms on %s"), serverName(state)), { column(children) })
+		local right = { native.foot(_("Join with code"), function()
+			joiningS:set(nil)
+			codeS:set(true)
+		end, "primary", canAct) }
+		-- Join with code: in place of the room list, laid out as the Host
+		-- page: the picture of joining on the left, the invite (large, as
+		-- the room's page shows it), its password and where it joins on the
+		-- right; Join or Cancel below.
 		if codeS:old() then
-			body = column({
-				row({
-					heading(_("Join with code"), _("A friend's room: the invite code they sent you, and its password if it has one.")),
-				}),
-				field(_("Invite code"), invite, "K7QM2X", { maxLength = 128 }),
-				field(_("Password (if the room has one)"), joinPassword, "", { password = true, maxLength = 64 }),
-				row({
-					primary(_("Join"), function()
-						codeS:set(false)
-						joinBy(invite:get(), joinPassword:get())
-					end, canAct and not busy),
-					gap(8),
-					button(_("Cancel"), function() codeS:set(false) end),
-				}),
-			}, style{ size = { LEFT, AUTO }, padding = { 16, 16, 16, 16 } })
+			local function join()
+				codeS:set(false)
+				joinBy(invite:get(), joinPassword:get())
+			end
+			local tall = SIZE.PREVIEW_HEIGHT + SIZE.PLAYERS_HEIGHT + 46
+			local picture = pictureCard(lobby.fullPicture("::/gui/menu/images/m05_ingame.tga"), _("Join with code"),
+				_("Six letters and digits, on the room's page of whoever hosts it"), nil, nil, true,
+				SIZE.ROOM_LEFT - 24, tall, nil, "bottom-left")
+			local code = builtin.TextInputField{
+				meta = { class = "font-scale-title-2", styleSheet = style{ size = { SIZE.ROOM_RIGHT - 44, 64 } } },
+				value = invite:get(),
+				placeholderText = "K7QM2X",
+				maxLength = 128,
+				acceptOnFocusLoss = true,
+				resetValueOnCancel = false,
+				onValueChange = function(value) invite:set(value) end,
+				onTyping = function(value) invite:set(value) end,
+			}
+			body = row({
+				column({ native.card(_("Room"), { picture }) }, style{ size = { SIZE.ROOM_LEFT, AUTO } }),
+				gap(16),
+				column({
+					-- From the top: the code, its password, then where it joins;
+					-- what is left below.
+					native.card(_("Invite"), { column({
+						column({
+							note(_("Invite code")),
+							gap(4),
+							code,
+						}, style{ size = { SIZE.ROOM_RIGHT - 44, 100 } }),
+						gap(12),
+						note(_("Password (if the room has one)")),
+						gap(4),
+						input(joinPassword, "", SIZE.ROOM_RIGHT - 44, { password = true, maxLength = 64 }),
+						gap(24),
+						native.entry(_("Server"), label(serverName(state), "font-scale-body")),
+						native.entry(_("You join as"), label(state.name ~= "" and state.name or "?", "font-scale-body")),
+						gui_react_util.makeVerticalSpacer(),
+					}, style{ size = { SIZE.ROOM_RIGHT - 24, tall } }) }),
+				}, style{ size = { SIZE.ROOM_RIGHT, AUTO } }),
+			})
+			right = {
+				native.foot(_("Cancel"), function() codeS:set(false) end),
+				gap(8),
+				native.foot(_("Join"), join, "primary", canAct and not busy),
+			}
 		end
-		return frame(_("Join a room"), status, body, {
-			modsButton(),
-			gui_react_util.makeHorizontalSpacer(),
-			button(_("Close"), onClose),
-		})
+		return frame(_("Join a room"), status, body, footerOf({ modsButton() }, right))
 	end
 
-	-- Host: the room's settings, and Create.
+	-- Host: the room's world, as the room shows it, and its settings, and
+	-- Create.
 	if page == "host" then
 		local rules = state.rules or {}
 		local rulesItems = {}
@@ -1497,10 +2212,6 @@ function lobby.content(onClose, focus, onNewGame)
 			if offered.name == (pickedRules or (rules[1] and rules[1].name)) then explainRules = offered.description end
 		end
 		local saves = state.saves or {}
-		local saveItems = { { "", _("Create a new world...") } }
-		for _i, save in ipairs(saves) do
-			if not hookCopy(save) then saveItems[#saveItems + 1] = { save, save } end
-		end
 		local pickedSave = saveS:old()
 		if pickedSave == nil then
 			pickedSave = ""
@@ -1541,47 +2252,55 @@ function lobby.content(onClose, focus, onNewGame)
 				and string.format(_("Listed for everyone on %s: %s, %s."), serverName(state),
 					lobby.climateName(details.map), details.year > 0 and tostring(details.year) or _("year unknown"))
 				or string.format(_("Listed for everyone on %s."), serverName(state)))
-			or _("Only players you send the invite to can find it.")
-		return frame(_("Host a room"), status, column({
-			row({ back("choose"), gap(16),
-					heading(_("Make it your own"), _("Choose your world, play style and who can join.")) }),
-			row({
-				column({
-					not connected and field(_("Your name"), name, state.name ~= "" and state.name or _("Your name"), { maxLength = 32 }) or gap(1),
-					field(_("Room name"), roomName, string.format(_("%s's room"), state.name), { maxLength = 48 }),
-					choice(_("Start from this save"), pickedSave, saveItems, function(value) saveS:set(value) end,
-						pickedSave ~= "" and _("Every player's game loads it from the menu when you start.")
-							or _("Choose your map and settings on the next screen.")),
-					choice(_("Players"), playersS:old(), playersItems, function(value) playersS:set(value) end),
-				}, style{ size = { LEFT, AUTO } }),
-				gap(30),
-				column({
-					note(_("How you play")),
-					gap(4),
-					row({
-						lobby.styleCard(false, competitiveS:old() ~= true, function() competitiveS:set(false) end, canAct),
-						gap(12),
-						lobby.styleCard(true, competitiveS:old() == true, function() competitiveS:set(true) end, canAct),
-					}),
-					gap(4),
-					note(competitiveS:old() and _("Each player founds a company of their own in the game.")
-						or _("Everyone plays for the room's one company.")),
-					gap(10),
-					choice(_("Who can find it"), public and "public" or "private", {
-						{ "private", _("Private: invite only") },
-						{ "public", _("Public: in the room list") },
-					}, function(value) publicS:set(value) end, where),
-					#rulesItems > 1 and choice(_("Rules"), pickedRules or rulesItems[1][1], rulesItems,
-						function(value) rulesS:set(value) end, explainRules) or gap(1),
-					field(_("Password (optional)"), createPassword, "", { password = true, maxLength = 64 }),
-				}, style{ size = { RIGHT, AUTO } }),
-			}),
-		}), {
-			modsButton(),
-			gui_react_util.makeHorizontalSpacer(),
-			button(_("Close"), onClose),
-			primary(_("Create room"), create, canAct and not busy),
-		})
+			or nil
+		-- The world, as the room's page shows it: a click picks the save,
+		-- its mods and their settings on the game's Load Game page.
+		local worldTitle, worldPicture
+		if pickedSave ~= "" then
+			worldTitle = lobby.startLine({ name = pickedSave, map = details and details.map or "",
+				year = details and details.year or 0, arrived = true })
+			worldPicture = details and details.shot and {
+				data_native = details.shot.data,
+				size = api.type.Vec2i.new(details.shot.width, details.shot.height),
+				scaling = builtin.type.ImageViewScaling.AutoZoom,
+			} or lobby.fullPicture(details and details.map ~= "" and lobby.bigClimatePicture(details.map) or COOP_PICTURE)
+		else
+			worldTitle = _("New world")
+			worldPicture = lobby.fullPicture("::/gui/menu/images/temperate_ingame.tga")
+		end
+		local world = pictureCard(worldPicture, worldTitle,
+			pickedSave ~= "" and _("Click to choose the save and mods")
+				or _("Choose your map and settings on the next screen."), nil,
+			onPick and pickWorld or nil, canAct and not busy, SIZE.ROOM_LEFT - 24,
+			SIZE.PREVIEW_HEIGHT, nil, "bottom-left")
+		local left = column({
+			native.card(_("World"), { world }),
+			gap(8),
+			native.card(_("How you play"), { column({
+				row({
+					lobby.styleCard(false, competitiveS:old() ~= true, function() competitiveS:set(false) end, canAct),
+					gap(12),
+					lobby.styleCard(true, competitiveS:old() == true, function() competitiveS:set(true) end, canAct),
+				}),
+			}, style{ size = { SIZE.ROOM_LEFT - 24, SIZE.PLAYERS_HEIGHT } }) }),
+		}, style{ size = { SIZE.ROOM_LEFT, AUTO } })
+		local right = column({
+			native.card(_("Room"), { column({
+				not connected and field(_("Your name"), name, state.name ~= "" and state.name or _("Your name"), { maxLength = 32 }) or gap(1),
+				field(_("Room name"), roomName, string.format(_("%s's room"), state.name), { maxLength = 48 }),
+				choice(_("Players"), playersS:old(), playersItems, function(value) playersS:set(value) end),
+				choice(_("Who can find it"), public and "public" or "private", {
+					{ "private", _("Private: invite only") },
+					{ "public", _("Public: in the room list") },
+				}, function(value) publicS:set(value) end, where),
+				#rulesItems > 1 and choice(_("Rules"), pickedRules or rulesItems[1][1], rulesItems,
+					function(value) rulesS:set(value) end, explainRules) or gap(1),
+				field(_("Password (optional)"), createPassword, "", { password = true, maxLength = 64 }),
+			}, style{ size = { SIZE.ROOM_RIGHT - 24, SIZE.PREVIEW_HEIGHT + SIZE.PLAYERS_HEIGHT + 46 } }) }),
+		}, style{ size = { SIZE.ROOM_RIGHT, AUTO } })
+		return frame(_("Host a room"), status, row({ left, gap(16), right }), footerOf({ modsButton() }, {
+			native.foot(_("Create room"), create, "primary", canAct and not busy),
+		}))
 	end
 
 	-- In a room: players on the left, chat on the right.
@@ -1600,69 +2319,32 @@ function lobby.content(onClose, focus, onNewGame)
 		end
 	end
 	for _i, member in ipairs(room.members) do
-		local parts = { lobby.memberCard(member, playing) }
+		-- For the owner, a Remove in each other player's card's top left
+		-- corner (its check mark is in the top right), asked first: every
+		-- card stays as high as the others.
+		local extra = {}
 		if room.you_own and not member.you then
-			parts[#parts + 1] = gap(4)
+			local item
 			if confirm and confirm.kind == "kick" and confirm.id == member.id then
-				parts[#parts + 1] = row({
+				item = row({
 					button(_("Remove"), function()
 						send({ action = "kick", player = member.id }, string.format(_("Removing %s..."), member.name))
-					end, "primary", canAct),
+					end, "error-tape", canAct),
 					gap(4),
 					button(_("Keep"), function() confirmS:set(nil) end),
 				})
 			else
-				parts[#parts + 1] = row({
-					button_react_util.makeIconButton(nil, ICON.kick, function()
-						confirmS:set({ kind = "kick", id = member.id, name = member.name })
-					end, string.format(_("Remove %s from the room"), member.name)),
-				})
+				item = button_react_util.makeIconButton(nil, ICON.kick, function()
+					confirmS:set({ kind = "kick", id = member.id, name = member.name })
+				end, string.format(_("Remove %s from the room"), member.name))
 			end
+			extra[1] = builtin.FloatingLayoutChild{ h = 0.03, v = 0.06, item = item }
 		end
 		if #cells > 0 then cells[#cells + 1] = gap(12) end
-		cells[#cells + 1] = column(parts)
+		cells[#cells + 1] = lobby.memberCard(member, playing, extra)
 		if #cells >= 3 then flush() end
 	end
 	flush()
-
-	local roomHeader = column({
-		row({
-			label(room.name, "font-scale-title-3"),
-			gap(8),
-			room.has_password and icon(ICON.lock, 18) or gap(1),
-			gap(8),
-			badge(room.competitive and _("Competitive") or _("Co-op"), room.competitive and "warning" or "success"),
-			gui_react_util.makeHorizontalSpacer(),
-		}),
-		gap(6),
-		row({
-			note(_("Invite code  ")),
-			label(room.invite ~= "" and inviteCode(room.invite) or "-", "font-scale-title-4, info"),
-			gap(10),
-			-- The hook puts it on the clipboard (the game's GUI has no
-			-- clipboard of its own); "Copied" for a moment after.
-			button(copiedS:old() > 0 and _("Copied") or _("Copy"), function()
-				local refused = act({ action = "copy", text = inviteCode(room.invite) })
-				refusedS:set(refused)
-				if not refused then copiedS:set(COPIED_POLLS) end
-			end, nil, room.invite ~= "", _("Copy the invite code, to paste it to your friends")),
-		}),
-		note(_("Send it to friends: they join with it from their game's Multiplayer window.")),
-		gap(10),
-		note(string.format(_("%d of %d players  ·  %d ready"), #room.members, room.max_players, readyCount(room))),
-		gap(8),
-	})
-
-	local players = column({
-		roomHeader,
-		heading(_("Players")),
-		builtin.ScrollArea{
-			meta = { styleSheet = style{ size = { LEFT, HEIGHT - 330 } } },
-			horizontalPolicy = builtin.type.ScrollBarPolicy.AlwaysOff,
-			verticalPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
-			content = column(memberRows),
-		},
-	}, style{ size = { LEFT, AUTO } })
 
 	local lines = state.chat or {}
 	local chatRows = {}
@@ -1676,9 +2358,7 @@ function lobby.content(onClose, focus, onNewGame)
 		})
 		chatRows[#chatRows + 1] = gap(3)
 	end
-	if #chatRows == 0 then
-		chatRows[1] = note(_("Nothing said yet. Say hello!"))
-	end
+	if #chatRows == 0 then chatRows[1] = gap(1) end
 	local function sendChat()
 		local msg = chatText:get()
 		if msg and not msg:match("^%s*$") then
@@ -1686,133 +2366,195 @@ function lobby.content(onClose, focus, onNewGame)
 			send({ action = "chat", text = msg }, nil)
 		end
 	end
-	-- The save the room starts from, for everyone; the owner picks it here
-	-- while the room is in its lobby, from the saves the Host page offers.
-	local startBlock
-	-- The chat takes what the start save leaves of the column.
-	local chatHeight = HEIGHT - 330
-	if playing then
-		startBlock = gap(1)
+
+	-- The save the room starts from, in a line.
+	local start, upload, pick = room.start, room.upload, pickS:old()
+	local startText
+	if pick then
+		startText = string.format(_("Reading %s..."), pick.save)
+	elseif upload then
+		startText = string.format(_("Sending %s to the room: %d%%"), upload.save, upload.percent)
+	elseif start then
+		startText = lobby.startLine(start)
+	elseif room.you_own then
+		startText = _("A new world: Set up world creates its map and settings")
 	else
-		local start, upload, pick = room.start, room.upload, pickS:old()
-		local line
-		if pick then
-			line = string.format(_("Reading %s..."), pick.save)
-		elseif upload then
-			line = string.format(_("Sending %s to the room: %d%%"), upload.save, upload.percent)
-		elseif start then
-			line = lobby.startLine(start)
-		elseif room.you_own then
-			line = _("Choose Set up world to create the map and settings for everyone.")
-		else
-			line = _("The world the owner's game has.")
-		end
-		local children = {}
-		if room.you_own then
-			local current = (pick and pick.save) or (upload and upload.save) or (start and start.name) or ""
-			local items, listed = {}, false
-			for _i, save in ipairs(state.saves or {}) do
-				if not hookCopy(save) then
-					items[#items + 1] = { save, save }
-					if save == current then listed = true end
-				end
-			end
-			-- The room's own, even once it left the newest saves listed.
-			if current ~= "" and not listed then table.insert(items, 1, { current, current }) end
-			items[#items + 1] = { "", _("New world: choose map and settings") }
-			children[#children + 1] = choice(_("Start from this save"), current, items, function(value)
-				if value == current or not canAct then return end
-				confirmS:set(nil)
-				if value == "" then
-					send({ action = "choose_start", save = "" }, _("Changing the save..."))
-					return
-				end
-				local details = lobby.saveDetails(value)
-				if details.async then
-					pickS:set({ save = value, polls = 0 })
-				else
-					send({ action = "choose_start", save = value, map = details.map, year = details.year },
-						_("Changing the save..."))
-				end
-			end, line)
-			chatHeight = chatHeight - 92
-		else
-			children[#children + 1] = note(_("Starts from"))
-			children[#children + 1] = gap(4)
-			children[#children + 1] = label(line, "font-scale-body")
-			children[#children + 1] = gap(12)
-			chatHeight = chatHeight - 54
-		end
-		if upload then
-			children[#children + 1] = builtin.Component{
-				meta = { styleSheet = style{ size = { RIGHT - 20, 14 } } },
-				layout = builtin.BoxLayout{ children = { builtin.ProgressBar{ value = math.min(1, upload.percent / 100) } } },
-			}
-			children[#children + 1] = gap(8)
-			chatHeight = chatHeight - 22
-		end
-		startBlock = column(children)
+		startText = _("The world the owner's game has")
 	end
 
-	local chat = column({
-		startBlock,
-		heading(_("Chat")),
-		builtin.ScrollArea{
-			meta = { styleSheet = style{ size = { RIGHT, chatHeight } } },
-			horizontalPolicy = builtin.type.ScrollBarPolicy.AlwaysOff,
-			verticalPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
-			content = column(chatRows),
-		},
+	-- The room tab: the world and the players on the left, as the game's
+	-- Load Game page shows a save; the room's card, the chat and what the
+	-- player can do on the right.
+	-- The owner picks the save, its mods and their settings by clicking its
+	-- picture, as a save's tile opens it on the game's Load Game page.
+	-- A card as the players' are, the main menu's: the world's picture with
+	-- its name, and what a click does, on the card's band.
+	local pickable = room.you_own and not playing and onPick ~= nil
+	local preview = pictureCard(lobby.startPicture(room), startText,
+		pickable and _("Click to change the save and mods") or "", nil,
+		pickable and function()
+			confirmS:set(nil)
+			pickWorld()
+		end or nil,
+		not pickable or (canAct and not busy and pick == nil), SIZE.ROOM_LEFT - 24, SIZE.PREVIEW_HEIGHT, nil, "bottom-left")
+	local previewChildren = { preview }
+	if upload then
+		previewChildren[#previewChildren + 1] = gap(4)
+		previewChildren[#previewChildren + 1] = builtin.Component{
+			meta = { styleSheet = style{ size = { SIZE.ROOM_LEFT - 24, 10 } } },
+			layout = builtin.BoxLayout{ children = { builtin.ProgressBar{ value = math.min(1, upload.percent / 100) } } },
+		}
+	end
+	-- Two columns of the game's cards, each a card with its title on top and
+	-- one below it, the two rows as high on both sides: the world and the
+	-- players on the left, the room and its chat on the right.
+	local left = column({
+		native.card(_("World"), {
+			column(previewChildren, style{ size = { SIZE.ROOM_LEFT - 24, SIZE.PREVIEW_HEIGHT } }),
+		}),
 		gap(8),
-		row({
-			input(chatText, _("Say something to the room"), RIGHT - 100,
-				{ maxLength = 280, acceptOnFocusLoss = false, onEnter = function() sendChat() end }),
-			gap(8),
-			button(_("Send"), sendChat, nil, canAct),
-		}, style{ size = { RIGHT, 40 } }),
-	}, style{ size = { RIGHT, AUTO } })
+		native.card(string.format(_("Players  ·  %d of %d  ·  %d ready"), #room.members, room.max_players,
+			readyCount(room)), {
+			builtin.ScrollArea{
+				meta = { styleSheet = style{ size = { SIZE.ROOM_LEFT - 24, SIZE.PLAYERS_HEIGHT } } },
+				horizontalPolicy = builtin.type.ScrollBarPolicy.AlwaysOff,
+				verticalPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
+				content = column(memberRows),
+			},
+		}),
+	}, style{ size = { SIZE.ROOM_LEFT, AUTO } })
 
-	local footer = { modsButton() }
+	-- The room: its invite code first, as what its owner hands out, then
+	-- the rest in lines, and how this player's mods stand, which leads to
+	-- them.
+	local modsLine, modsTone = lobby.roomModsLine(state)
+	local info = {
+		note(_("Invite code")),
+		row({
+			label(room.invite ~= "" and inviteCode(room.invite) or "-", "font-scale-title-2, info"),
+			gui_react_util.makeHorizontalSpacer(),
+			-- The hook puts it on the clipboard (the game's GUI has no
+			-- clipboard of its own); "Copied" for a moment after.
+			button(copiedS:old() > 0 and _("Copied") or _("Copy"), function()
+				local refused = act({ action = "copy", text = inviteCode(room.invite) })
+				refusedS:set(refused)
+				if not refused then copiedS:set(COPIED_POLLS) end
+			end, nil, room.invite ~= "", _("Copy the invite code, to paste it to your friends")),
+		}, style{ size = { SIZE.ROOM_RIGHT - 44, 44 } }),
+		gap(10),
+		native.entry(_("Players"), label(string.format(_("%d of %d  ·  %d ready"), #room.members, room.max_players,
+			readyCount(room)))),
+		native.entry(_("Play style"), label(room.competitive and _("Competitive") or _("Co-op"))),
+		native.entry(_("Password"), label(room.has_password and _("Yes") or _("No"))),
+		native.entry(_("Server"), label(serverName(state))),
+		native.entry(_("Mods"), modsLine and button(modsLine, function() roomTabS:set("mods") end,
+			modsTone == "error" and "primary" or nil, true, _("The room's mods, and yours"))
+			or label(_("None named yet"))),
+	}
+	local right = column({
+		native.card(room.name, {
+			column(info, style{ size = { SIZE.ROOM_RIGHT - 24, SIZE.PREVIEW_HEIGHT } }),
+		}),
+		gap(8),
+		native.card(_("Chat"), {
+			column({
+				builtin.ScrollArea{
+					meta = { styleSheet = style{ size = { SIZE.ROOM_RIGHT - 24, SIZE.PLAYERS_HEIGHT - 48 } } },
+					horizontalPolicy = builtin.type.ScrollBarPolicy.AlwaysOff,
+					verticalPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
+					content = column(chatRows),
+				},
+				gap(8),
+				row({
+					input(chatText, _("Say something to the room"), SIZE.ROOM_RIGHT - 130,
+						{ maxLength = 280, acceptOnFocusLoss = false, onEnter = function() sendChat() end }),
+					gap(8),
+					button(_("Send"), sendChat, nil, canAct),
+				}, style{ size = { SIZE.ROOM_RIGHT - 24, 40 } }),
+			}, style{ size = { SIZE.ROOM_RIGHT - 24, SIZE.PLAYERS_HEIGHT } }),
+		}),
+	}, style{ size = { SIZE.ROOM_RIGHT, AUTO } })
+
+	local missing = (tonumber(state.room_mods_missing) or 0) + (tonumber(state.room_mods_other) or 0)
+	local roomModCount = #(state.room_mods or {}) + (tonumber(state.room_mods_more) or 0)
+	local ownCount = 0
+	for _i, m in ipairs(state.mods or {}) do
+		if m.choosable then ownCount = ownCount + 1 end
+	end
+	local tabs = {
+		native.tabOf("room", _("Room"), row({ left, gap(16), right })),
+		native.tabOf("mods", missing > 0 and string.format(_("The room's mods (%d) · %d missing"), roomModCount,
+			missing) or string.format(_("The room's mods (%d)"), roomModCount), roomModsPanel()),
+		native.tabOf("own", string.format(_("Only for you (%d)"), ownCount), ownModsPanel()),
+	}
+
+	-- At the bottom left, small and apart: leaving the room, a new world
+	-- instead of a save, and the owner's taking back that they are ready.
+	-- At the bottom right, alone, as the game's Load Game button: what
+	-- moves the room on.
+	local smalls = {}
+	local function small(item)
+		if #smalls > 0 then smalls[#smalls + 1] = gap(8) end
+		smalls[#smalls + 1] = item
+	end
 	if confirm and confirm.kind == "leave" then
-		footer[#footer + 1] = label(_("Leave the room?"), "font-scale-body, warning")
-		footer[#footer + 1] = button(_("Leave"), function()
+		small(label(_("Leave the room?"), "font-scale-body, warning"))
+		small(native.foot(_("Leave"), function()
 			pageS:set("choose")
 			send({ action = "leave" }, _("Leaving the room..."))
-		end,
-			"primary", canAct)
-		footer[#footer + 1] = button(_("Stay"), function() confirmS:set(nil) end)
+		end, "error-tape", canAct))
+		small(native.foot(_("Stay"), function() confirmS:set(nil) end))
 	else
-		footer[#footer + 1] = button(_("Leave room"), function() confirmS:set({ kind = "leave" }) end, nil, canAct)
+		small(native.foot(_("Leave room"), function() confirmS:set({ kind = "leave" }) end, "error-tape", canAct))
 	end
+	-- The small ones on the left, the button at the right edge; taking
+	-- back being ready, red as leaving, just before it.
+	local footer = { row(smalls) }
 	footer[#footer + 1] = gui_react_util.makeHorizontalSpacer()
-	footer[#footer + 1] = button(_("Close"), onClose)
+	if not playing and me and me.ready and room.you_own then
+		footer[#footer + 1] = native.foot(_("Not ready"), function()
+			send({ action = "ready", ready = false }, nil)
+		end, "error-tape", canAct and not busy)
+	end
 	if playing then
 		footer[#footer + 1] = note(_("The room's game is under way."))
+	elseif room.you_own and not (me and me.ready) and not state.start_save and onNewGame then
+		footer[#footer + 1] = native.wide(_("Set up world"), onNewGame, canAct and not busy,
+			_("Choose the map and settings, then start multiplayer"))
+	elseif room.you_own and me and me.ready then
+		local all = everyoneReady(room)
+		local waits = lobby.startWaits(room) or pickS:old() ~= nil
+		-- A player whose mods differ cannot start with the room (the server
+		-- refuses): said before, not after.
+		local differs
+		for _i, member in ipairs(room.members) do
+			local how = lobby.memberDiffers(member)
+			if how and not differs then differs = string.format("%s: %s", member.name, how) end
+		end
+		footer[#footer + 1] = native.wide(_("Start the game"), function()
+			send({ action = "start" }, _("Starting the room's game..."))
+		end, canAct and all and not waits and not differs and not busy,
+			(waits and _("The save is still on its way to the room"))
+				or differs
+				or (all and _("Every player's game loads the room's world")) or _("Waiting for everyone to be ready"))
+	elseif me and me.ready then
+		footer[#footer + 1] = native.foot(_("Not ready"), function()
+			send({ action = "ready", ready = false }, nil)
+		end, "error-tape", canAct and not busy)
 	else
-		if me and me.ready then
-			footer[#footer + 1] = button(_("Not ready"), function()
-				send({ action = "ready", ready = false }, nil)
-			end, nil, canAct and not busy)
-		elseif room.you_own and not state.start_save and onNewGame then
-			footer[#footer + 1] = primary(_("Set up world"), onNewGame, canAct and not busy,
-				_("Choose the map and settings, then start multiplayer"))
-		else
-			footer[#footer + 1] = primary(_("Ready"), function()
-				send({ action = "ready", ready = true }, _("Getting ready..."))
-			end, canAct and not busy)
-		end
-		if room.you_own then
-			local all = everyoneReady(room)
-			local waits = lobby.startWaits(room) or pickS:old() ~= nil
-			footer[#footer + 1] = primary(_("Start the game"), function()
-				send({ action = "start" }, _("Starting the room's game..."))
-			end, canAct and all and not waits and not busy,
-				(waits and _("The save is still on its way to the room"))
-					or (all and _("Every player's game loads the room's world")) or _("Waiting for everyone to be ready"))
-		end
+		footer[#footer + 1] = native.wide(_("Ready"), function()
+			send({ action = "ready", ready = true }, _("Getting ready..."))
+		end, canAct and not busy)
 	end
 
-	return frame(_("Your room"), status, row({ players, gap(30), chat }), footer)
+	return frame(_("Your room"), status, builtin.TabWidget{
+		orientation = builtin.type.TabOrientation.North,
+		deselectAllowed = false,
+		showIndicators = true,
+		value = roomTabS:old(),
+		tabs = tabs,
+		onValueChange = function(value) roomTabS:set(value) end,
+	}, footer)
 end
 
 -- The live line under a Multiplayer card on the main menu, from the lobby

@@ -31,17 +31,17 @@ use tpf3mp_bridge::{
 };
 use tpf3mp_net::close;
 use tpf3mp_proto::{
-    BoundedVec, ChatText, ContentDiff, ContentManifest, Event, EventBody, Invite, JoinRoom,
-    LaneDigest, LoadingStage, MAX_PREVIEW, MAX_ROOM_MEMBERS, Payload, PlayerId, Request,
-    RequestError, Resume, RoomPhase, RoomView, SavedWorld, SessionId, SnapshotId, Speed, StartSave,
-    Text, WorldOffer,
+    BoundedVec, ChatText, ContentDiff, Event, EventBody, Invite, JoinRoom, LaneDigest,
+    LoadingStage, MAX_PREVIEW, MAX_ROOM_MEMBERS, Payload, PlayerId, Request, RequestError, Resume,
+    RoomPhase, RoomView, SavedWorld, SessionId, SnapshotId, Speed, StartSave, Text, TurnStart,
+    WorldOffer,
 };
 use tpf3mp_snapshot::ManifestId;
 use tracing::{debug, info, warn};
 
 use crate::{
     Action, Client, ClientError, ClientEvent, ConnectOptions, Events, FollowError, Playout,
-    TurnFollower, Worlds, connect, transfer,
+    TurnFollower, Worlds, connect, picker::Declaration, transfer,
 };
 
 /// The agent's end of the link to the hook.
@@ -139,13 +139,18 @@ pub struct BridgeOptions {
 pub type ListsNow = Arc<dyn Fn() -> Option<ModLists> + Send + Sync>;
 /// Takes in how the room says this game differs; returns what to declare
 /// anew, if that changed.
-pub type Learn = Arc<dyn Fn(&ContentDiff) -> Option<ContentManifest> + Send + Sync>;
+pub type Learn = Arc<dyn Fn(&ContentDiff) -> Option<Declaration> + Send + Sync>;
+/// Takes in the room's mods as the room tells them, and whether this player
+/// owns the room now; returns what to declare anew, if that changed.
+pub type Adopt =
+    Arc<dyn Fn(Option<&tpf3mp_proto::RoomMods>, bool) -> Option<Declaration> + Send + Sync>;
 
 /// The launcher's mod picker, as a bridge asks it (`crate::picker::Mods`).
 #[derive(Clone)]
 pub struct PickerLink {
     pub lists: ListsNow,
     pub learn: Learn,
+    pub adopt: Adopt,
 }
 
 impl std::fmt::Debug for PickerLink {
@@ -200,8 +205,11 @@ pub enum Control {
     /// Everyone is asked to get ready again.
     StartWorld {
         start: Option<(PathBuf, StartSave)>,
-        declare: Option<ContentManifest>,
+        declare: Option<Declaration>,
     },
+    /// Declare this anew: the room's owner's new list of the room's mods,
+    /// or this player's content after the mods installed changed.
+    Declare(Declaration),
     /// Leave the room, which ends the session.
     Leave,
     /// The game the front end started has exited. Once its hook attached,
@@ -237,6 +245,8 @@ pub struct Status {
     pub notices: VecDeque<String>,
     /// How this player's game differs from the room's, while it does.
     pub content_diff: Option<ContentDiff>,
+    /// The room's mods, as its owner declared them and the room told them.
+    pub room_mods: Option<tpf3mp_proto::RoomMods>,
     /// The server's name for the current connection, which its log uses:
     /// what a player quotes to the server's operator.
     pub session: Option<SessionId>,
@@ -270,6 +280,7 @@ impl Default for Status {
             chat: VecDeque::new(),
             notices: VecDeque::new(),
             content_diff: None,
+            room_mods: None,
             session: None,
             outdated: false,
             announcement: None,
@@ -477,6 +488,53 @@ fn file_stamp(file: &Path) -> Option<FileStamp> {
     Some((metadata.len(), metadata.modified().ok()?))
 }
 
+/// The lists a game without the picker (`--mods`) loads the room's world
+/// with: the room's mods and settings as its owner declared them, when it
+/// did, then the player's listed personal mods; the listed ones alone
+/// otherwise. The content check made the listed shared mods the room's,
+/// but not the settings: without the room's, this game would load the
+/// save's while every other game loads the owner's.
+fn told_lists(
+    told: Option<&tpf3mp_proto::RoomMods>,
+    listed: Option<&ModLists>,
+) -> Option<ModLists> {
+    let Some(told) = told else {
+        return listed.cloned();
+    };
+    let shared = told
+        .mods
+        .iter()
+        .map(|m| tpf3mp_bridge::ModName::new(m.id.as_str()).ok())
+        .collect::<Option<Vec<_>>>()?;
+    Some(ModLists {
+        shared: tpf3mp_proto::BoundedVec::new(shared).ok()?,
+        personal: listed
+            .map(|lists| lists.personal.clone())
+            .unwrap_or_default(),
+        params: told.params.clone(),
+    })
+}
+
+/// Most events held after a game's turn stream until the room said its mods
+/// (which it does right after the join): far more than that moment brings.
+const MAX_HELD_EVENTS: usize = 4096;
+
+/// Most bytes held so, far below what the client's turn budget
+/// and the hook's outbox allow a hostile server to make this game hold.
+const MAX_HELD_BYTES: usize = 16 << 20;
+
+/// What any other held event is taken to cost.
+const HELD_EVENT_OVERHEAD: usize = 256;
+
+/// What a held event costs to hold: a turn as the follower weighs one.
+fn held_weight(event: &ClientEvent) -> usize {
+    match event {
+        // As the follower weighs a turn it holds: every event costs.
+        ClientEvent::Turn(turn) => crate::follower::turn_weight(turn),
+        _ => HELD_EVENT_OVERHEAD,
+    }
+}
+
 /// Couples one game's hook to one client.
 pub struct Bridge<L> {
     link: L,
@@ -537,7 +595,7 @@ pub struct Bridge<L> {
     start_held: Option<SnapshotId>,
     /// What to declare to the room before naming the save on its way: the
     /// room's shared mods follow it.
-    start_declare: Option<ContentManifest>,
+    start_declare: Option<Declaration>,
     /// The save told to the room to start from, and its file's size and
     /// time as it was read.
     start_told: Option<(SavedWorld, FileStamp)>,
@@ -562,7 +620,20 @@ pub struct Bridge<L> {
     build: Option<String>,
     /// What this game last declared to the room in the session, when the
     /// picker changed it: declared again on a new connection.
-    declared: Option<ContentManifest>,
+    declared: Option<Declaration>,
+    /// The room's mods and settings as its owner last declared them
+    /// (`RoomMods`), for a game without the picker (`--mods`).
+    told: Option<Box<tpf3mp_proto::RoomMods>>,
+    /// Whether the room said its mods on this session (`RoomMods`, which it
+    /// sends every member once a connection, `None` included), and the
+    /// turn stream that would begin the game held until it has: the lists
+    /// the game begins with carry the room's mods and settings.
+    room_heard: bool,
+    held_stream: Option<TurnStart>,
+    /// What came after that stream until then, taken up in order after it.
+    held_events: VecDeque<ClientEvent>,
+    /// The commands' bytes among them.
+    held_bytes: usize,
     /// What the hook said while the bridge had no connection, rejoining:
     /// read so the game's window still reaches the launcher (its Leave
     /// above all), and taken up first once the room is back.
@@ -574,6 +645,26 @@ pub struct Bridge<L> {
 const MAX_HELD: usize = 4096;
 
 impl<L: HookLink> Bridge<L> {
+    /// A new connection to the room: it is told the room's mods anew, which
+    /// may have changed while this game was away, and what was held for the
+    /// one before goes with it.
+    fn on_new_connection(&mut self) {
+        self.room_heard = false;
+        self.held_stream = None;
+        self.held_events.clear();
+        self.held_bytes = 0;
+    }
+
+    /// The lists this game loads the room's worlds with: the picker's, or
+    /// without it the room's as told (`--mods`); none, and a world loads
+    /// with its save's own mods.
+    fn load_lists(&self) -> Option<ModLists> {
+        match &self.options.picker {
+            Some(picker) => (picker.lists)(),
+            None => told_lists(self.told.as_deref(), self.options.mods.as_ref()),
+        }
+    }
+
     pub fn new(link: L, options: BridgeOptions) -> Self {
         let now = Instant::now();
         let (done_tx, done_rx) = mpsc::unbounded_channel();
@@ -631,6 +722,11 @@ impl<L: HookLink> Bridge<L> {
             options,
             build: None,
             declared: None,
+            told: None,
+            room_heard: false,
+            held_stream: None,
+            held_events: VecDeque::new(),
+            held_bytes: 0,
             held: VecDeque::new(),
         }
     }
@@ -1125,7 +1221,7 @@ impl<L: HookLink> Bridge<L> {
     fn change_start_world(
         &mut self,
         start: Option<(PathBuf, StartSave)>,
-        declare: Option<ContentManifest>,
+        declare: Option<Declaration>,
         client: &Client,
     ) {
         if self.begun || self.room_phase != Some(RoomPhase::Lobby) {
@@ -1151,13 +1247,18 @@ impl<L: HookLink> Bridge<L> {
         {
             info!(file = %file.display(), "the owner describes the save the room starts from");
             self.options.start_save = Some(save.clone());
-            self.request(
-                client,
-                Request::StartWorld {
-                    world: *told,
-                    save: save.clone(),
-                },
-            );
+            // Its mods or their settings picked anew: the room takes them
+            // before what it shows of the save, in that order.
+            let mut requests = Vec::new();
+            if let Some(declaration) = declare {
+                self.declared = Some(declaration.clone());
+                requests.push(declaration.request());
+            }
+            requests.push(Request::StartWorld {
+                world: *told,
+                save: save.clone(),
+            });
+            self.requests_in_order(client, requests);
             return;
         }
         self.options.start_generated_world = start.is_none();
@@ -1193,7 +1294,7 @@ impl<L: HookLink> Bridge<L> {
                 let attempt = self.start_attempt;
                 tokio::spawn(async move {
                     let declared = match declare {
-                        Some(manifest) => requests.done(Request::DeclareContent(manifest)).await,
+                        Some(declaration) => requests.done(declaration.request()).await,
                         None => Ok(()),
                     };
                     match declared.and(requests.done(Request::ClearStartWorld).await) {
@@ -1341,7 +1442,37 @@ impl<L: HookLink> Bridge<L> {
         event: ClientEvent,
         client: &Client,
     ) -> Result<Option<BridgeEnd>, BridgeFault> {
+        // A held stream's game follows it, never before it: its turns and
+        // what the game is asked. The room's view, its mods, chat, previews
+        // and losing the connection are taken up at once (the room's owner
+        // among them, before its mods are adopted).
+        if self.held_stream.is_some()
+            && matches!(
+                event,
+                ClientEvent::TurnStream(_)
+                    | ClientEvent::Turn(_)
+                    | ClientEvent::Diverged { .. }
+                    | ClientEvent::Upload { .. }
+                    | ClientEvent::IntentRejected { .. }
+            )
+        {
+            self.held_bytes = self.held_bytes.saturating_add(held_weight(&event));
+            if self.held_events.len() >= MAX_HELD_EVENTS || self.held_bytes > MAX_HELD_BYTES {
+                return Err(BridgeFault::Unexpected(
+                    "the room did not say its mods before its game's turns",
+                ));
+            }
+            self.held_events.push_back(event);
+            return Ok(None);
+        }
         match event {
+            ClientEvent::TurnStream(start) if !self.begun && !self.room_heard => {
+                // A game joined while it runs: its stream and the room's
+                // mods come on different streams; the game begins once both
+                // are here.
+                debug!("the room's mods first, then the game begins");
+                self.held_stream = Some(start);
+            }
             ClientEvent::TurnStream(start) => {
                 // A new stream, perhaps on a new connection: tell it where
                 // the game stands.
@@ -1361,10 +1492,7 @@ impl<L: HookLink> Bridge<L> {
                         checkpoint_interval: start.checkpoint_interval,
                         saves: path_text(&saves)?,
                         player: client.player(),
-                        mods: match &self.options.picker {
-                            Some(picker) => (picker.lists)(),
-                            None => self.options.mods.clone(),
-                        },
+                        mods: self.load_lists(),
                     });
                     if let Some(room) = &self.room {
                         self.outbox.push_back(ToHook::Room(room_info(room)));
@@ -1482,13 +1610,13 @@ impl<L: HookLink> Bridge<L> {
                     .as_ref()
                     .zip(self.options.picker.as_ref())
                     .and_then(|(diff, picker)| (picker.learn)(diff));
-                if let Some(manifest) = again {
+                if let Some(declaration) = again {
                     info!(
-                        mods = manifest.mods.len(),
+                        mods = declaration.manifest().mods.len(),
                         "declaring the room's shared mods this game has"
                     );
-                    self.declared = Some(manifest.clone());
-                    self.request(client, Request::DeclareContent(manifest));
+                    self.declared = Some(declaration.clone());
+                    self.request(client, declaration.request());
                 }
                 self.status(|status| {
                     if let Some(diff) = &diff {
@@ -1496,6 +1624,37 @@ impl<L: HookLink> Bridge<L> {
                     }
                     status.content_diff = diff;
                 });
+            }
+            ClientEvent::RoomMods(room) => {
+                // The room's mods as its owner declared them: the picker
+                // declares those this player has, in the room's order.
+                let again = self.options.picker.as_ref().and_then(|picker| {
+                    // An owner not known yet takes no one's room away.
+                    let owns = self.room_owner.is_none_or(|owner| owner == client.player());
+                    (picker.adopt)(room.as_deref(), owns)
+                });
+                if let Some(declaration) = again {
+                    info!(
+                        mods = declaration.manifest().mods.len(),
+                        "declaring the room's mods this game has"
+                    );
+                    self.declared = Some(declaration.clone());
+                    self.request(client, declaration.request());
+                }
+                self.told.clone_from(&room);
+                self.room_heard = true;
+                self.status(|status| status.room_mods = room.map(|room| *room));
+                if let Some(start) = self.held_stream.take() {
+                    if let Some(end) = self.on_event(ClientEvent::TurnStream(start), client)? {
+                        return Ok(Some(end));
+                    }
+                    self.held_bytes = 0;
+                    while let Some(event) = self.held_events.pop_front() {
+                        if let Some(end) = self.on_event(event, client)? {
+                            return Ok(Some(end));
+                        }
+                    }
+                }
             }
             ClientEvent::Kicked => return Ok(Some(BridgeEnd::Kicked)),
             ClientEvent::Closed(reason) => return Ok(Some(BridgeEnd::Closed(reason))),
@@ -1549,7 +1708,12 @@ impl<L: HookLink> Bridge<L> {
                         info!(file = %file.display(), "fetched the world to load");
                         self.received = Some(id);
                         self.tidy();
-                        check_world(&file)?;
+                        // A world loaded with the room's list runs TPF3-MP's
+                        // mod whatever its save lists (`mods::plan`); one
+                        // loaded with its own mods must list it.
+                        if self.load_lists().is_none() {
+                            check_world(&file)?;
+                        }
                         self.order_load(Some(&file), next_step)?;
                     }
                     Err(error) => {
@@ -1640,13 +1804,13 @@ impl<L: HookLink> Bridge<L> {
         let done = self.done_tx.clone();
         let save = self.start_save_named();
         let declare = self.start_declare.take();
-        if let Some(manifest) = &declare {
-            self.declared = Some(manifest.clone());
+        if let Some(declaration) = &declare {
+            self.declared = Some(declaration.clone());
         }
         let attempt = self.start_attempt;
         tokio::spawn(async move {
             let declared = match declare {
-                Some(manifest) => requests.done(Request::DeclareContent(manifest)).await,
+                Some(declaration) => requests.done(declaration.request()).await,
                 None => Ok(()),
             };
             let told = match declared {
@@ -1756,6 +1920,10 @@ impl<L: HookLink> Bridge<L> {
             Control::Kick(player) => Request::Kick(player),
             Control::Chat(text) => Request::Chat(text),
             Control::Banner(banner) => Request::SetBanner(banner),
+            Control::Declare(declaration) => {
+                self.declared = Some(declaration.clone());
+                declaration.request()
+            }
             Control::StartWorld { start, declare } => {
                 self.change_start_world(start, declare, client);
                 return Ok(None);
@@ -1787,6 +1955,26 @@ impl<L: HookLink> Bridge<L> {
     }
 
     /// Sends a request on a task of its own; a refusal becomes a notice.
+    /// Sends `requests` one after the other, each once the one before was
+    /// answered; the first refused stops the rest.
+    fn requests_in_order(&self, client: &Client, requests: Vec<Request>) {
+        let sender = client.requests();
+        let status = self.options.status.clone();
+        tokio::spawn(async move {
+            for request in requests {
+                if let Err(error) = sender.done(request).await {
+                    if let Some(status) = status {
+                        status
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .notice(error.to_string());
+                    }
+                    return;
+                }
+            }
+        });
+    }
+
     fn request(&self, client: &Client, request: Request) {
         let requests = client.requests();
         let status = self.options.status.clone();
@@ -2137,7 +2325,7 @@ pub struct Rejoin {
     pub password: Option<Text<64>>,
     /// This player's game build and mods, declared on every new
     /// connection: a running game can only be joined afresh with them.
-    pub content: Option<ContentManifest>,
+    pub content: Option<Declaration>,
     /// Stop trying after this long without a connection.
     pub give_up_after: Duration,
 }
@@ -2200,6 +2388,7 @@ pub async fn play<L: HookLink>(
         match outcome {
             Ok((new_client, new_events)) => {
                 info!("rejoined the room");
+                bridge.on_new_connection();
                 bridge.status(|status| status.notice("rejoined the room"));
                 losses.connected(Instant::now());
                 client = new_client;
@@ -2371,7 +2560,7 @@ async fn rejoin_attempts<L: HookLink>(
             })?;
             if let Some(content) = declared.as_ref().or(rejoin.content.as_ref()) {
                 client
-                    .declare_content(content.clone())
+                    .declare(content.clone())
                     .await
                     .map_err(|error| Failed::Retry(error.to_string()))?;
             }
@@ -2531,6 +2720,70 @@ mod tests {
     use tpf3mp_proto::{FixedBytes, MAX_PAYLOAD, Payload, RoomId, Turn, TurnStart};
 
     use super::*;
+
+    /// A game without the picker (`--mods`) loads the room's world with the
+    /// room's mods and settings as its owner declared them, its own listed
+    /// personal mods after them: the content check does not cover the
+    /// settings, and the save's would differ from every other game's.
+    #[test]
+    fn without_the_picker_the_rooms_settings_still_load() {
+        let name = |id: &str| tpf3mp_bridge::ModName::new(id).unwrap();
+        let listed = ModLists {
+            shared: tpf3mp_proto::BoundedVec::new(vec![name("signals"), name("tpf3mp_1")]).unwrap(),
+            personal: tpf3mp_proto::BoundedVec::new(vec![name("minimap")]).unwrap(),
+            params: Vec::new(),
+        };
+        let room_mod = |id: &str| tpf3mp_proto::RoomMod {
+            id: Text::new(id).unwrap(),
+            version: Text::new("1").unwrap(),
+            info: tpf3mp_proto::ModInfo {
+                name: Text::lossy(id),
+                source: Text::lossy("mod.io"),
+                modio: None,
+            },
+        };
+        let settings = vec![tpf3mp_proto::ModParams {
+            id: Text::new(tpf3mp_proto::GAME_SETTINGS).unwrap(),
+            params: vec![tpf3mp_proto::ModParam {
+                key: Text::new("difficulty").unwrap(),
+                value: 2,
+            }],
+        }];
+        let told = tpf3mp_proto::RoomMods {
+            game: Text::lossy("40408"),
+            mods: vec![room_mod("signals"), room_mod("tpf3mp_1")],
+            params: settings.clone(),
+        };
+        let lists = told_lists(Some(&told), Some(&listed)).unwrap();
+        assert_eq!(lists.shared, listed.shared);
+        assert_eq!(lists.personal, listed.personal);
+        assert_eq!(lists.params, settings);
+        // A room that told none: the listed ones, as before.
+        assert_eq!(told_lists(None, Some(&listed)), Some(listed));
+    }
+
+    /// Held before the room said its mods, a turn of many events without
+    /// commands weighs as the follower weighs it: a hostile server cannot
+    /// make this game hold gigabytes of empty events under the bound.
+    #[test]
+    fn held_turns_weigh_every_event() {
+        let left = |seq| Event {
+            seq,
+            step: 1,
+            body: EventBody::PlayerLeft {
+                player: PlayerId(FixedBytes([7; 32])),
+                kicked: false,
+            },
+        };
+        let turn = Turn {
+            number: 1,
+            sealed_through: 0,
+            speed: Speed::NORMAL,
+            events: (0..10_000).map(left).collect(),
+        };
+        assert!(held_weight(&ClientEvent::Turn(turn)) >= 10_000 * 64);
+        assert!(held_weight(&ClientEvent::Kicked) > 0);
+    }
 
     struct AcceptingLink;
 
@@ -2764,6 +3017,7 @@ mod tests {
             connected,
             banner: None,
             loading: None,
+            differs: None,
         };
         let room = RoomView {
             id: RoomId(FixedBytes([7; 16])),
@@ -2820,6 +3074,7 @@ mod tests {
             members: [owner, guest]
                 .map(|player| MemberView {
                     loading: None,
+                    differs: None,
 
                     player,
                     name: Text::new("Player").unwrap(),

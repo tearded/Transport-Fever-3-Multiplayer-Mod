@@ -691,6 +691,7 @@ mod tests {
                     owner: i == 0,
                     you: i == 0,
                     content: MemberContent::Same,
+                    differs: None,
                     banner: None,
                     loading: None,
                 })

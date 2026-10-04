@@ -503,7 +503,16 @@ link it. The agent's side is `tpf3mp_agent::bridge`.
     owner's pick of the save the room starts from, in its lobby (empty
     for none; LOBBY.md, "Changing the start save in the room"), and the
     lobby's room carries the save it starts from and the owner's upload
-    of it.
+    of it. Since version 25, `ChooseRoomMods { save, map, year, mods,
+    params }` is the owner's pick on the game's Load Game page: the save
+    (absent to keep the room's), the mods in the game's load order with
+    their names and sources, and the settings of the room's mods and the
+    game's own (id `""`) (LOBBY.md, "The room's save and mods"); and
+    `RescanMods` asks the launcher to find the installed mods again after
+    an install from Mod Hub. The lobby carries the room's mods with this
+    player's version of each and whether they have it (`LobbyRoomMod`),
+    and how each member's game differs (`LobbyMember::differs`); `Begin`'s
+    `ModLists` carry the room's settings of its mods.
   - `Log`: a line for the agent's log.
   - `Preview { preview }`: what the player's build tool shows now, for the
     other members, or `None` once it shows nothing (`Session::preview`;
@@ -627,7 +636,7 @@ by hand (see [DEVELOPMENT.md](DEVELOPMENT.md)). On release day, what remains for
 ### The main menu's Multiplayer window
 
 The room's lobby is in the game (D17, as amended on 2026-09-30): the
-Multiplayer entry on the game's main menu (docs/LOBBY.md) opens a window
+Multiplayer entry on the game's main menu (docs/LOBBY.md) opens a page
 that connects, creates or joins a room, shows its players and their ready
 marks, chats, gets ready and, for the owner, starts the room's game. It
 drives the launcher that started the game, which still holds the
