@@ -99,7 +99,12 @@ has, from each place the game keeps them (`tpf3mp_modscan::roots`):
   they were found under `%LOCALAPPDATA%`. Linux and macOS to confirm);
 - local mods: `<Steam>\userdata\<account>\3493540\local\staging_area\<modId>`
   and `...\local\mods`;
-- the game's own: `<game>\mods` and `<game>\dlcs`.
+- the game's own: `<game>\mods`, `<game>\mods\release` and `<game>\dlcs`.
+  `release` holds the game's built-in mods, which saves list as
+  `urbangames_no_costs_1`, `urbangames_sandbox_1`, `urbangames_tycoon_1`
+  and so on, and the campaign's (SEEN on Windows, 2026-10-04: 21 mods;
+  until then the launcher missed them, and a save listing one had it
+  "not found among the installed mods").
 
 A mod is found by its `mod.json`'s `modId`, else its folder's name. A save
 lists a Mod Hub mod by its `modId`, the mod.io number only as its hub id

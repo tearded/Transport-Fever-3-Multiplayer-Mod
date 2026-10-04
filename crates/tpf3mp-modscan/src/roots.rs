@@ -8,7 +8,11 @@
 //!   (`revyn112_towns_de` in `...\6414521`);
 //! - local mods: `<Steam>\userdata\<account>\3493540\local\staging_area\<modId>`
 //!   (investigation/TF3_MODS_2026-09-27.md), and `...\local\mods`;
-//! - the game's own: `<game>\mods` and `<game>\dlcs`.
+//! - the game's own: `<game>\mods`, `<game>\mods\release` and
+//!   `<game>\dlcs`. `release` holds the game's built-in mods, the ones a
+//!   save lists as `urbangames_no_costs_1`, `urbangames_sandbox_1` and so
+//!   on, and the campaign's (21 mods on one PC, 2026-10-04; the `mw_*` among
+//!   them were also in `<game>\mods`, with the same files).
 //!
 //! A mod is found by the id its `mod.json` gives, or else by its folder's
 //! name. A save lists a Mod Hub mod by the `modId` (`revyn112_towns_de`,
@@ -52,6 +56,7 @@ pub fn roots(game: Option<&Path>, steam_roots: &[PathBuf], data: &[PathBuf]) -> 
     }
     if let Some(game) = game {
         out.push(game.join("mods"));
+        out.push(game.join("mods").join("release"));
         out.push(game.join("dlcs"));
     }
     out.retain(|root| root.is_dir());
@@ -184,15 +189,19 @@ mod tests {
             &game.join("dlcs/urbangames_preorder_pack/mod.json"),
             r#"{"modId": "urbangames_preorder_pack"}"#,
         );
-        // Not a mod: no mod.json.
-        fs::create_dir_all(game.join("mods/release")).unwrap();
+        // The game's built-in mods, in a folder of their own; once taken
+        // for not a mod, as it has no mod.json itself (2026-10-04).
+        write(
+            &game.join("mods/release/urbangames_no_costs/mod.json"),
+            r#"{"modId": "urbangames_no_costs_1"}"#,
+        );
 
         let roots = roots(
             Some(&game),
             std::slice::from_ref(&steam),
             &[public, data, dir.path().join("none")],
         );
-        assert_eq!(roots.len(), 5, "{roots:?}");
+        assert_eq!(roots.len(), 6, "{roots:?}");
         let found = installed(&roots);
         let ids: Vec<&str> = found.iter().map(|f| f.id.as_str()).collect();
         assert_eq!(
@@ -201,6 +210,7 @@ mod tests {
                 "revyn112_towns_de",
                 "celmi_timetables",
                 "gw_big_city_1",
+                "urbangames_no_costs_1",
                 "urbangames_preorder_pack"
             ]
         );
