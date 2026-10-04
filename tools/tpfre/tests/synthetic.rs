@@ -446,6 +446,240 @@ fn audit_profile(exe: &Path, targets: &str) -> PathBuf {
 
 const MIDDLE_TARGET: &str = "\n[[target]]\nname = 'middle'\nsignature = '48 83 EC 28 B8 ?? ?? ?? ?? 48 83 C4 28 C3'\nprologue = '48 83 EC 28'\n";
 
+struct UpdateBuild {
+    _root: tempfile::TempDir,
+    repository: PathBuf,
+    archive: PathBuf,
+    bundle: PathBuf,
+}
+
+fn update_build(targets: &str) -> UpdateBuild {
+    let root = tempfile::Builder::new()
+        .prefix("update build with spaces ")
+        .tempdir()
+        .expect("tempdir");
+    let game = root.path().join("game");
+    let repository = root.path().join("repository");
+    let bundle = repository.join("profiles/fixture-build");
+    std::fs::create_dir(&game).expect("game");
+    std::fs::create_dir_all(&bundle).expect("bundle");
+    let bytes = build_pe(false);
+    let id = tpf3mp_hookcore::profile::BuildIdentity::of_bytes(&bytes);
+    std::fs::write(game.join("game.exe"), bytes).expect("game exe");
+    std::fs::write(repository.join("Cargo.toml"), "[workspace]\nmembers = []\n")
+        .expect("workspace");
+    std::fs::write(
+        repository.join("profiles/native-build.txt"),
+        "fixture-build\n",
+    )
+    .expect("selection");
+    std::fs::write(bundle.join("native.rs"), "pub const BUILD: u32 = 1;\n").expect("native data");
+    std::fs::write(bundle.join("hooks.toml"), format!(
+        "name = 'fixture'\nregion = '.text'\n[build]\nsha256 = '{}'\nsize = {}\npe_timestamp = {}\n{}",
+        id.sha256, id.size.expect("size"), id.pe_timestamp.expect("PE timestamp"), targets,
+    )).expect("profile");
+    let archive = root.path().join("archive");
+    tpfre::archive::create(&tpfre::archive::Options {
+        game: &game,
+        out: &archive,
+        build: "fixture",
+        executable: "game.exe",
+        steam_manifest: None,
+    })
+    .expect("complete archive");
+    UpdateBuild {
+        _root: root,
+        repository,
+        archive,
+        bundle,
+    }
+}
+
+#[test]
+fn build_gate_reports_the_exact_selected_profile_without_private_paths() {
+    let f = update_build(MIDDLE_TARGET);
+    let (code, out, err) = run(&[
+        "verify-build",
+        "--archive",
+        s(&f.archive),
+        "--repo",
+        s(&f.repository),
+        "--json",
+    ]);
+    assert_eq!(code, 0, "{out}{err}");
+    let report: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(report["bundle"], "fixture-build");
+    assert_eq!(report["kind"], "selected_build_verification");
+    assert_eq!(report["targets"][0]["status"], "matched");
+    assert_eq!(report["runtime_verified"], false);
+    assert_eq!(report["review_required"], false);
+    assert_eq!(report["bundle_files"].as_array().expect("files").len(), 2);
+    assert!(!out.contains(s(f._root.path())));
+    let selected = tpf3mp_hookcore::bundle::Bundle::selected(&f.repository.join("profiles"))
+        .expect("selection");
+    let module = selected.rust_module().expect("module");
+    assert!(module.contains("fixture-build/hooks.toml"));
+    assert!(module.contains("pub mod native;"));
+}
+
+#[test]
+fn a_matching_custom_profile_cannot_bypass_the_compiled_build_gate() {
+    let f = update_build(MIDDLE_TARGET);
+    let hooks = std::fs::read_to_string(f.bundle.join("hooks.toml")).expect("hooks");
+    let matching = tpf3mp_hookcore::profile::Profile::from_toml(&hooks).expect("profile");
+    std::fs::write(f.repository.join("profiles/custom.toml"), &hooks).expect("custom profile");
+    std::fs::write(
+        f.bundle.join("hooks.toml"),
+        hooks.replace(&matching.build.sha256, &"00".repeat(32)),
+    )
+    .expect("other selected build");
+    assert!(
+        !tpfre::audit::verify(&f.archive, &f.repository.join("profiles"))
+            .expect("generic verification finds custom profile")
+            .review_required
+    );
+    let result =
+        tpfre::build_gate::build_with(&f.archive, &f.repository, None, &mut Vec::new(), |_, _| {
+            panic!("must not start Cargo")
+        });
+    assert!(result.is_err(), "the selected native build must match");
+}
+
+#[test]
+fn broken_optional_hooks_stop_the_build_even_with_an_old_success_report() {
+    let targets = format!(
+        "{MIDDLE_TARGET}\n[[target]]\nname = 'missing'\nrequired = false\nsignature = 'DE AD BE EF'\nprologue = 'DE'\n"
+    );
+    let f = update_build(&targets);
+    std::fs::write(
+        f.repository.join("verification.json"),
+        "{\"review_required\":false}",
+    )
+    .expect("old report");
+    let code =
+        tpfre::build_gate::build_with(&f.archive, &f.repository, None, &mut Vec::new(), |_, _| {
+            panic!("must not start Cargo")
+        })
+        .expect("target refusal report");
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn missing_incomplete_corrupt_or_exe_only_inputs_never_start_the_build() {
+    let f = update_build(MIDDLE_TARGET);
+    let manifest: tpfre::archive::Manifest =
+        serde_json::from_slice(&std::fs::read(f.archive.join("build.json")).expect("manifest"))
+            .expect("JSON");
+    for input in [
+        f.archive.join("absent"),
+        f.archive.join(&manifest.executable),
+    ] {
+        assert!(
+            tpfre::build_gate::build_with(
+                &input,
+                &f.repository,
+                None,
+                &mut Vec::new(),
+                |_, _| panic!("must not start Cargo")
+            )
+            .is_err()
+        );
+    }
+    std::fs::write(f.archive.join(".incomplete"), "incomplete").expect("marker");
+    assert!(tpfre::build_gate::verify(&f.archive, &f.repository).is_err());
+    std::fs::remove_file(f.archive.join(".incomplete")).expect("remove marker");
+    std::fs::write(f.archive.join(&manifest.executable), "changed").expect("corruption");
+    assert!(
+        tpfre::build_gate::build_with(
+            &f.archive,
+            &f.repository,
+            None,
+            &mut Vec::new(),
+            |_, _| panic!("must not start Cargo")
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn build_gate_requires_a_valid_bundle_selection_and_complete_identity() {
+    let f = update_build(MIDDLE_TARGET);
+    let selection = f.repository.join("profiles/native-build.txt");
+    for invalid in [
+        "",
+        "../fixture-build",
+        "fixture-build/hooks.toml",
+        "fixture-build\nother",
+        "absent",
+    ] {
+        std::fs::write(&selection, invalid).expect("selection");
+        assert!(
+            tpfre::build_gate::verify(&f.archive, &f.repository).is_err(),
+            "{invalid:?}"
+        );
+    }
+    std::fs::write(&selection, "fixture-build").expect("restore selection");
+    let hooks = std::fs::read_to_string(f.bundle.join("hooks.toml")).expect("hooks");
+    let without_metadata = hooks
+        .lines()
+        .filter(|line| !line.starts_with("size = ") && !line.starts_with("pe_timestamp = "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(f.bundle.join("hooks.toml"), without_metadata).expect("incomplete identity");
+    assert!(tpfre::build_gate::verify(&f.archive, &f.repository).is_err());
+    std::fs::write(f.bundle.join("hooks.toml"), hooks).expect("restore profile");
+    std::fs::remove_file(f.bundle.join("native.rs")).expect("remove native bundle");
+    assert!(tpfre::build_gate::verify(&f.archive, &f.repository).is_err());
+}
+
+#[test]
+fn a_verified_build_runs_the_release_packages_and_propagates_cargo_failure() {
+    let f = update_build(MIDDLE_TARGET);
+    let mut called = false;
+    let code = tpfre::build_gate::build_with(
+        &f.archive,
+        &f.repository,
+        std::num::NonZeroUsize::new(2),
+        &mut Vec::new(),
+        |repo, args| {
+            called = true;
+            assert_eq!(repo, f.repository.canonicalize().expect("repository"));
+            assert_eq!(
+                args,
+                [
+                    "build",
+                    "--release",
+                    "--locked",
+                    "-p",
+                    "tpf3mp-launcher",
+                    "-p",
+                    "tpf3mp-agent",
+                    "-p",
+                    "tpf3mp-server",
+                    "-p",
+                    "tpf3mp-hook",
+                    "--jobs",
+                    "2"
+                ]
+            );
+            Ok(1)
+        },
+    )
+    .expect("verified build");
+    assert!(called);
+    assert_eq!(code, 1, "a Cargo failure is still a failed build");
+    let (code, _, _) = run(&[
+        "build",
+        "--archive",
+        s(&f.archive),
+        "--repo",
+        s(&f.repository),
+        "--jobs",
+        "0",
+    ]);
+    assert_eq!(code, 2, "zero parallel jobs is a usage error");
+}
+
 #[test]
 fn verification_discovers_per_build_bundles_without_parsing_their_other_metadata() {
     let f = fixture();

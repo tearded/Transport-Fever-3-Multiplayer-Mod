@@ -380,10 +380,28 @@ pub fn compare(old: &Path, new: &Path, dir: &Path, cache: &Path) -> Result<Repor
 
 /// All targets, including optional ones, must resolve. No absent-EXE/build skips.
 pub fn verify(input: &Path, dir: &Path) -> Result<Report> {
+    verify_with(input, |id| profiles(dir, id))
+}
+
+/// Verify exactly the selected native profile, without custom-profile fallback.
+pub fn verify_selected(input: &Path, profile: Profile) -> Result<Report> {
+    verify_with(input, |id| {
+        ensure!(
+            profile.build == *id,
+            "selected native bundle does not match executable identity (SHA-256, size and PE timestamp required)"
+        );
+        Ok(vec![profile])
+    })
+}
+
+fn verify_with(
+    input: &Path,
+    select: impl FnOnce(&BuildIdentity) -> Result<Vec<Profile>>,
+) -> Result<Report> {
     let exe = archive::executable(input)?;
     let bytes = fs::read(&exe)?;
     let id = BuildIdentity::of_bytes(&bytes);
-    let ps = profiles(dir, &id)?;
+    let ps = select(&id)?;
     let pe = Pe::parse(&bytes, None)?;
     let mut targets = Vec::new();
     for p in ps {

@@ -5,10 +5,9 @@
 
 use tpf3mp_hookcore::profile::{BuildIdentity, Profile};
 
-// This release has one native ABI. A new build must explicitly select its own
-// reviewed bundle here; retaining a profile alone never keeps old layouts alive.
-#[path = "../../../profiles/tf3_build40408_steam_windows/native.rs"]
-pub mod native;
+// Generated from profiles/native-build.txt, the same selection checked before
+// packaging. A new build explicitly selects its reviewed native bundle there.
+include!(concat!(env!("OUT_DIR"), "/native_bundle.rs"));
 
 pub const BUILT_IN_PROFILES: &[(&str, &str)] = &[(native::PROFILE_NAME, native::PROFILE_TOML)];
 

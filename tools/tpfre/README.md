@@ -96,6 +96,30 @@ always say `runtime_verified: false`. These commands never activate hooks,
 approve a build or replace real-game acceptance. Keep the existing
 feature → dev → acceptance → main release gates.
 
+## Checked update builds
+
+From the repository root, `tpfre verify-build --repo . --archive <snapshot>
+--json` checks the bundle selected in `profiles/native-build.txt`, exactly as
+the hook build script selects it. A complete private archive is required;
+an EXE-only input or a custom profile cannot bypass this gate. SHA-256,
+size and PE timestamp must all be pinned and match, and optional targets
+must pass too. The report records the bundle file hashes and checkout commit;
+it never certifies runtime compatibility.
+
+`tpfre build --repo . --archive <snapshot> --jobs 2` performs that live check,
+then invokes `cargo build --release --locked` for launcher, agent, server
+and hook. A failure stops before Cargo runs. It accepts no old success report
+and has no skip-verification switch. Cargo failures remain failed builds.
+When installed on the machine, `quiet-cargo` runs that build through its
+shared queue and CPU cap.
+Run the standalone `tpfre` binary for this command: wrapping `cargo run ...
+build` in `quiet-cargo` would make the nested build wait for its own parent.
+
+The release workflow requires `verify-build` on a dedicated private runner
+before every package job, including manual runs. Only its JSON report leaves
+that runner. Setup and the one-command local invocation are in
+[DEVELOPMENT.md](../../docs/DEVELOPMENT.md#game-update-builds).
+
 ## What the index holds
 
 | table | what |

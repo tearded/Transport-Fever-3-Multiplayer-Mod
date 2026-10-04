@@ -345,8 +345,10 @@ hook modules reexport the existing names, so their callers and behavioral
 tests use the same data. Algorithms, bounds, kill switches and generic x86
 instruction decoding remain in the hook modules.
 
-`crates/tpf3mp-hook/src/build_data.rs` explicitly selects the one compiled
-native bundle. Bootstrap checks its complete executable identity before
+`profiles/native-build.txt` explicitly selects the one compiled native
+bundle. The hook build script generates `build_data.rs`'s native module and
+built-in profile from this same selection; the release check reads it too.
+Bootstrap checks its complete executable identity before
 installing the menu or step gate. A TOML profile for another executable is
 insufficient: it cannot enable that build with the previous build's native
 layouts. Custom profiles for the supported executable keep their priority.
@@ -355,11 +357,13 @@ moving data does not approve the Preview or add another supported platform.
 
 For a new build, create a separate bundle directory, investigate the audit's
 signature/function/script changes, and review its native data alongside its
-`hooks.toml`. Select that reviewed bundle explicitly in `build_data.rs`.
+`hooks.toml`. Select that reviewed bundle explicitly in `native-build.txt`.
 Also review the hook code's ABI assumptions (calling conventions and the
 instructions emitted by callbacks); grouping data does not prove those are
-unchanged. Run the strict profile verification, the normal tests, and the
-authorized real-game acceptance before promotion. The archive and audit
+unchanged. Use `tpfre build` for the checked local release build; the release
+workflow also requires `verify-build` against its private archive before
+packaging ([DEVELOPMENT.md](DEVELOPMENT.md#game-update-builds)). Run the normal
+tests and the authorized real-game acceptance before promotion. The archive and audit
 commands are described in [tpfre](../tools/tpfre/README.md#game-update-workflow-windows-pe-builds).
 
 ## The bridge: what travels over the link

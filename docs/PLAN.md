@@ -90,8 +90,11 @@ before the rest ([DAY_ONE.md](DAY_ONE.md) §0).
   `tpfre verify`; D14). Static results never replace real-game acceptance.
 - [x] Bundle reviewed profiles and other build-specific native data so a new
   build's changes can be reviewed together.
-- [ ] Integrate exact-build verification with private build inputs into the
-  update/release procedure; retain every existing promotion gate.
+- [x] Integrate exact-build verification with private build inputs into the
+  update/release procedure (`tpfre build`, `verify-build`, and the release
+  workflow's private runner gate); retain every existing promotion gate.
+  Runner registration and `TPF3MP_GAME_ARCHIVE` configuration are operator
+  setup, not evidence that a GitHub verification run has passed.
 
 *Added* (2026-09-27, from third-party mods made for build 40391,
 [investigation/TF3_MODS_2026-09-27.md](../investigation/TF3_MODS_2026-09-27.md)):

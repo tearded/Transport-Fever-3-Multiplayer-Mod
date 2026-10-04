@@ -18,6 +18,9 @@ name: release
 # - TPF3MP_UPDATE_PUBLIC_KEY: the public keys updates must be signed with.
 #   Without one the launcher never updates itself, so no release is
 #   drafted: manual runs still build packages to try.
+# - TPF3MP_GAME_ARCHIVE: a complete private tpfre archive on the dedicated
+#   self-hosted Windows runner labelled `tpf3mp-game-builds`. Missing input
+#   or a failed check stops every package, including manual workflow runs.
 #
 # It signs nothing: publishing a release starts sign.yml, which signs it
 # for the updater in the protected `release` environment. Actions are
@@ -55,10 +58,55 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Require private game verification configuration
+        env:
+          TPF3MP_GAME_ARCHIVE: ${{ vars.TPF3MP_GAME_ARCHIVE }}
+        run: |
+          if [ -z "$TPF3MP_GAME_ARCHIVE" ]; then
+            echo "::error::Set TPF3MP_GAME_ARCHIVE to the complete private archive on the tpf3mp-game-builds runner (docs/DEVELOPMENT.md, Game update builds). No package is built without verification."
+            exit 1
+          fi
+
+  game-build:
+    name: verify selected game build
+    needs: version
+    runs-on: [self-hosted, Windows, X64, tpf3mp-game-builds]
+    timeout-minutes: 30
+    env:
+      TPF3MP_GAME_ARCHIVE: ${{ vars.TPF3MP_GAME_ARCHIVE }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Verify the compiled native bundle against the private archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path target -Force | Out-Null
+          $reportPath = Join-Path $pwd 'target/game-build-verification.json'
+          Remove-Item -LiteralPath $reportPath -Force -ErrorAction SilentlyContinue
+          if (-not (Test-Path -LiteralPath $env:TPF3MP_GAME_ARCHIVE -PathType Container)) {
+            throw 'Missing private source archive; no package is built'
+          }
+          $report = & cargo run --release --locked --manifest-path tools/tpfre/Cargo.toml -- verify-build --repo . --archive $env:TPF3MP_GAME_ARCHIVE --json
+          $verificationExit = $LASTEXITCODE
+          if ($report.Count -gt 0) {
+            [System.IO.File]::WriteAllLines($reportPath, [string[]]$report, [System.Text.UTF8Encoding]::new($false))
+          }
+          if ($verificationExit -ne 0) { throw 'Selected game build verification failed; no package is built; inspect the static report artifact when available' }
+          $verification = ($report -join "`n") | ConvertFrom-Json
+          if ($verification.source_commit -ne $env:GITHUB_SHA -or $verification.source_dirty -ne $false -or $verification.review_required -or $verification.runtime_verified) {
+            throw 'Verification must describe this exact checkout and its static check only'
+          }
+      # Only the static report leaves the runner, never game files or indexes.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: game-build-verification
+          path: target/game-build-verification.json
+          if-no-files-found: ignore
 
   package:
     name: package (${{ matrix.name }})
-    needs: version
+    needs: [version, game-build]
     strategy:
       fail-fast: false
       matrix:

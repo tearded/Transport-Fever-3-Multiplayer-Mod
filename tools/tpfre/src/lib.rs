@@ -7,6 +7,7 @@
 
 pub mod archive;
 pub mod audit;
+pub mod build_gate;
 pub mod cli;
 pub mod db;
 pub mod diff;

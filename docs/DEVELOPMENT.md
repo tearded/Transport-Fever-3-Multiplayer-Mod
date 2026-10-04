@@ -157,6 +157,55 @@ cargo clippy --workspace --all-targets -- -D warnings
 To test in the real game, with several games in one room on one PC, see
 [GAME_TESTING.md](GAME_TESTING.md).
 
+### Game update builds
+
+`profiles/native-build.txt` selects the reviewed native build directory. The
+hook's build script and the update tools read that same selection: `hooks.toml`
+and `native.rs` always belong to the selected bundle. For an update, review the
+new profile, offsets, layouts and callback ABI, then change this one selection
+on the feature branch ([HOOKS.md](HOOKS.md#reviewing-the-native-data-for-a-game-update)).
+
+Build `tools/tpfre` once with the machine's `quiet-cargo` wrapper when installed.
+Then, from the repository root, run the standalone tool against a complete
+private source archive:
+
+```powershell
+& ./tools/tpfre/target/release/tpfre.exe build --repo . --archive "$env:USERPROFILE/TPF3-MP-builds/25533170-sources" --jobs 2
+```
+
+This checks every archived file, the exact SHA-256, size and PE timestamp of
+the selected profile, and every target including optional ones. Only after
+success does it run the release build of launcher, agent, server and hook.
+Missing/incomplete inputs, a different build or failed hooks stop before Cargo
+starts. A saved verification report cannot substitute for the live check;
+custom profiles cannot override the compiled bundle. An installed Preview is
+not needed to verify an archived supported build.
+The local build uses the machine's `quiet-cargo` wrapper automatically when
+installed, so its build shares the queue and CPU cap with other sessions.
+
+The `release` workflow requires the same `verify-build` check before any
+package job, on pushes to `main` and on manual runs. Set up:
+
+- a dedicated private Windows GitHub Actions runner labelled
+  `tpf3mp-game-builds`, with Git, the pinned Rust toolchain and PowerShell 7;
+- the repository variable `TPF3MP_GAME_ARCHIVE`, an absolute path to the
+  complete source archive readable by that runner, outside its checkout.
+
+The workflow requires a clean checkout of the exact release commit and records
+it alongside the bundle file hashes and target results. Only
+`game-build-verification.json` is
+uploaded and attached to the draft release; game files, sources and indexes
+remain on the private runner. Missing configuration fails before scheduling
+the private check. A failed target check retains its static report as an
+artifact for investigation while packaging stays blocked. An unavailable
+runner holds packaging until the runner is
+available. Ordinary CI compilation/testing needs no private game inputs.
+
+Static success certifies profile bytes only. Native ABI review, real-game
+acceptance and the feature → dev → acceptance → main gates still apply; no
+platform gains game support from this check alone. Ordinary `cargo build`
+remains available for development and is not a verified update build.
+
 ### Which build is this
 
 Every launcher, agent, server and hook says which build it is. The build

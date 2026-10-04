@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use crate::query::Query;
-use crate::{archive, audit, diff, index, matching, sig};
+use crate::{archive, audit, build_gate, diff, index, matching, sig};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -58,6 +58,24 @@ pub enum Cmd {
         profiles: PathBuf,
         #[arg(long)]
         json: bool,
+    },
+    /// Check the selected compiled bundle against a complete private archive.
+    VerifyBuild {
+        #[arg(long)]
+        archive: PathBuf,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify the selected game build, then build the release binaries locally.
+    Build {
+        #[arg(long)]
+        archive: PathBuf,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        jobs: Option<std::num::NonZeroUsize>,
     },
     /// Index a PE32+ x86-64 binary (read only) into a .tpfdb file.
     Index {
@@ -317,6 +335,16 @@ fn dispatch(cli: Cli, out: &mut dyn Write, err: &mut dyn Write) -> anyhow::Resul
             profiles,
             json,
         } => audit::print(&audit::verify(&binary, &profiles)?, json, out),
+        Cmd::VerifyBuild {
+            archive,
+            repo,
+            json,
+        } => build_gate::print(&build_gate::verify(&archive, &repo)?, json, out),
+        Cmd::Build {
+            archive,
+            repo,
+            jobs,
+        } => build_gate::build(&archive, &repo, jobs, out),
         Cmd::Index {
             binary,
             out: db,

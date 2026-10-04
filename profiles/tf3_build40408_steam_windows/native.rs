@@ -1,7 +1,8 @@
 //! One compiled native ABI bundle, paired with hooks.toml.
 
-pub const PROFILE_NAME: &str = "tf3_build40408_steam_windows/hooks.toml";
-pub const PROFILE_TOML: &str = include_str!("hooks.toml");
+pub use crate::build_data::{
+    COMPILED_PROFILE_NAME as PROFILE_NAME, COMPILED_PROFILE_TOML as PROFILE_TOML,
+};
 pub const STEAM_BUILD_ID: u64 = 25533170;
 pub const GAME_BUILD: u32 = 40408;
 
