@@ -242,6 +242,38 @@ function junctions.without(changes, nodes, edges)
 	return kept, left
 end
 
+-- The configurations at `nodes` again, each reference to edge `old` naming
+-- `new` (whose component is `comp`): for an edge a proposal rebuilds in place
+-- between the same nodes (a stop placed or removed). The other edges keep
+-- their entities, so nothing is searched for by position. The turns,
+-- crosswalks and light phases keep their order; one that no longer fits its
+-- edges' lanes raises, and the build fails.
+function junctions.renamed(proposal, nodes, old, new, comp)
+	local adds, removes, seen = {}, {}, {}
+	local function same(id) return id end
+	for _, node in ipairs(nodes) do
+		local c = not seen[node] and node >= 0 and component(node, "BASE_NODE_CONFIG")
+		seen[node] = true
+		if c then
+			local config = captureConfig(c, { edge = same })
+			local function edge(id)
+				if id == old then return new, comp end
+				local other = component(id, "BASE_EDGE")
+				if not other then error("a junction edge no longer exists", 0) end
+				return id, other
+			end
+			local n = api.type.BaseNodeLaneConnectionAndEntity.new()
+			n.entity, n.comp = node, makeConfig(config, edge, node)
+			adds[#adds+1] = n
+			removes[#removes+1] = node
+		end
+	end
+	if #adds > 0 then
+		proposal.streetProposal.nodeConfigsToAdd = adds
+		proposal.streetProposal.nodeConfigsToRemove = removes
+	end
+end
+
 -- Add configs to a SimpleProposal. Match in three dimensions and reject
 -- ambiguous parallel edges/nodes instead of picking a game's lowest id.
 -- `preserve` names the existing nodes whose incident edges are rebuilt.

@@ -7273,6 +7273,141 @@ fn the_bulldozer_removes_a_stop_in_every_game() {
     );
 }
 
+/// Junctions with traffic lights at both ends of edge 100: node 8, where
+/// edge 102 from node 11 meets it, with turns, crosswalks and light phases
+/// of its own, and node 9, its end.
+const TRAFFIC_LIGHT_ENDS: &str = r#"
+NODES[11] = { x = 50, y = -100, z = 0 }
+EDGES[102] = { node0 = 11, node1 = 8, tangent0 = { x = 0, y = 60, z = 0 }, tangent1 = { x = 0, y = 60, z = 0 },
+               objects = {}, roadTemplate = '::/street/country.street_template', laneConfigs = { 'country lanes' } }
+STREETS[8] = { 100, 102 } STREETS[11] = { 102 }
+api.res.trafficLightTypeRep = {
+    find = function(name) if name == '::/traffic_light/standard.lua' then return 3 end return -1 end,
+    getName = function(id) if id == 3 then return '::/traffic_light/standard.lua' end end,
+}
+local function turn(a, b) return { segment0 = a, lane0 = 0, segment1 = b, lane1 = 0, withRoad = true, withTram = false } end
+local function phase(locked, duration, minimum, skip)
+    return { lockedLanes = locked, duration = duration, minDuration = minimum, canSkip = skip }
+end
+CONFIGS[8] = { trafficLightPreference = 1, doubleSlipSwitch = false, userModifiedTrafficLightStates = true,
+    laneConnections = { turn(100, 102), turn(102, 100), turn(100, 100) }, crosswalks = { 102, 100 },
+    trafficLightConfig = { trafficLightType = 3,
+        states = { phase({ 0, 3 }, 30, 10, true), phase({ 1, 2, 4 }, 20, 5, false) } } }
+CONFIGS[9] = { trafficLightPreference = 0, doubleSlipSwitch = false, userModifiedTrafficLightStates = false,
+    laneConnections = { turn(100, 100) }, crosswalks = { 100 },
+    trafficLightConfig = { trafficLightType = 3, states = { phase({ 0 }, 25, 25, false) } } }
+-- Both, placed, as the world has them now.
+function WORLD_WORDS()
+    local function nodeAt(e) return PLACE(NODES[e]) end
+    local function edgeAt(e) local c = EDGES[e] return ENDS(NODES[c.node0], NODES[c.node1]) end
+    return CONFIG_WORDS({ { entity = 8, comp = CONFIGS[8] }, { entity = 9, comp = CONFIGS[9] } }, nodeAt, edgeAt)
+end
+-- The edges a sent proposal's configurations name.
+function NAMED(sent)
+    local named = {}
+    for _, c in ipairs(sent.proposal.streetProposal.nodeConfigsToAdd or {}) do
+        for _, l in ipairs(c.comp.laneConnections) do named[l.segment0], named[l.segment1] = true, true end
+        for _, e in ipairs(c.comp.crosswalks) do named[e] = true end
+    end
+    local out = {}
+    for e in pairs(named) do out[#out + 1] = e end
+    table.sort(out)
+    return table.concat(out, ',')
+end
+"#;
+
+/// A stop on a town road between two junctions with traffic lights crashed
+/// every game of a room (2026-10-04, build 40408: the rebuild of the road
+/// removed the lane configurations at its ends and left their traffic
+/// lights, ecs::Engine::GetComponentDataIndex asserting BaseNodeConfig in
+/// the simulation). Placing a stop, and the bulldozer removing one, now
+/// replace those configurations with the same turns, crosswalks and light
+/// phases naming the rebuilt road.
+#[test]
+fn a_stop_keeps_the_junction_settings_at_its_roads_ends() {
+    for removal in [false, true] {
+        let (lua, _script) = engine();
+        lua.load(FAKE_NETWORK).exec().unwrap();
+        lua.load(FAKE_STOPS).exec().unwrap();
+        lua.load(CONFIG_WORDS).exec().unwrap();
+        lua.load(TRAFFIC_LIGHT_ENDS).exec().unwrap();
+        let action = if removal {
+            "OBJECTS[555] = { transf = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 50,0.2,0,1 }, \
+                 edgeObjectConstruction = '::/stations/street/small_stops/small_new.con' } \
+             EDGES[100].objects = { { 555, 0 } } \
+             ACTION = { Bulldoze = { EdgeObject = { edge = { network = 'Street', ends = { \
+                 a = { x = 50, y = -40, z = 0 }, b = { x = 50, y = 40, z = 0 } } }, \
+                 at = { x = 50, y = 0.2, z = 0 }, model = '::/stations/street/small_stops/small_new.con' } } }"
+        } else {
+            "ACTION = { PlaceStop = { edge = { network = 'Street', ends = { a = { x = 50, y = -40, z = 0 }, \
+                 b = { x = 50, y = 40, z = 0 } } }, at = { x = 50, y = 0, z = 0 }, left = true, two_sided = true, \
+                 direction = { x = 0, y = 1, z = 0 }, model = '::/stations/street/small_stops/small_new_twosided.con' } }"
+        };
+        lua.load(format!(
+            "{action} assert(schema_check(ACTION)) BEFORE = WORLD_WORDS() HOOK.batch = {{ ACTION }} \
+             UPDATE({{}}, STATE, 0.2)"
+        ))
+        .exec()
+        .unwrap_or_else(|error| panic!("{error}"));
+        let (sends, removed, named, sent, before): (usize, String, String, String, String) = lua
+            .load(
+                "local s = SENT[1] and SENT[1].proposal.streetProposal \
+                 local removed = {} \
+                 for i, n in ipairs(s and s.nodeConfigsToRemove or {}) do removed[i] = n end \
+                 table.sort(removed) \
+                 if s then s.nodesToAdd = s.nodesToAdd or {} end \
+                 return #SENT, table.concat(removed, ','), s and NAMED(SENT[1]) or '', \
+                     s and SENT_WORDS(SENT[1]) or '', BEFORE",
+            )
+            .eval()
+            .unwrap_or_else(|error| panic!("{error}\n{}", hook_log(&lua)));
+        assert_eq!(sends, 1, "removal {removal}: {}", hook_log(&lua));
+        assert_eq!(
+            removed, "8,9",
+            "removal {removal}: the settings they replace go"
+        );
+        assert_eq!(
+            named, "-1,102",
+            "removal {removal}: the rebuilt road and the other one, never the removed road"
+        );
+        assert_eq!(
+            sent, before,
+            "removal {removal}: the turns, crosswalks and lights as they were"
+        );
+        assert!(
+            sent.contains("tl1 type3 [0,3 30/10 skip][1,2,4 20/5]"),
+            "removal {removal}: {sent}"
+        );
+    }
+}
+
+/// Where the settings at a stop's road cannot be carried over (here a turn
+/// onto a lane the road does not have), every game refuses the stop, and
+/// sends nothing, rather than reset the junction or leave it broken.
+#[test]
+fn a_stop_whose_junction_settings_cannot_be_kept_is_refused() {
+    let (lua, _script) = engine();
+    lua.load(FAKE_NETWORK).exec().unwrap();
+    lua.load(FAKE_STOPS).exec().unwrap();
+    lua.load(CONFIG_WORDS).exec().unwrap();
+    lua.load(TRAFFIC_LIGHT_ENDS).exec().unwrap();
+    lua.load(
+        "CONFIGS[9].laneConnections[1].lane1 = 1 \
+         HOOK.batch = { { PlaceStop = { edge = { network = 'Street', ends = { a = { x = 50, y = -40, z = 0 }, \
+             b = { x = 50, y = 40, z = 0 } } }, at = { x = 50, y = 0, z = 0 }, left = true, \
+             direction = { x = 0, y = 1, z = 0 }, model = '::/stations/street/small_stops/small_new.con' } } } \
+         UPDATE({}, STATE, 0.2)",
+    )
+    .exec()
+    .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(lua.load("return #SENT").eval::<usize>().unwrap(), 0);
+    assert!(
+        hook_log(&lua).contains("the junction's lanes changed"),
+        "{}",
+        hook_log(&lua)
+    );
+}
+
 #[test]
 fn a_stops_loading_flags_reach_the_game_in_order_however_it_copied_them() {
     let (lua, _script) = engine();

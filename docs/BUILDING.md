@@ -452,6 +452,15 @@ lossless from Lua. Rules:
   edge it matched runs the other way;
 - one stop per side per street edge. Two objects with the same side value on
   one edge is a fatal assert in lane creation. Guard by side, not by count;
+- the junctions at the edge's ends keep their lane configurations. A script
+  proposal must remove the configurations that name the edge it removes
+  ("Unknown exception" otherwise, below), and must add them back naming the
+  rebuilt edge: removed alone at a junction with traffic lights, the lights
+  stay without a configuration, the build asserts
+  (`GetComponentDataIndex`, component `BaseNodeConfig`) and leaves the
+  world half rebuilt, and the simulation dies a second later (TF3 build
+  40408, 2026-10-04: a two-sided stop between two traffic lights crashed a
+  room; reproduced from the console in a single game);
 - merging a new stop into a nearby group is not in the proposal: the apply
   pairs an opposite-side stop within 125 m, else joins any group within
   200 m. The same placement merges the same way everywhere for free;

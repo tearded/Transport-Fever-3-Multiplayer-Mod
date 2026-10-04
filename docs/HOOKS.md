@@ -2819,8 +2819,16 @@ construction's window its edits:
   other stops kept under their own entities, the new stop
   `edgeObjectsToAdd[1]` (edge -1, the parameter where it stands, `left`,
   the model, the player), named in the edge's objects as `{ -1, side }`,
-  the lane configurations at the edge's ends removed as for any edge a
-  replay removes; then the game's verdict, and the build as the player's
+  the lane configurations at the edge's ends replaced by the same turns,
+  crosswalks and light phases naming the rebuilt edge
+  (`junctions.renamed`: only references to the old edge change, the other
+  edges keep their entities, nothing is searched for by position; one
+  that no longer fits its lanes refuses the stop in every game). Removed
+  alone, a junction with traffic lights kept its lights with no
+  configuration, a fatal assert
+  (`ecs::Engine::GetComponentDataIndex`, `BaseNodeConfig`) that crashed
+  every game of a room on 2026-10-04 (build 40408). Then the game's
+  verdict, and the build as the player's
   own (`ignoreErrors`, `playerInitiated`), paid by the player. The
   rebuilt edge keeps its own `PlayerOwned` (a company's road stays the
   company's). Once built, the stop is settled as the acting company's
@@ -3151,8 +3159,10 @@ and `native/src/preview_plugin.cpp` in tpf2-multiplayer).
   it at the proposal it would send, so nothing is sent, built or logged
   (construction, road, track and stop builds only). One this game cannot
   make (a street type it lacks, an edge it has not) does not show, and the
-  log says why. Its junction settings are left out (`junctions.into` is
-  skipped in the dry run): they name nodes of the sender's game, and
+  log says why. A road or construction build's junction settings are left
+  out (`junctions.into` is skipped in the dry run; a stop's rebuild keeps
+  the settings at its own road's ends, which this game reads itself):
+  they name nodes of the sender's game, and
   checking them failed every station snapped to a street ("the junction
   no longer exists").
 - **Drawing them** (`crate::drawing`), as TpF2 Multiplayer did

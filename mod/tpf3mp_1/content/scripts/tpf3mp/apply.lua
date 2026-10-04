@@ -1278,8 +1278,9 @@ end
 -- under its own entity, re-parented with its station group and lines. A new
 -- stop is `edgeObjectsToAdd[1]`, named in the edge's objects as -1 (TPF2's
 -- tool and scripts did so; INFERRED on TF3); a removed one goes into
--- `edgeObjectsToRemove`. The lane configurations at the edge's ends name it,
--- and go with it, as for any edge a replay removes (networkInto).
+-- `edgeObjectsToRemove`. The lane configurations at the edge's ends name it:
+-- they are replaced by the same settings naming the rebuilt edge, as for any
+-- edge a replay removes (networkInto).
 
 -- The existing edge a stop action names, as edgeBetween finds it.
 local function stopEdge(ref)
@@ -1310,13 +1311,14 @@ local function rebuildWith(e, network, objects)
 	end
 	proposal.streetProposal.edgesToAdd = { s }
 	proposal.streetProposal.edgesToRemove = { e.id }
-	local configs = {}
-	for _, node in ipairs({ e.comp.node0, e.comp.node1 }) do
-		if api.engine.getComponent(node, api.type.ComponentType.BASE_NODE_CONFIG) ~= nil then
-			configs[#configs + 1] = node
-		end
-	end
-	if #configs > 0 then proposal.streetProposal.nodeConfigsToRemove = configs end
+	-- The lane configurations at its ends name the edge, so they go and come
+	-- back naming the rebuilt one, their turns, crosswalks and lights as they
+	-- were (junctions.renamed); one that cannot fails the stop in every game.
+	-- Removed alone, a junction with traffic lights kept its lights with no
+	-- configuration: a fatal assert in every game (build 40408, 2026-10-04: a
+	-- stop on a town road between two traffic lights crashed a room,
+	-- ecs::Engine::GetComponentDataIndex, BaseNodeConfig).
+	junctions.renamed(proposal, { e.comp.node0, e.comp.node1 }, e.id, -1, s.comp)
 	return proposal
 end
 
