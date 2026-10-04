@@ -136,15 +136,9 @@ fn scan(t: &TargetSpec, bytes: &[u8], base: u64) -> Scan {
     }
 }
 fn profiles(dir: &Path, id: &BuildIdentity) -> Result<Vec<Profile>> {
-    let mut paths = fs::read_dir(dir)?
-        .map(|r| r.map(|e| e.path()))
-        .collect::<std::io::Result<Vec<_>>>()?;
-    paths.sort();
+    let paths = tpf3mp_hookcore::profile::profile_files(dir)?;
     let mut out = Vec::new();
-    for path in paths
-        .into_iter()
-        .filter(|p| p.extension().is_some_and(|e| e == "toml"))
-    {
+    for path in paths {
         let p = Profile::from_toml(&fs::read_to_string(&path)?)
             .with_context(|| format!("profile {}", path.display()))?;
         if p.verify_identity(id).is_ok() {

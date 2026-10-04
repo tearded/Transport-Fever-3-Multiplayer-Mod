@@ -120,8 +120,8 @@ mod route_trace {
     use super::*;
     use std::collections::BTreeMap;
 
-    const SITE: &str = "ecs::LineSystem::GetData/return";
-    const EXPECTED: [u8; 9] = [0x48, 0x83, 0xc0, 0x18, 0x48, 0x83, 0xc4, 0x28, 0xc3];
+    use crate::build_data::native::order::route_trace::EXPECTED;
+    use crate::build_data::native::order::route_trace::SITE;
     static LINE: AtomicU64 = AtomicU64::new(u64::MAX);
     static BROKEN: AtomicBool = AtomicBool::new(false);
     static SEEN: Mutex<BTreeMap<i32, String>> = Mutex::new(BTreeMap::new());
@@ -349,29 +349,15 @@ pub mod land_vehicle {
     /// Set to `0` (or `off`), the site stays out: the engine shuffles the
     /// vehicles in its own order.
     pub const TOGGLE_ENV: &str = "TPF3MP_HOOK_LAND_VEHICLE_ORDER";
-    /// The site: `mov r13, [rbp-0x20]; mov rsi, [rbp-0x18]; cmp r13, rsi`.
-    pub const SITE: &str = "ecs::LandVehicleMoveSystem::Update2/shuffle";
-    /// The engine's own walk from an entry to its node record, which the
-    /// hook copies: `this` at `[rbp-0x80]`, the node-list holder at
-    /// `this+8`, the records at `[holder]`, 20 bytes each, the entry's
-    /// node index at its first dword.
-    pub const RECORDS: &str = "ecs::LandVehicleMoveSystem::Update2/records";
-    /// The bytes at the site; the first [`STEAL`] are run from the stub.
-    pub const EXPECTED: [u8; 11] = [
-        0x4C, 0x8B, 0x6D, 0xE0, // mov r13, [rbp-0x20]
-        0x48, 0x8B, 0x75, 0xE8, // mov rsi, [rbp-0x18]
-        0x4C, 0x3B, 0xEE, // cmp r13, rsi
-    ];
-    pub const STEAL: usize = 8;
-    /// Frame slots, as the stolen bytes encode them.
-    const VEC_BEGIN: i64 = -0x20;
-    const VEC_END: i64 = -0x18;
-    /// Where `this` is, as the records walk encodes it (`mov r8, [rbp-0x80]`).
-    const THIS: i64 = -0x80;
-    /// One entry: `{int32 nodeIndex, float priority}`.
-    pub const ENTRY_LEN: u64 = 8;
-    /// One node record: the entity id, then four component indices.
-    pub const RECORD_LEN: u64 = 20;
+    pub use crate::build_data::native::order::land_vehicle::ENTRY_LEN;
+    pub use crate::build_data::native::order::land_vehicle::EXPECTED;
+    pub use crate::build_data::native::order::land_vehicle::RECORD_LEN;
+    pub use crate::build_data::native::order::land_vehicle::RECORDS;
+    pub use crate::build_data::native::order::land_vehicle::SITE;
+    pub use crate::build_data::native::order::land_vehicle::STEAL;
+    use crate::build_data::native::order::land_vehicle::THIS;
+    use crate::build_data::native::order::land_vehicle::VEC_BEGIN;
+    use crate::build_data::native::order::land_vehicle::VEC_END;
     /// A sanity bound on the vehicle count.
     pub const MAX_ENTRIES: u64 = 1 << 20;
 
@@ -621,16 +607,10 @@ pub mod terminal {
     /// Set to `0` (or `off`), the site stays out: the boarding loop reads
     /// the vehicles in the engine's order.
     pub const TOGGLE_ENV: &str = "TPF3MP_HOOK_VEHICLES_AT_STOP_ORDER";
-    /// The site: `mov [rsp+0x248], rax` right after the getter's call, with
-    /// `rax` the `std::vector<Entity>*`.
-    pub const SITE: &str = "ecs::SimEntityAtTerminalSystem::Update/vehicles at stop";
-    /// The getter the call before the site must reach.
-    pub const GETTER: &str = "ecs::TransportVehicleSystem::GetVehiclesAtLineStop";
-    pub const EXPECTED: [u8; 12] = [
-        0x48, 0x89, 0x84, 0x24, 0x48, 0x02, 0x00, 0x00, // mov [rsp+0x248], rax
-        0x41, 0x8B, 0x7F, 0x50, // mov edi, [r15+0x50]
-    ];
-    pub const STEAL: usize = 8;
+    pub use crate::build_data::native::order::terminal::EXPECTED;
+    pub use crate::build_data::native::order::terminal::GETTER;
+    pub use crate::build_data::native::order::terminal::SITE;
+    pub use crate::build_data::native::order::terminal::STEAL;
     pub const MAX_IDS: u64 = 1 << 20;
 
     static BROKEN: AtomicBool = AtomicBool::new(false);
@@ -814,29 +794,15 @@ pub mod platform {
     pub const FIX: &str = "platform-order";
     /// Set to `0` (or `off`), both sites stay out.
     pub const TOGGLE_ENV: &str = "TPF3MP_HOOK_PLATFORM_ORDER";
-    /// `mov rcx,[r13+0x10]; movsxd rax,[rsi+rdi+4]; imul rbx,rax,0x1e8`,
-    /// right after `mov rax,[r13+8]; mov rdi,[rax]`.
-    pub const VISIT_SITE: &str = "ecs::TransportVehicleSystem::Update2/visit";
-    pub const VISIT_EXPECTED: [u8; 16] = [
-        0x49, 0x8B, 0x4D, 0x10, // mov rcx, [r13+0x10]
-        0x48, 0x63, 0x44, 0x3E, 0x04, // movsxd rax, [rsi+rdi+4]
-        0x48, 0x69, 0xD8, 0xE8, 0x01, 0x00, 0x00, // imul rbx, rax, 0x1e8
-    ];
-    pub const VISIT_STEAL: usize = 9;
-    /// `mov rcx,r14; sub rcx,r13; mov rax,rdi; imul rcx`: the candidates
-    /// are `[r13, r14)`, the sort's call follows.
-    pub const CANDIDATES_SITE: &str = "FindNextFreeTerminal/candidate sort";
-    pub const CANDIDATES_EXPECTED: [u8; 12] = [
-        0x49, 0x8B, 0xCE, // mov rcx, r14
-        0x49, 0x2B, 0xCD, // sub rcx, r13
-        0x48, 0x8B, 0xC7, // mov rax, rdi
-        0x48, 0xF7, 0xE9, // imul rcx
-    ];
-    pub const CANDIDATES_STEAL: usize = 6;
-    /// Update2's `int` argument, the node count, spilled at `[rbp+0x5b0]`.
-    const COUNT: i64 = 0x5b0;
-    pub const RECORD_LEN: u64 = 8;
-    pub const CANDIDATE_LEN: u64 = 12;
+    pub use crate::build_data::native::order::platform::CANDIDATE_LEN;
+    pub use crate::build_data::native::order::platform::CANDIDATES_EXPECTED;
+    pub use crate::build_data::native::order::platform::CANDIDATES_SITE;
+    pub use crate::build_data::native::order::platform::CANDIDATES_STEAL;
+    use crate::build_data::native::order::platform::COUNT;
+    pub use crate::build_data::native::order::platform::RECORD_LEN;
+    pub use crate::build_data::native::order::platform::VISIT_EXPECTED;
+    pub use crate::build_data::native::order::platform::VISIT_SITE;
+    pub use crate::build_data::native::order::platform::VISIT_STEAL;
     pub const MAX_RECORDS: u64 = 1 << 20;
     pub const MAX_CANDIDATES: u64 = 1 << 12;
 
@@ -1193,16 +1159,12 @@ pub mod road {
     /// Set to `0` (or `off`), the entries keep the engine's order (the
     /// measurement still installs the detours when it is on).
     pub const TOGGLE_ENV: &str = "TPF3MP_HOOK_ROAD_ENTRY_ORDER";
-    pub const ADD: &str = measure::EDGE_USE_ADD;
-    pub const ADD_RANGE: &str = measure::EDGE_USE_ADD_RANGE;
-    /// One entry: the entity id first.
-    pub const ENTRY_LEN: u64 = 20;
-    /// One edge's data: its length (a float), then the entries vector.
-    pub const EDGE_DATA_LEN: u64 = 32;
-    /// One edge entity's slot: its edges vector first.
-    pub const SLOT_LEN: u64 = 72;
-    /// An `EdgeId`: entity, index, direction.
-    pub const EDGE_ID_LEN: u64 = 12;
+    pub use crate::build_data::native::order::road::ADD;
+    pub use crate::build_data::native::order::road::ADD_RANGE;
+    pub use crate::build_data::native::order::road::EDGE_DATA_LEN;
+    pub use crate::build_data::native::order::road::EDGE_ID_LEN;
+    pub use crate::build_data::native::order::road::ENTRY_LEN;
+    pub use crate::build_data::native::order::road::SLOT_LEN;
     pub const MAX_ENTRIES: u64 = 1 << 16;
     pub const MAX_PATH: u64 = 1 << 20;
 
@@ -1304,8 +1266,7 @@ pub mod road {
         outcomes
     }
 
-    /// Where `Add`'s manager keeps its data (`EdgeUseManagerData*`).
-    pub const MANAGER_DATA: u64 = 0x18;
+    pub use crate::build_data::native::order::road::MANAGER_DATA;
 
     /// One entry, as the engine lays it out.
     pub type Entry = [u8; ENTRY_LEN as usize];
@@ -1769,14 +1730,13 @@ pub mod road {
 pub mod measure {
     use super::*;
 
-    pub const RESERVE: &str = "transport::EdgeReservationManager::Reserve";
-    pub const RESERVE_SIMPLE: &str = "transport::EdgeReservationManager::Reserve_simple";
-    pub const EDGE_USE_ADD: &str = "transport::EdgeUseManager::Add";
-    pub const EDGE_USE_ADD_RANGE: &str = "transport::EdgeUseManager::AddRange";
-    pub const ENGINE_UPDATE: &str = "ecs::Engine::Update";
+    pub use crate::build_data::native::order::measure::EDGE_USE_ADD;
+    pub use crate::build_data::native::order::measure::EDGE_USE_ADD_RANGE;
+    pub use crate::build_data::native::order::measure::ENGINE_UPDATE;
+    pub use crate::build_data::native::order::measure::RESERVE;
+    pub use crate::build_data::native::order::measure::RESERVE_SIMPLE;
     pub const DEFAULT_INTERVAL: u64 = 100;
-    /// One `EdgeId` on a path: entity, index, direction.
-    const EDGE_LEN: u64 = 12;
+    use crate::build_data::native::order::measure::EDGE_LEN;
     /// A sanity bound on one reservation's edge count.
     const MAX_EDGES: u64 = 1 << 16;
 

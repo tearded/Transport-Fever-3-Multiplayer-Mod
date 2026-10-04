@@ -37,19 +37,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::modules::Memory;
 
-/// The profile's name for the stop tool's call of `CommandList::Add` in
-/// `MousePressed`. `Add` returns 5 bytes past it.
-pub const STOP_ADD_CALL: &str = "StreetTerminalBuilder::MousePressed/Add call";
-/// The profile's name for `MousePressed` setting the busy byte, whose
-/// signature holds [`BUSY`]: a build that moved it does not resolve.
-pub const STOP_BUSY_SET: &str = "StreetTerminalBuilder::MousePressed/busy set";
+pub use crate::build_data::native::stoptool::STOP_ADD_CALL;
+pub use crate::build_data::native::stoptool::STOP_BUSY_SET;
 
-/// Where the tool keeps its busy byte (build 40408).
-pub const BUSY: usize = 0x2c8;
-/// Where a `std::function` keeps its impl pointer (MSVC x64).
-pub const FUNCTION_IMPL: usize = 0x38;
-/// Where the click's functor keeps the tool, after its vftable.
-pub const FUNCTOR_TOOL: usize = 0x8;
+pub use crate::build_data::native::stoptool::BUSY;
+pub use crate::build_data::native::stoptool::FUNCTION_IMPL;
+pub use crate::build_data::native::stoptool::FUNCTOR_TOOL;
 
 /// Where `Add` returns to from the stop tool's call; 0 when the profile
 /// does not name it (or the busy byte), and the tool waits as before.

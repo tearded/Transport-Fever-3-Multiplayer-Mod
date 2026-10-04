@@ -318,7 +318,9 @@ and build profiles (`profiles/*.toml`) in the per-user `TPF3-MP` data
 folder. It also carries the release's own profiles, built in from the
 repository's `profiles/` folder (Transport Fever 3 Steam build 40408 on
 Windows, so far); a profile in the data folder for the same build comes
-first, so one can be tried there without a release. The game's environment says which, so several games on one PC each
+first, so one can be tried there without a release. Per-build directories
+with `hooks.toml` are supported too; flat custom profiles stay supported.
+The game's environment says which, so several games on one PC each
 reach their own agent:
 
 | variable | effect |
@@ -331,6 +333,34 @@ reach their own agent:
 command line. The multiplayer rig (`tpf3mp-rig`, in
 [DEVELOPMENT.md](DEVELOPMENT.md)) sets all three for every game it starts, and starts a real
 game with the hook in it as the launcher does.
+
+### Reviewing the native data for a game update
+
+The compiled Windows native data is grouped with its signature profile in
+`profiles/tf3_build40408_steam_windows/`: `hooks.toml` records the executable
+SHA-256, size and PE timestamp; `native.rs` records the game/Steam build and
+exports each subsystem's data file. Those files hold splice bytes, frame and
+field offsets, structure layouts and GUI register/site descriptions. The
+hook modules reexport the existing names, so their callers and behavioral
+tests use the same data. Algorithms, bounds, kill switches and generic x86
+instruction decoding remain in the hook modules.
+
+`crates/tpf3mp-hook/src/build_data.rs` explicitly selects the one compiled
+native bundle. Bootstrap checks its complete executable identity before
+installing the menu or step gate. A TOML profile for another executable is
+insufficient: it cannot enable that build with the previous build's native
+layouts. Custom profiles for the supported executable keep their priority.
+This release still supports only the existing Windows Steam build 40408;
+moving data does not approve the Preview or add another supported platform.
+
+For a new build, create a separate bundle directory, investigate the audit's
+signature/function/script changes, and review its native data alongside its
+`hooks.toml`. Select that reviewed bundle explicitly in `build_data.rs`.
+Also review the hook code's ABI assumptions (calling conventions and the
+instructions emitted by callbacks); grouping data does not prove those are
+unchanged. Run the strict profile verification, the normal tests, and the
+authorized real-game acceptance before promotion. The archive and audit
+commands are described in [tpfre](../tools/tpfre/README.md#game-update-workflow-windows-pe-builds).
 
 ## The bridge: what travels over the link
 

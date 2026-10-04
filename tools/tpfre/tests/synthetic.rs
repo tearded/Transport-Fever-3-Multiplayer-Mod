@@ -447,6 +447,22 @@ fn audit_profile(exe: &Path, targets: &str) -> PathBuf {
 const MIDDLE_TARGET: &str = "\n[[target]]\nname = 'middle'\nsignature = '48 83 EC 28 B8 ?? ?? ?? ?? 48 83 C4 28 C3'\nprologue = '48 83 EC 28'\n";
 
 #[test]
+fn verification_discovers_per_build_bundles_without_parsing_their_other_metadata() {
+    let f = fixture();
+    let profiles = audit_profile(&f.exe, MIDDLE_TARGET);
+    let bundle = profiles.join("steam-build");
+    std::fs::create_dir(&bundle).expect("bundle");
+    std::fs::rename(profiles.join("fixture.toml"), bundle.join("hooks.toml"))
+        .expect("profile move");
+    std::fs::write(bundle.join("metadata.toml"), "not a hook profile").expect("metadata");
+    let (code, out, err) = run(&["verify", s(&f.exe), "--profiles", s(&profiles), "--json"]);
+    assert_eq!(code, 0, "{out}{err}");
+    let r: serde_json::Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(r["targets"].as_array().expect("targets").len(), 1);
+    assert_eq!(r["targets"][0]["status"], "matched");
+}
+
+#[test]
 fn undecodable_body_is_reported_unknown_without_losing_other_targets() {
     let f = fixture();
     let alpha = functions(false)

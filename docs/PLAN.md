@@ -88,7 +88,7 @@ before the rest ([DAY_ONE.md](DAY_ONE.md) §0).
 - [x] Automated per-target signature/prologue and containing-function audit,
   script diff and strict exact-build profile verification (`tpfre audit`,
   `tpfre verify`; D14). Static results never replace real-game acceptance.
-- [ ] Bundle reviewed profiles and other build-specific native data so a new
+- [x] Bundle reviewed profiles and other build-specific native data so a new
   build's changes can be reviewed together.
 - [ ] Integrate exact-build verification with private build inputs into the
   update/release procedure; retain every existing promotion gate.
@@ -123,7 +123,7 @@ Then:
   equivalents of TPF2's `GameSim::Step`, `CGame::Step`,
   `CommandList::Add`, save and load, into the recon log. TF3's names may
   differ from TPF2's. *Done* with `tpfre match` (TPF2's names carried
-  over); the targets are in `profiles/tf3_build40408_steam_windows.toml`,
+  over); the targets are in `profiles/tf3_build40408_steam_windows/hooks.toml`,
   proven against the installed game
   (`crates/tpf3mp-hookcore/tests/tf3_static_proof.rs`).
 - [x] `script_api_dump`: both state dumps (game script and GUI); every

@@ -49,17 +49,13 @@ pub const FIX: &str = "town-field-cache";
 /// cache, as the game does.
 pub const TOGGLE_ENV: &str = "TPF3MP_HOOK_TOWN_FIELD_CACHE";
 
-pub const FIELD: &str = "StreetField::At";
-pub const SITE: &str = "StreetField::At/cache found";
-/// Where the site lies in `At`.
-pub const SITE_AT: u64 = 0xba;
-/// Where the miss path starts in `At`: the site's `jne` must reach it.
-pub const MISS_AT: u64 = 0xf6;
-/// `cmp byte [r9+0x19], 0` (stolen), then `jne` to the miss path.
-pub const EXPECTED: [u8; 7] = [0x41, 0x80, 0x79, 0x19, 0x00, 0x75, 0x35];
-pub const STEAL: usize = 5;
-/// The map's head node's nil flag.
-const NIL: u64 = 0x19;
+pub use crate::build_data::native::townfield::EXPECTED;
+pub use crate::build_data::native::townfield::FIELD;
+pub use crate::build_data::native::townfield::MISS_AT;
+use crate::build_data::native::townfield::NIL;
+pub use crate::build_data::native::townfield::SITE;
+pub use crate::build_data::native::townfield::SITE_AT;
+pub use crate::build_data::native::townfield::STEAL;
 
 static BROKEN: AtomicBool = AtomicBool::new(false);
 static CALLS: AtomicU64 = AtomicU64::new(0);

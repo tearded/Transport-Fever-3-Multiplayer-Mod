@@ -131,18 +131,10 @@ pub const GAME_SCRIPT_SALT: u32 = 0;
 /// number within its step.
 pub const TOWN_DEVELOP_SALT: u32 = 0x746f_776e;
 
-/// Where the script's entity (`ecs::Entity`, an `int`) is in each call's
-/// functor, as the engine's own code reads it (build 40408): the update
-/// functor's `mov eax, [rdi+0x20]` (0xf45490), the post-update functor's
-/// `mov eax, [rdi+0x18]` (0xf449e6), the event operator's captures'
-/// `mov eax, [rdi+0x20]` (0xf417d5).
-pub const UPDATE_ENTITY: usize = 0x20;
-pub const POST_UPDATE_ENTITY: usize = 0x18;
-pub const EVENT_ENTITY: usize = 0x20;
-/// Where the event operator's captures keep the event's `int const*` seed:
-/// the engine reseeds the state itself when it is not null (`mov rax,
-/// [rcx+0x28]` ... `call lua::State::RandomSeed`, 0xf417a7).
-pub const EVENT_SEED: usize = 0x28;
+pub use crate::build_data::native::seeds::EVENT_ENTITY;
+pub use crate::build_data::native::seeds::EVENT_SEED;
+pub use crate::build_data::native::seeds::POST_UPDATE_ENTITY;
+pub use crate::build_data::native::seeds::UPDATE_ENTITY;
 
 /// After the first few calls of each kind, the reseed goes to the log once
 /// per this many steps.

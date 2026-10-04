@@ -129,7 +129,7 @@ to carry over on every patch.
 ## The build profile
 
 The entry's targets are in the release's built-in profile for the build
-(`profiles/tf3_build40408_steam_windows.toml`, `docs/HOOKS.md`), next to the
+(`profiles/tf3_build40408_steam_windows/hooks.toml`, `docs/HOOKS.md`), next to the
 step gate's: `lua_loadfile` is detoured, the others only called. The first
 three are optional there: without them the menu stays the game's and the
 step gate still installs. `tpf3mp-hookcore/tests/tf3_static_proof.rs` pins

@@ -73,6 +73,12 @@ prove callee/data equivalence or ABI compatibility. Matcher suggestions are
 investigation hints, never automatically accepted targets. SHA-keyed indexes
 are cached without modifying profiles or executables.
 
+Profile discovery accepts flat `*.toml` files and immediate per-build
+directories containing `hooks.toml`, in deterministic path order. Other
+metadata inside a bundle is not parsed as a hook profile. The runtime's
+native data and profile are paired in these bundles; `verify` checks profile
+bytes and does not certify their Rust ABI data (see [HOOKS.md](../../docs/HOOKS.md#reviewing-the-native-data-for-a-game-update)).
+
 An undecodable function body (for example embedded data) is reported with
 `normalized_function_equal: null` and `comparison_error`; it requires manual
 review, while the remaining targets are still checked.

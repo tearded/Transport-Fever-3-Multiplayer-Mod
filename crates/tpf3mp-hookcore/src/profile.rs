@@ -12,7 +12,12 @@
 //! what keeps the hook off an unknown or patched build instead of patching
 //! blindly (see `docs/HOOKS.md`).
 
-use std::{fs::File, io, io::Read, path::Path};
+use std::{
+    fs::{self, File},
+    io,
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -20,6 +25,26 @@ use thiserror::Error;
 
 use crate::pattern::{Pattern, PatternError, ScanError};
 use crate::pe::PeHeaders;
+
+/// Flat custom profiles and per-build directories containing `hooks.toml`.
+/// One level only, deterministic order, and no arbitrary TOML metadata parsed.
+pub fn profile_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() && path.extension().is_some_and(|e| e == "toml") {
+            paths.push(path);
+        } else if path.is_dir() {
+            let profile = path.join("hooks.toml");
+            if profile.is_file() {
+                paths.push(profile);
+            }
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
 
 /// Identifies one exact game build.
 #[derive(Debug, Clone, PartialEq, Eq)]

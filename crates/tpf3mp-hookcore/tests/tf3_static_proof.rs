@@ -14,7 +14,7 @@ use tpf3mp_hookcore::pe::PeHeaders;
 use tpf3mp_hookcore::profile::{self, BuildIdentity, Profile};
 
 const DEFAULT_EXE: &str = r"F:\SteamLibrary\steamapps\common\Transport Fever 3\TransportFever3.exe";
-const PROFILE: &str = include_str!("../../../profiles/tf3_build40408_steam_windows.toml");
+const PROFILE: &str = include_str!("../../../profiles/tf3_build40408_steam_windows/hooks.toml");
 
 /// Addresses found on release day (RVAs, image base 0x140000000).
 const TARGETS: &[(&str, u64)] = &[
