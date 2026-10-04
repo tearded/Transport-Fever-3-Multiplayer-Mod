@@ -165,6 +165,14 @@ and `native.rs` always belong to the selected bundle. For an update, review the
 new profile, offsets, layouts and callback ABI, then change this one selection
 on the feature branch ([HOOKS.md](HOOKS.md#reviewing-the-native-data-for-a-game-update)).
 
+For the combined process, use `tpfre update`: it snapshots an installed
+update or reads an existing archive, collects all archived file changes,
+script changes, profiled hook/function changes and independent blockers, then checks/tests and builds only when its
+exact reviewed native bundle is selected. Batch the diagnosed changes before
+rerunning; use `--check-only` for the initial analysis. See the
+[one-run command and reports](../tools/tpfre/README.md#one-update-run).
+It never edits the game or automatically approves unknown ABI data.
+
 Build `tools/tpfre` once with the machine's `quiet-cargo` wrapper when installed.
 Then, from the repository root, run the standalone tool against a complete
 private source archive:

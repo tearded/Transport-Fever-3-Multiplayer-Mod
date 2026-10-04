@@ -96,6 +96,54 @@ always say `runtime_verified: false`. These commands never activate hooks,
 approve a build or replace real-game acceptance. Keep the existing
 feature → dev → acceptance → main release gates.
 
+## One update run
+
+`tpfre update` collects the complete change list before invoking Cargo. It
+reads an installed game (`--game` plus its Steam `--build` ID) or an existing
+complete private archive (`--new`). `--old` is the last supported archive.
+Use a new private output directory for each run:
+
+```powershell
+# From the repository root; the existing Preview archive needs no installation:
+& ./tools/tpfre/target/release/tpfre.exe update --repo . --old "$env:USERPROFILE/TPF3-MP-builds/25533170-sources" --new "$env:USERPROFILE/TPF3-MP-builds/25686323-sources" --out "$env:USERPROFILE/TPF3-MP-builds/runs/preview-analysis-01" --cache "$env:USERPROFILE/TPF3-MP-builds/indexes" --jobs 2 --check-only
+# After a game patch, replace --new with:
+# --game 'D:/SteamLibrary/steamapps/common/Transport Fever 3' --build <Steam-build-ID>
+```
+
+The run saves `files.json` (changed/added/removed archived contents, including
+libraries), `audit.json` (every baseline target/function and changed scripts),
+`signatures.json` when an exact candidate exists, `native-bundle.json` when
+the selected bundle matches, and `summary.json` with all independent blocking
+checks. A missing candidate does not hide the separate native-bundle failure.
+No game or profile is modified; new snapshots, reports and caches stay private.
+Existing run directories and output/cache locations inside inputs/Git are
+refused before creating anything there.
+
+The command does not infer ABI data, accept matcher suggestions, repin a
+profile to an unknown executable or change `native-build.txt`. An unknown
+update leaves a complete diagnosis and stops before Cargo. Investigate and
+batch the needed changes, prepare and select its reviewed native bundle, then
+rerun. A previously prepared exact new bundle is a reviewed input: the old
+baseline audit remains diagnostic, since old signatures can deliberately
+stop matching after the reviewed changes. With an unchanged EXE, changed
+scripts or libraries still block reuse of its bundle; their review is required.
+Update the supported baseline only after the existing acceptance process.
+
+When the static checks pass, a normal run checks format, Clippy and the whole
+workspace's tests (collecting failures across crates), then makes one release build of launcher, agent, server
+and hook. A failed check stops subsequent stages; Cargo output is retained in
+`format.log`, `clippy.log`, `tests.log` and `build.log`. The archive and selected
+native data are checked again after testing before compilation. The machine's
+quiet-cargo wrapper handles heavy commands. `--check-only` executes the same
+analysis and static gates without tests or compilation.
+
+Exit 0 means `static_checks_passed` in check-only mode or `built` after the
+checks and release build. Exit 1 means `blocked` with the stage and reasons
+in `summary.json`; invalid output locations/CLI inputs retain the usual codes
+3/2. Every result has `runtime_verified: false`. A local build still needs
+real-game acceptance and the existing branch/release gates; it is not published
+by this command.
+
 ## Checked update builds
 
 From the repository root, `tpfre verify-build --repo . --archive <snapshot>

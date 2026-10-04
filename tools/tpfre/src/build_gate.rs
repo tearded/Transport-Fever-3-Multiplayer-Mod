@@ -165,8 +165,7 @@ pub fn build(
     build_with(snapshot, repository, jobs, out, |repository, args| {
         // Respect a machine's quiet-cargo queue/cap when it is installed.
         // CI machines without that wrapper use their normal Cargo executable.
-        let cargo = quiet_cargo()
-            .unwrap_or_else(|| std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+        let cargo = cargo_program();
         let status = Command::new(cargo)
             .args(args)
             .current_dir(repository)
@@ -174,6 +173,10 @@ pub fn build(
             .context("start Cargo after game verification")?;
         Ok(if status.success() { 0 } else { 1 })
     })
+}
+
+pub(crate) fn cargo_program() -> std::ffi::OsString {
+    quiet_cargo().unwrap_or_else(|| std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
 }
 
 fn quiet_cargo() -> Option<std::ffi::OsString> {

@@ -20,3 +20,5 @@ pub mod query;
 pub mod rtti;
 pub mod sig;
 pub mod strings;
+
+pub mod update;

@@ -319,7 +319,7 @@ fn read_script(f: &mut File, e: &ZipEntry) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn check_output(game: &Path, out: &Path) -> Result<()> {
+pub(crate) fn check_output_location(game: &Path, out: &Path) -> Result<()> {
     ensure!(
         !out.components().any(|c| matches!(c, Component::ParentDir)),
         "output must not contain '..'"
@@ -342,18 +342,19 @@ fn check_output(game: &Path, out: &Path) -> Result<()> {
         !ancestor.ancestors().any(|p| p.join(".git").exists()),
         "archive must be outside a Git worktree (private game sources)"
     );
-    fs::create_dir_all(parent)?;
-    let parent = parent.canonicalize()?;
-    ensure!(
-        !parent.starts_with(game),
-        "archive must be outside the game install"
-    );
     ensure!(
         !out.exists(),
         "archive already exists; nothing overwritten: {}",
         out.display()
     );
     Ok(())
+}
+
+pub(crate) fn check_output(game: &Path, out: &Path) -> Result<()> {
+    check_output_location(game, out)?;
+    let absolute = std::path::absolute(out)?;
+    fs::create_dir_all(absolute.parent().context("output parent")?)?;
+    check_output_location(game, out)
 }
 
 pub fn create(opts: &Options<'_>) -> Result<Manifest> {

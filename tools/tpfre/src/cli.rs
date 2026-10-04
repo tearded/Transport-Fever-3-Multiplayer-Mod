@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use crate::query::Query;
-use crate::{archive, audit, build_gate, diff, index, matching, sig};
+use crate::{archive, audit, build_gate, diff, index, matching, sig, update};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -76,6 +76,41 @@ pub enum Cmd {
         repo: PathBuf,
         #[arg(long)]
         jobs: Option<std::num::NonZeroUsize>,
+    },
+    /// Run the update pipeline: snapshot, compare, verify, test and build.
+    Update {
+        /// Previous complete private archive (the supported baseline).
+        #[arg(long)]
+        old: PathBuf,
+        /// An existing complete archive of the updated game.
+        #[arg(long, required_unless_present = "game", conflicts_with = "game")]
+        new: Option<PathBuf>,
+        /// Snapshot an installed game instead of supplying --new.
+        #[arg(
+            long,
+            required_unless_present = "new",
+            conflicts_with = "new",
+            requires = "build"
+        )]
+        game: Option<PathBuf>,
+        #[arg(long, requires = "game")]
+        build: Option<String>,
+        #[arg(long, default_value = "TransportFever3.exe")]
+        exe: String,
+        #[arg(long, requires = "game")]
+        steam_manifest: Option<PathBuf>,
+        /// New private run directory, outside Git and all game/archive inputs.
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        cache: Option<PathBuf>,
+        #[arg(long)]
+        jobs: Option<std::num::NonZeroUsize>,
+        /// Stop after the static checks, without running Cargo.
+        #[arg(long)]
+        check_only: bool,
     },
     /// Index a PE32+ x86-64 binary (read only) into a .tpfdb file.
     Index {
@@ -345,6 +380,42 @@ fn dispatch(cli: Cli, out: &mut dyn Write, err: &mut dyn Write) -> anyhow::Resul
             repo,
             jobs,
         } => build_gate::build(&archive, &repo, jobs, out),
+        Cmd::Update {
+            old,
+            new,
+            game,
+            build,
+            exe,
+            steam_manifest,
+            out: dest,
+            repo,
+            cache,
+            jobs,
+            check_only,
+        } => {
+            let input = match (new.as_deref(), game.as_deref(), build.as_deref()) {
+                (Some(snapshot), None, None) => update::Input::Archive(snapshot),
+                (None, Some(game), Some(build)) => update::Input::Install {
+                    game,
+                    build,
+                    executable: &exe,
+                    steam_manifest: steam_manifest.as_deref(),
+                },
+                _ => anyhow::bail!("use --new <archive> or --game <install> --build <ID>"),
+            };
+            update::run(
+                &update::Options {
+                    old: &old,
+                    input,
+                    repository: &repo,
+                    output: &dest,
+                    cache: cache.as_deref(),
+                    jobs,
+                    check_only,
+                },
+                out,
+            )
+        }
         Cmd::Index {
             binary,
             out: db,
