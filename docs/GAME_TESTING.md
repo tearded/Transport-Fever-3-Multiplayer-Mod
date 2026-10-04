@@ -111,7 +111,11 @@ It:
 2. starts `tpf3mp-rig` with a local server and one game per player, 25 s
    apart (two games starting together can fail to set up their graphics);
 3. waits until every game's hook has attached and the room's game starts;
-4. loads the fixture in the host's console;
+4. waits until the host's `hook.log` says its main menu is up (the
+   mod's `main_page.tl` served and the room begun on a menu frame), then
+   loads the fixture in its console. A game that quits first, comes up
+   without the mod's page, or is not at its menu after `-MenuWait`
+   seconds (180) fails the setup; nothing is typed into it;
 5. waits until the room has saved that world and the guests have loaded it
    from their main menus;
 6. closes the host's console and zooms in.

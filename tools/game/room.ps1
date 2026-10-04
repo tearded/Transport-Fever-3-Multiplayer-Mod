@@ -4,9 +4,9 @@
 # 1. installs the repository's mod into the game's staging area;
 # 2. starts tpf3mp-rig: a throwaway local server, one agent and one game
 #    per player, each game with the hook loaded, all in one room;
-# 3. once the room's game starts, loads the fixture save in the host (p1)
-#    through its console; the room saves that world, and the guests load it
-#    from their main menus; a guest that has not after -GuestWait seconds
+# 3. once the room's game starts and the host's (p1) hook.log says its main
+#    menu is up, loads the fixture save in the host through its console;
+#    the room saves that world, and the guests load it from their main menus; a guest that has not after -GuestWait seconds
 #    fails the setup instead of loading a different world;
 # 4. closes the host's console and zooms each game in a little.
 #
@@ -23,7 +23,8 @@ param(
   [ValidatePattern("^[A-Za-z0-9_-]+$")][string]$Fixture = "tpf3mp_fixture3",
   [string]$GameBuild = "40408",
   [int]$Stagger = 25,
-  [int]$MenuSeconds = 55,
+  [int]$MenuWait = 180,
+  [int]$MenuSettle = 5,
   [int]$GuestWait = 150,
   [string]$CloseConsoleAt = "557,47",
   [switch]$NoInstall
@@ -87,21 +88,45 @@ $load = 'local ns=app.SaveGameNamespace.getSavegame() for _,i in ipairs(app.find
   'if i.saveName=="' + $Fixture + '" then local id=api.type.SavegameId.new() id.path=i.path ' +
   'id.saveGameName=i.saveName id.saveGameNamespace=ns print("@@loading ' + $Fixture + '") app.loadGame(id,false,nil) end end'
 $consoled = @()
-function Load-Fixture([int]$gp) {
-  # The console takes input once the game is at its main menu.
-  $ready = (Get-Process -Id $gp -ErrorAction Stop).StartTime.AddSeconds($MenuSeconds)
-  while ((Get-Date) -lt $ready) { Start-Sleep -Seconds 2 }
-  & "$PSScriptRoot\console.ps1" -GamePid $gp -Lua $load -Open | Out-Null
-  $script:consoled += $gp
-}
 function Hook-Says([string]$player, [string]$pattern) {
   $log = "$runDir\$player\hook.log"
   (Test-Path $log) -and (Select-String -Path $log -Pattern $pattern -Quiet)
 }
+function Wait-Menu([string]$player, [int]$gp) {
+  # The console takes input once the game is at its main menu: the hook has
+  # served the menu's page and, on one of the menu's frames, seen the room
+  # begin. Then -MenuSettle seconds for the page to be built.
+  $deadline = (Get-Date).AddSeconds($MenuWait)
+  while (-not ((Hook-Says $player "main_page.tl SERVED") -and (Hook-Says $player "the room began at the main menu"))) {
+    if (Hook-Says $player "main_page.tl MISSED") {
+      throw "$player's main menu came without the mod's page; see $runDir\$player\hook.log. Games left running"
+    }
+    if (-not (Get-Process -Id $gp -ErrorAction SilentlyContinue)) {
+      throw "$player's game (pid $gp) quit before its main menu; see $runDir\$player\hook.log and $GameStdout"
+    }
+    if ((Get-Date) -ge $deadline) {
+      throw "$player's game was not at its main menu after $MenuWait s; nothing typed. Games left running in $runDir"
+    }
+    Start-Sleep -Seconds 1
+  }
+  Start-Sleep -Seconds $MenuSettle
+}
+function Load-Fixture([string]$player, [int]$gp) {
+  Wait-Menu $player $gp
+  $said = & "$PSScriptRoot\console.ps1" -GamePid $gp -Lua $load -Open
+  $script:consoled += $gp
+  if (-not ($said -match "@@loading $Fixture")) { "${player}: the console did not echo the fixture's load; waiting for the hook anyway" }
+}
 
-Load-Fixture $pids[0]
+Load-Fixture "p1" $pids[0]
+# The hook's own lines for the room's save; a bare "holding" also matches
+# the paused-tick fix's "holding tickCount" lines.
+$saved = "saved the world for the room|was not saved for the room|holding the world"
 $deadline = (Get-Date).AddSeconds(150)
-while ((Get-Date) -lt $deadline -and -not (Hook-Says "p1" "saved the world|not saved|holding")) { Start-Sleep -Seconds 3 }
+while ((Get-Date) -lt $deadline -and -not (Hook-Says "p1" $saved)) { Start-Sleep -Seconds 3 }
+if (-not (Hook-Says "p1" $saved)) {
+  throw "Host did not load the fixture within 150 s of typing it; see $runDir\p1\hook.log. Games left running"
+}
 for ($i = 1; $i -lt $pids.Count; $i++) {
   $player = "p$($i + 1)"
   $deadline = (Get-Date).AddSeconds($GuestWait)
@@ -128,7 +153,7 @@ for ($i = 0; $i -lt $pids.Count; $i++) {
   $player = "p$($i + 1)"
   "== $player"
   Get-Content "$runDir\$player\hook.log" -ErrorAction SilentlyContinue |
-    Select-String "playing the room's world|holding|saved the world|from its save" |
+    Select-String "playing the room's world|$saved" |
     Select-Object -Last 2 | ForEach-Object { $_.Line }
 }
 "games: " + ((0..($pids.Count - 1) | ForEach-Object { "p$($_ + 1)=$($pids[$_])" }) -join " ")
