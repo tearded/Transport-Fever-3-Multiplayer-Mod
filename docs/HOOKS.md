@@ -355,6 +355,13 @@ layouts. Custom profiles for the supported executable keep their priority.
 This release still supports only the existing Windows Steam build 40408;
 moving data does not approve the Preview or add another supported platform.
 
+A static signature candidate for Steam Preview 40418 is in
+`profiles/tf3_build40418_steam_windows/hooks.toml`. All 143 targets match its
+private archive, but its directory deliberately has no `native.rs` and is not
+selected. The Release bundle and release archive remain active. The changed
+splice bytes, script review and remaining ABI work are recorded in
+[the Preview investigation](../investigation/PREVIEW_40418_2026-10-04.md).
+
 For a new build, create a separate bundle directory, investigate the audit's
 signature/function/script changes, and review its native data alongside its
 `hooks.toml`. Select that reviewed bundle explicitly in `native-build.txt`.

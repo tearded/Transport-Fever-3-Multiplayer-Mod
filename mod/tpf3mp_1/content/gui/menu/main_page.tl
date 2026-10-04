@@ -603,12 +603,12 @@ return react.RegisterRecipe("MainPage", function(mainPageParams : MenuPageParam<
 		end
 	end
 
-	local notifications = button_react_util.makeIconButton(nil, "::/gui/menu/icons/news_50.tga", 
-		function()
-			if clickAllowed("TopBar") then
-				showReleaseNotes()
-			end
-		end, _("Check the Latest Release Notes"))
+	-- local notifications = button_react_util.makeIconButton(nil, "::/gui/menu/icons/news_50.tga",
+	-- 	function()
+	-- 		if clickAllowed("TopBar") then
+	-- 			showReleaseNotes()
+	-- 		end
+	-- 	end, _("Check the Latest Release Notes"))
 
 	local profile = menu_util.UserProfile()
 	
