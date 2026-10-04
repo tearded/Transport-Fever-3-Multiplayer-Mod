@@ -215,6 +215,18 @@ non-admin machine it can start hidden at that account's Windows login instead
 of being installed as a service. Keep runner credentials and archives outside
 Git, and use the Release archive until a reviewed Preview bundle is selected.
 
+For static work on `feat/game-update-*`, the optional repository variable
+`TPF3MP_CANDIDATE_GAME_ARCHIVE` names a second complete private archive.
+When configured, the same private job also runs `tpfre verify` against all
+candidate signatures, including optional targets, and uploads the separate
+`game-candidate-verification.json` artifact. Missing or unsupported candidate
+input fails the update check; an unset variable leaves this optional check out.
+The active native selection and `TPF3MP_GAME_ARCHIVE` still govern packaging.
+For Preview 40418, point the candidate variable at its complete private source
+archive while keeping the active variable on Release. Signature success never
+selects or approves the candidate's native ABI or runtime. Ordinary CI also
+checks the candidate's pinned identity and the native hold without game files.
+
 To verify a pushed feature branch without building or drafting a release:
 
 ```powershell
