@@ -95,14 +95,19 @@ jobs:
           if (-not (Test-Path -LiteralPath $quietCargo -PathType Leaf)) {
             throw 'Install quiet-cargo on the private runner before enabling game verification'
           }
+          if (-not $env:RUNNER_TOOL_CACHE) { throw 'Runner tool cache is not configured' }
+          # Keep compilation artifacts outside checkout's git clean. Cargo
+          # still rebuilds changed sources; every run checks the live archive.
+          $verificationTarget = Join-Path $env:RUNNER_TOOL_CACHE 'tpfre-game-verification'
           # Windows PowerShell treats native stderr as errors; Cargo progress
           # is stderr too. Check the exit code explicitly before verification.
           $ErrorActionPreference = 'Continue'
-          & $quietCargo build --release --locked --manifest-path tools/tpfre/Cargo.toml -j 2
+          & $quietCargo build --release --locked --manifest-path tools/tpfre/Cargo.toml --target-dir $verificationTarget -j 2
           $buildExit = $LASTEXITCODE
           $ErrorActionPreference = 'Stop'
           if ($buildExit -ne 0) { throw 'Could not build the game verification tool' }
-          $report = & ./tools/tpfre/target/release/tpfre.exe verify-build --repo . --archive $env:TPF3MP_GAME_ARCHIVE --json
+          $verificationTool = Join-Path $verificationTarget 'release/tpfre.exe'
+          $report = & $verificationTool verify-build --repo . --archive $env:TPF3MP_GAME_ARCHIVE --json
           $verificationExit = $LASTEXITCODE
           if ($report.Count -gt 0) {
             [System.IO.File]::WriteAllLines($reportPath, [string[]]$report, [System.Text.UTF8Encoding]::new($false))

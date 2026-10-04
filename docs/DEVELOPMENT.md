@@ -205,6 +205,9 @@ the private check. A failed target check retains its static report as an
 artifact for investigation while packaging stays blocked. An unavailable
 runner holds packaging until the runner is
 available. Ordinary CI compilation/testing needs no private game inputs.
+The verification tool's Cargo target directory stays in the runner's tool
+cache, outside the clean checkout. Repeated checks reuse compilation artifacts
+while still checking the current commit and every private archive file afresh.
 The private job is never triggered by pull requests. Register it only in the
 trusted repository that holds the release workflow. Run `run.cmd` under its
 configured Windows account; it must be online for checks to finish. On a
