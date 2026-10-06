@@ -968,7 +968,7 @@ impl<G: RoomGate> StepDriver<G> {
                         _ => Updates::Own,
                     };
                 }
-                Err(error) => self.hold(format!("before the game began: {error}")),
+                Err(error) => self.play_alone(&error),
             }
         }
         match self.phase {
@@ -1345,7 +1345,7 @@ impl<G: RoomGate> StepDriver<G> {
                     return;
                 }
                 Err(error) => {
-                    self.hold(format!("before the game began: {error}"));
+                    self.play_alone(&error);
                     return;
                 }
             }
@@ -1397,6 +1397,19 @@ impl<G: RoomGate> StepDriver<G> {
             self.menu_said = Some(what);
             self.log.push(format!("at the main menu: {what}"));
         }
+    }
+
+    /// The launcher's link failed before any room's game began (a game
+    /// frozen past the agent's heartbeat limit ends the agent's session):
+    /// there is no room world to protect, so the game plays on by itself
+    /// instead of being held, and says it cannot join a room until it is
+    /// restarted from the launcher. In a room's game a failed link still
+    /// holds the world.
+    fn play_alone(&mut self, error: &SessionError) {
+        self.log.push(format!(
+            "the launcher's link failed before any room began ({error}): this game plays on alone; restart it from the launcher to join a room"
+        ));
+        self.phase = Phase::Ended;
     }
 
     fn hold(&mut self, reason: String) {
@@ -1471,6 +1484,8 @@ pub(crate) mod tests {
         pub(crate) lobby_fails: bool,
         /// The lobby read and not taken yet.
         pub(crate) lobby_heard: Option<LobbyView>,
+        /// The link fails when asked whether the room began.
+        pub(crate) begin_fails: bool,
     }
 
     impl RoomGate for Script {
@@ -1482,6 +1497,9 @@ pub(crate) mod tests {
             std::mem::take(&mut self.reset_ended)
         }
         fn try_begin(&mut self) -> Result<Option<Begin>, SessionError> {
+            if self.begin_fails {
+                return Err(SessionError::AgentGone);
+            }
             let begin = self.begin.pop_front().flatten();
             if let Some(begin) = &begin {
                 self.interval = u64::from(begin.checkpoint_interval).max(1);
@@ -2260,6 +2278,27 @@ pub(crate) mod tests {
         assert_eq!(log.len(), 1, "{log:?}");
         assert!(log[0].contains("lobby"), "{log:?}");
         assert_eq!(d.phase(), &Phase::BeforeBegin);
+    }
+
+    #[test]
+    fn a_link_lost_before_any_room_began_leaves_the_game_playing_alone() {
+        let script = Script {
+            begin_fails: true,
+            ..Script::default()
+        };
+        let (mut d, mut calls) = driver(script);
+        assert_eq!(call(&mut d, &mut calls), Updates::Own);
+        assert_eq!(d.phase(), &Phase::Ended);
+        assert!(!d.in_room());
+        assert!(
+            d.take_log().iter().any(|l| l.contains("plays on alone")),
+            "the player is told why"
+        );
+        assert_eq!(
+            call(&mut d, &mut calls),
+            Updates::Own,
+            "and it keeps playing"
+        );
     }
 
     #[test]

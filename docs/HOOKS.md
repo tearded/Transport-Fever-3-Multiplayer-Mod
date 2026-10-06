@@ -300,6 +300,11 @@ the payload may wrap around the end of the buffer.
   present.
 - **Heartbeat.** Each side bumps its own counter and reads the peer's. A counter
   that stops advancing means the peer is gone.
+  The agent gives a loaded game's hook 60 s (a load 600 s). A game that
+  freezes longer (a big map can, while it builds terrain and textures)
+  loses its agent. Before any room's game began, the hook then lets the
+  game play on alone and logs that it cannot join a room until restarted
+  from the launcher; in a room's game it holds the world, as before.
 - **Restart.** The owner re-creates the mapping with a new `session`. A peer
   that sees `session` change knows the rings were reset and drops anything in
   flight, then re-syncs from the new generation. The launcher does this for
