@@ -310,6 +310,14 @@ on the player's server setting (Settings, **Server**), else on its default:
 relay (`setup::RELAY`). `--server` wins over both for the run, so playtests
 stay on the local server whatever the setting says.
 
+A package built with `TPF3MP_SERVERS` (or a launcher given
+`--more-servers "US=us.example.org:29470"`) lists more servers besides
+its default, and, on its default, plays on all of them: rooms listed from
+each, created on the closest (D12's PROPOSED amendment of 2026-10-06;
+LOBBY.md, "Several servers"). `--server` turns that off for the run.
+`crates/tpf3mp-testkit/tests/regional.rs` plays it through with two local
+servers and one that never answers.
+
 (`tpf3mp-agent launcher` with the same options serves it as a page in the
 browser instead.)
 

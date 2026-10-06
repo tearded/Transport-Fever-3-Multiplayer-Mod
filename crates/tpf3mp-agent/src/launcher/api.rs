@@ -58,6 +58,18 @@ pub(crate) struct View {
     pub(crate) room_params: Vec<ParamRow>,
     /// The page of public rooms last asked for, while connected.
     pub(crate) rooms: Option<RoomList>,
+    /// The servers the release vouches for, its default first; empty or
+    /// one when it plays on one server alone (D12's PROPOSED amendment of
+    /// 2026-10-06).
+    pub(crate) listed: Vec<super::servers::ListedServer>,
+    /// Whether the launcher plays on `listed`, two or more: rooms are
+    /// listed from all and hosted on the closest. Not with `--server` nor
+    /// with a server of the player's own in Settings.
+    pub(crate) on_list: bool,
+    /// Each room of the last list's server, by invite, while `on_list`.
+    pub(crate) room_servers: Vec<(String, String)>,
+    /// The round trip to the server played on, last read.
+    pub(crate) home_ping: Option<std::time::Duration>,
 }
 
 /// Something the player asks for.
@@ -221,6 +233,11 @@ pub struct RoomList {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PublicRoom {
     pub invite: String,
+    /// The name of the room's server, such as `EU`, when the launcher
+    /// lists rooms from several; `None` with one server.
+    pub server: Option<String>,
+    /// That server's ping, in milliseconds, when known.
+    pub ping_ms: Option<u32>,
     pub name: String,
     pub rules: String,
     pub players: u8,
@@ -243,6 +260,8 @@ impl RoomList {
                 .iter()
                 .map(|room| PublicRoom {
                     invite: room.invite.to_string(),
+                    server: None,
+                    ping_ms: None,
                     name: room.name.as_str().to_owned(),
                     rules: room.rules.as_str().to_owned(),
                     players: room.players,
@@ -257,6 +276,19 @@ impl RoomList {
                 .collect(),
         }
     }
+}
+
+/// One of the servers the release vouches for, as the player sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ServerRow {
+    /// Its name, such as `EU`.
+    pub name: String,
+    /// Its round trip from here, in milliseconds, when known.
+    pub ping_ms: Option<u32>,
+    /// The launcher plays on it now: rooms it creates go there.
+    pub here: bool,
+    /// It answers.
+    pub reachable: bool,
 }
 
 /// Everything a launcher front end shows: the web page reads it as JSON,
@@ -320,8 +352,14 @@ pub struct State {
     /// another: the launcher's `--start-save`, or the one last picked.
     pub start_save: Option<String>,
     /// The page of the server's public rooms last asked for
-    /// ([`Action::ListRooms`]).
+    /// ([`Action::ListRooms`]): every listed server's, labelled, when the
+    /// launcher plays on several ([`State::servers`]).
     pub rooms: Option<RoomList>,
+    /// The servers the release vouches for, with their pings, while the
+    /// launcher plays on them (two or more; D12's PROPOSED amendment of
+    /// 2026-10-06): rooms are listed from all, and a room this player
+    /// creates goes to the closest. Empty when it plays on one server.
+    pub servers: Vec<ServerRow>,
     /// The mods this player has installed, those they may choose first
     /// ([`Action::ChooseMod`]; docs/MODS.md).
     pub mods: Vec<ModRow>,
@@ -698,14 +736,22 @@ pub(crate) fn snapshot(view: &View, status: &Status) -> State {
         server: view.server.clone(),
         server_fixed: view.server_fixed,
         server_default: view.server_default.clone(),
-        // The name is the default server's: another shows its address.
-        server_name: view.server_name.clone().filter(|_| {
-            match (&view.server_default, &view.server) {
-                (Some(default), Some(server)) => super::same_server(default, server),
-                (Some(_), None) => false,
-                (None, _) => true,
-            }
-        }),
+        // The name is the default server's, or another listed server's:
+        // any other shows its address.
+        server_name: view
+            .server
+            .as_deref()
+            .and_then(|server| super::servers::find(&view.listed, server))
+            .map(|listed| listed.name.clone())
+            .or_else(|| {
+                view.server_name
+                    .clone()
+                    .filter(|_| match (&view.server_default, &view.server) {
+                        (Some(default), Some(server)) => super::same_server(default, server),
+                        (Some(_), None) => false,
+                        (None, _) => true,
+                    })
+            }),
         server_version: view.server_version.clone(),
         support_id: status
             .session
@@ -760,6 +806,8 @@ pub(crate) fn snapshot(view: &View, status: &Status) -> State {
         room_mods: view.room_mods.clone(),
         room_params: view.room_params.clone(),
         rooms: view.rooms.clone().filter(|_| view.connected),
+        // The lookouts know the other servers: `Shared::snapshot` adds them.
+        servers: Vec::new(),
         start: status
             .room
             .as_ref()
@@ -783,6 +831,7 @@ pub(crate) fn snapshot(view: &View, status: &Status) -> State {
 }
 
 /// The state the page shows, as JSON.
+#[cfg(test)]
 pub(crate) fn render(view: &View, status: &Status) -> String {
     serde_json::to_string(&snapshot(view, status)).unwrap_or_else(|_| "{}".to_owned())
 }

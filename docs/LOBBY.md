@@ -106,7 +106,10 @@ A game Steam started has no hook and keeps the plain menu.
     New Game card's), name, players/limit, companies, year and a lock for
     a password; a click joins, asking for a password first. The page asks
     for the list when shown and every 10 seconds; **Previous**, **Next**,
-    **Refresh**. **Join with code** opens a page laid out as Host's: the
+    **Refresh**. A launcher on its release's several servers (D12's
+    proposed amendment of 2026-10-06) lists the rooms of all of them:
+    each card adds its server and ping (`EU · 24 ms`), the title names
+    the servers with theirs, and a click joins on the room's server. **Join with code** opens a page laid out as Host's: the
     picture of joining on the left; on the right the invite code, large
     (as the room's page shows it), the room's password, and the server
     and name it joins with; **Cancel** and **Join**;
@@ -288,6 +291,27 @@ back to the default: the launcher refuses anything but a `host:port`, and
 any change while in a room, with why; otherwise it remembers the server,
 and if connected it disconnects and connects there under the same name.
 An invite never changes the server. Bridge version 15.
+
+**Several servers** (D12, PROPOSED amendment of 2026-10-06, not
+decided). A release may list servers besides its default
+(`TPF3MP_SERVERS`; `--more-servers`). A launcher playing on its default
+then plays on all of them: Connect goes to the closest that answers, by
+the round trip of its QUIC connection, and keeps a quiet connection, a
+*lookout*, to every other (`launcher::servers`): no content, no room, no
+diagnostics. `ListRooms` asks its own server and each lookout for the same
+page and merges them, lobbies first, then the fuller, then by name, each
+room with its server's name and ping (`server`, `ping_ms`; in the game's
+lobby `server`, `ping`, and the list's `servers`: name, ping, `here`,
+`reachable`; bridge version 26). Create first moves to the closest server
+(pings within 10 ms count as equal: the current stays, else the first
+listed). Join goes to the server the last list showed the room on; a code
+it did not show is tried on the server played on, then on the other
+servers that answer, closest first, while each answers `BadInvite`, and
+the launcher comes back where it was when none has it. An invite naming
+a server not on the list is refused. The state carries the servers
+(`servers`: name, `ping_ms`, `here`, `reachable`), which the launcher's
+Settings show. With one server, `--server`, or a server the player typed
+in Settings, none of this happens and the lobby is as before.
 
 **The start save.** The lobby lists the player's saves, newest first, by
 name: those `steam::find_save` finds by that name, in the save folder of

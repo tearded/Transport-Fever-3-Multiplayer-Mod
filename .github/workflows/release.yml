@@ -15,6 +15,10 @@ name: release
 #   purpose, so no release is drafted without it;
 # - TPF3MP_SERVER_NAME: what players see of that server, such as EU, in
 #   place of its address;
+# - TPF3MP_SERVERS: the release's other servers, as NAME=host:port
+#   separated by commas (D12's PROPOSED amendment of 2026-10-06): the
+#   launcher lists the rooms of all of them and hosts on the closest.
+#   Empty, the launcher plays on its default server alone;
 # - TPF3MP_UPDATE_PUBLIC_KEY: the public keys updates must be signed with.
 #   Without one the launcher never updates itself, so no release is
 #   drafted: manual runs still build packages to try.
@@ -187,6 +191,7 @@ jobs:
       # updates must be signed with, and where it looks for them.
       TPF3MP_DEFAULT_SERVER: ${{ vars.TPF3MP_DEFAULT_SERVER }}
       TPF3MP_SERVER_NAME: ${{ vars.TPF3MP_SERVER_NAME }}
+      TPF3MP_SERVERS: ${{ vars.TPF3MP_SERVERS }}
       TPF3MP_UPDATE_PUBLIC_KEY: ${{ vars.TPF3MP_UPDATE_PUBLIC_KEY }}
       TPF3MP_REPOSITORY: ${{ github.repository }}
       TPF3MP_DISTRIBUTABLE: "1"
@@ -210,6 +215,19 @@ jobs:
           if [ -n "$TPF3MP_SERVER_NAME" ] && ! [[ "$TPF3MP_SERVER_NAME" =~ ^[A-Za-z0-9\ ._-]{1,24}$ ]]; then
             echo "::error::TPF3MP_SERVER_NAME must be a short name such as EU: letters, digits, spaces, dots and dashes"
             exit 1
+          fi
+          # NAME=host:port entries separated by commas; the launcher
+          # refuses to start with a list that does not read.
+          if [ -n "$TPF3MP_SERVERS" ]; then
+            IFS=',' read -ra entries <<< "$TPF3MP_SERVERS"
+            for entry in "${entries[@]}"; do
+              entry="$(echo "$entry" | xargs)"
+              [ -z "$entry" ] && continue
+              if ! [[ "$entry" =~ ^[A-Za-z0-9\ ._-]{1,24}=[]A-Za-z0-9.:[-]+:[0-9]+$ ]]; then
+                echo "::error::TPF3MP_SERVERS must be NAME=host:port entries separated by commas, such as US=us.example.org:29470"
+                exit 1
+              fi
+            done
           fi
           # One key or several, separated by commas or spaces.
           if [ -n "$TPF3MP_UPDATE_PUBLIC_KEY" ] && ! [[ "$TPF3MP_UPDATE_PUBLIC_KEY" =~ ^[A-Za-z0-9+/]{43}=([\ ,]+[A-Za-z0-9+/]{43}=)*$ ]]; then

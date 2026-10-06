@@ -224,7 +224,8 @@ pub(crate) async fn respond(request: &Request, shared: &Shared, page: &Page) -> 
             if !authorized(request, page) {
                 return Response::error("401 Unauthorized", "missing or wrong token");
             }
-            let body = api::render(&shared.view(), &shared.status());
+            let body =
+                serde_json::to_string(&shared.snapshot()).unwrap_or_else(|_| "{}".to_owned());
             Response::json("200 OK", body)
         }
         ("POST", "/api/action") => {

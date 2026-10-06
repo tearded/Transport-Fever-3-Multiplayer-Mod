@@ -255,6 +255,26 @@ local function serverName(state)
 end
 lobby.serverName = serverName
 
+-- The release's servers the room list comes from, as "EU (24 ms) and US
+-- (110 ms)"; nil when it comes from one server.
+function lobby.listedServers(list)
+	local servers = list and list.servers or {}
+	if #servers < 2 then return nil end
+	local named = {}
+	for _i, server in ipairs(servers) do
+		local ping = tonumber(server.ping) or 0
+		if not server.reachable then
+			named[#named + 1] = string.format(_("%s (not answering)"), server.name)
+		elseif ping > 0 then
+			named[#named + 1] = string.format(_("%s (%d ms)"), server.name, ping)
+		else
+			named[#named + 1] = server.name
+		end
+	end
+	if #named == 2 then return string.format(_("%s and %s"), named[1], named[2]) end
+	return table.concat(named, ", ")
+end
+
 -- `text` with any server address in it (an IP address, host:port) put as
 -- "the server": the window names servers, never their addresses.
 local function hideAddress(text)
@@ -991,6 +1011,12 @@ end
 
 -- One public room of the list, as a card in the game's own style: the
 -- picture of its map, its name, and players, companies and year under it.
+-- A server as the room list names it: its name and ping, as "EU · 24 ms".
+function lobby.serverLine(name, ping)
+	if (tonumber(ping) or 0) > 0 then return string.format(_("%s · %d ms"), name, ping) end
+	return name
+end
+
 function lobby.roomCard(listed, onClick, enabled)
 	local title = listed.name
 	local line = string.format(_("%d/%d players · %d %s · %s"), listed.players, listed.max_players,
@@ -998,6 +1024,15 @@ function lobby.roomCard(listed, onClick, enabled)
 		listed.year > 0 and tostring(listed.year) or _("year unknown"))
 	local right = (listed.competitive and _("Competitive") or _("Co-op")) .. " · "
 		.. (listed.running and _("Playing") or lobby.climateName(listed.map))
+	-- With rooms from the release's several servers: which one, and how far.
+	local server = type(listed.server) == "string" and listed.server ~= ""
+		and lobby.serverLine(listed.server, listed.ping) or nil
+	local sub = string.format(_("%d/%d players · %s"),
+		listed.players, listed.max_players, listed.competitive and _("Competitive") or _("Co-op"))
+	if server then
+		sub = sub .. " · " .. server
+		right = right .. " · " .. string.format(_("On %s"), server)
+	end
 	local lock = listed.has_password and builtin.FloatingLayoutChild{
 		h = 0.95,
 		v = 0.06,
@@ -1009,8 +1044,7 @@ function lobby.roomCard(listed, onClick, enabled)
 	local card
 	if cards then
 		card = cards.CardButton{
-			bottomComponent = cards.makeCardLabelBottomComponent(title, string.format(_("%d/%d players · %s"),
-				listed.players, listed.max_players, listed.competitive and _("Competitive") or _("Co-op")), nil, nil, false),
+			bottomComponent = cards.makeCardLabelBottomComponent(title, sub, nil, nil, false),
 			onClick = onClick,
 			tooltip = title .. "\n" .. line .. "\n" .. right .. "\n"
 				.. (listed.has_password and _("Has a password") or _("Join this room")),
@@ -2138,7 +2172,7 @@ function lobby.content(onClose, focus, onNewGame, onPick, onModHub, commonParams
 				button(_("Cancel"), function() joiningS:set(nil) end),
 			})
 		end
-		local body = native.card(string.format(_("Public rooms on %s"), serverName(state)), { column(children) })
+		local body = native.card(string.format(_("Public rooms on %s"), lobby.listedServers(list) or serverName(state)), { column(children) })
 		local right = { native.foot(_("Join with code"), function()
 			joiningS:set(nil)
 			codeS:set(true)

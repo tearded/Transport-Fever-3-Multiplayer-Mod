@@ -682,3 +682,42 @@ fn the_server_setting_checks_what_was_typed() {
     };
     assert!(ServerSetting::of("", &elsewhere).can_reset);
 }
+
+#[test]
+fn on_the_releases_servers_settings_name_each_with_its_ping() {
+    use tpf3mp_agent::launcher::ServerRow;
+    use tpf3mp_launcher::app::{ServerSetting, server_setting_line, servers_line};
+    let state = State {
+        // Played on the farther server, after a room there: still the
+        // default, so nothing to reset.
+        server: Some("us.example.org:29470".into()),
+        servers: vec![
+            ServerRow {
+                name: "EU".into(),
+                ping_ms: Some(24),
+                here: false,
+                reachable: true,
+            },
+            ServerRow {
+                name: "US".into(),
+                ping_ms: Some(110),
+                here: true,
+                reachable: true,
+            },
+            ServerRow {
+                name: "Asia".into(),
+                ping_ms: None,
+                here: false,
+                reachable: false,
+            },
+        ],
+        ..on_the_relay()
+    };
+    assert_eq!(
+        servers_line(&state).as_deref(),
+        Some("EU · 24 ms, US · 110 ms (you are here), Asia · not answering")
+    );
+    assert!(server_setting_line(&state).contains("Rooms you host go to the closest"));
+    assert!(!ServerSetting::of("", &state).can_reset);
+    assert_eq!(servers_line(&on_the_relay()), None, "one server: as before");
+}

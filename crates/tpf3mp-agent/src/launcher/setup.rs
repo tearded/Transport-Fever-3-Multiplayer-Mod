@@ -161,6 +161,14 @@ pub struct LauncherArgs {
     #[arg(long)]
     pub server_name: Option<String>,
 
+    /// The release's other servers, besides the default, as
+    /// NAME=host:port separated by commas (`TPF3MP_SERVERS` in a
+    /// package). With them, the launcher lists the rooms of all, and the
+    /// rooms its player creates go to the closest; invites may name only
+    /// these. Not with --server, which plays on that one alone.
+    #[arg(long, value_name = "LIST")]
+    pub more_servers: Option<String>,
+
     /// Trust exactly this DER certificate instead of public certificate
     /// authorities (for development servers).
     #[arg(long)]
@@ -280,6 +288,25 @@ pub fn plays_on(
         .or_else(|| named(default))
 }
 
+/// The servers a launcher plays on (D12's PROPOSED amendment of
+/// 2026-10-06): none with a server `given` on its command line, which it
+/// plays on alone; else its `default`, named `name`, then the `more` a
+/// release lists. A list that does not read stops the launcher: it never
+/// guesses where players meet.
+pub fn listed_servers(
+    given: Option<&str>,
+    default: Option<&str>,
+    name: Option<&str>,
+    more: Option<&str>,
+) -> Result<Vec<super::ListedServer>> {
+    if given.is_some_and(|given| !given.trim().is_empty()) {
+        return Ok(Vec::new());
+    }
+    let more = super::servers::parse_list(more.unwrap_or_default())
+        .map_err(|why| anyhow::anyhow!("the release's servers: {why}"))?;
+    Ok(super::servers::release_list(default, name, &more))
+}
+
 impl LauncherArgs {
     /// The launcher's default server, if it has one.
     fn default_server(&self) -> Option<String> {
@@ -331,6 +358,18 @@ impl LauncherArgs {
             )
         });
         let default_server = self.default_server();
+        let server_name = self
+            .server_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned);
+        let servers = listed_servers(
+            self.server.as_deref(),
+            default_server.as_deref(),
+            server_name.as_deref(),
+            self.more_servers.as_deref(),
+        )?;
         let server = plays_on(
             self.server.as_deref(),
             remembered.chosen_server.as_deref(),
@@ -351,12 +390,8 @@ impl LauncherArgs {
             server_fixed: server.is_some(),
             server: server.or(remembered.server),
             default_server,
-            server_name: self
-                .server_name
-                .as_deref()
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-                .map(str::to_owned),
+            server_name,
+            servers,
             tunnel: self.tunnel.choice()?,
             remember: Some(remember),
             trust: trust(self.pin_cert.as_deref())?,
@@ -416,6 +451,36 @@ mod tests {
             "nothing given, and a setting that is no host:port"
         );
         assert_eq!(plays_on(None, None, None), None);
+    }
+
+    #[test]
+    fn the_release_lists_its_default_first_and_server_pins_one() {
+        let more = Some("US=us.example.org:29470, EU=eu.example.org:29470");
+        let listed = listed_servers(None, Some(RELAY), Some(RELAY_NAME), more).unwrap();
+        let names: Vec<&str> = listed.iter().map(|server| server.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["EU", "US"],
+            "the default first; a name it has already is not listed twice"
+        );
+        assert_eq!(listed[0].address, RELAY);
+        assert!(
+            listed_servers(Some("127.0.0.1:29470"), Some(RELAY), None, more)
+                .unwrap()
+                .is_empty(),
+            "--server plays on one server alone"
+        );
+        assert_eq!(
+            listed_servers(None, Some(RELAY), Some("EU"), None)
+                .unwrap()
+                .len(),
+            1,
+            "a release with its default alone plays as before"
+        );
+        assert!(
+            listed_servers(None, Some(RELAY), None, Some("US=not a server")).is_err(),
+            "a list that does not read stops the launcher"
+        );
         assert_eq!(super::super::server_address(RELAY).as_deref(), Ok(RELAY));
     }
 }

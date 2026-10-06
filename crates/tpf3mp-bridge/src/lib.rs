@@ -76,8 +76,12 @@ pub use session::{Begin, Game, Load, Notice, SaveOrder, Session, SessionError, S
 /// choice of the room's mods and their settings
 /// ([`LobbyAction::ChooseRoomMods`]), finding the installed mods again
 /// ([`LobbyAction::RescanMods`]), and the room's settings of its mods in
-/// [`ModLists`] (protocol 18).
-pub const BRIDGE_VERSION: u32 = 25;
+/// [`ModLists`] (protocol 18); 26 the release's servers in the room list
+/// ([`LobbyRoomList::servers`]) and each public room's server and ping
+/// ([`LobbyPublicRoom::server`], [`LobbyPublicRoom::ping_ms`]).
+pub const BRIDGE_VERSION: u32 = 26;
+/// Most servers the room list names ([`LobbyRoomList::servers`]).
+pub const MAX_LOBBY_SERVERS: usize = 8;
 /// The link name the agent creates and the hook opens, unless told
 /// otherwise.
 pub const DEFAULT_LINK: &str = "tpf3mp.default";
@@ -315,6 +319,22 @@ pub struct LobbyRoomList {
     pub rooms: BoundedVec<LobbyPublicRoom, { tpf3mp_proto::ROOMS_PER_PAGE }>,
     /// A later page has more.
     pub more: bool,
+    /// The servers the rooms come from, when the launcher plays on its
+    /// release's several servers; empty with one.
+    pub servers: BoundedVec<LobbyServer, MAX_LOBBY_SERVERS>,
+}
+
+/// One of the release's servers, as the room list names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LobbyServer {
+    /// Its name, such as `EU`.
+    pub name: Text<24>,
+    /// Its round trip, in milliseconds; 0 unknown.
+    pub ping_ms: u16,
+    /// The launcher plays on it: rooms this player creates go there.
+    pub here: bool,
+    /// It answers.
+    pub reachable: bool,
 }
 
 /// One public room, as the room browser shows it.
@@ -333,6 +353,11 @@ pub struct LobbyPublicRoom {
     pub year: u16,
     pub companies: u8,
     pub competitive: bool,
+    /// The name of the room's server, such as `EU`, when the list has
+    /// several servers'; empty with one.
+    pub server: Text<24>,
+    /// That server's round trip, in milliseconds; 0 unknown.
+    pub ping_ms: u16,
 }
 
 /// What a public room's list entry says of its world.
@@ -906,11 +931,23 @@ mod tests {
                         year: u16::MAX,
                         companies: u8::MAX,
                         competitive: true,
+                        server: Text::new("s".repeat(24)).unwrap(),
+                        ping_ms: u16::MAX,
                     };
                     tpf3mp_proto::ROOMS_PER_PAGE
                 ])
                 .unwrap(),
                 more: true,
+                servers: BoundedVec::new(vec![
+                    LobbyServer {
+                        name: Text::new("s".repeat(24)).unwrap(),
+                        ping_ms: u16::MAX,
+                        here: true,
+                        reachable: true,
+                    };
+                    MAX_LOBBY_SERVERS
+                ])
+                .unwrap(),
             }),
         }));
         let bytes = encode(&view).unwrap();
