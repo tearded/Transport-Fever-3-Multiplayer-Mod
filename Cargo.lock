@@ -4403,6 +4403,7 @@ dependencies = [
  "tpf3mp-ipc",
  "tpf3mp-launch",
  "tpf3mp-modscan",
+ "tpf3mp-nativemods",
  "tpf3mp-net",
  "tpf3mp-proto",
  "tpf3mp-snapshot",
@@ -4466,6 +4467,7 @@ dependencies = [
  "tpf3mp-buildinfo",
  "tpf3mp-hookcore",
  "tpf3mp-ipc",
+ "tpf3mp-nativemods",
  "tpf3mp-proto",
  "windows-sys 0.61.2",
 ]
@@ -4526,6 +4528,7 @@ dependencies = [
  "tpf3mp-agent",
  "tpf3mp-buildinfo",
  "tpf3mp-ipc",
+ "tpf3mp-nativemods",
  "tpf3mp-proto",
  "tracing",
  "tracing-appender",
@@ -4543,6 +4546,20 @@ dependencies = [
  "serde_json",
  "tempfile",
  "zstd",
+]
+
+[[package]]
+name = "tpf3mp-nativemods"
+version = "1.2.8"
+dependencies = [
+ "base64 0.23.1",
+ "ring",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "ureq",
 ]
 
 [[package]]

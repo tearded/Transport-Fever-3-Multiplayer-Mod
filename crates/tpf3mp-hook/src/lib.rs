@@ -50,6 +50,7 @@ pub mod log;
 pub mod lua;
 pub mod menu;
 pub mod modules;
+pub mod native_mods;
 pub mod network;
 pub mod order;
 pub mod perf;
@@ -121,13 +122,20 @@ pub fn bootstrap() {
             // thread is suspended. RegisterAppUsertypes must not run before
             // the world-loading hook can capture the menu's Lua state.
             install_menu(&profiles, &mut log, data_dir.as_deref());
-            match install::install(&profile, &link_name, Logger::open(data_dir.as_deref())) {
-                install::Installed::Yes { step_rva } => log.line(&format!(
-                    "step gate installed on {} at {step_rva:#x}; the session is attached to {link_name:?}",
-                    install::STEP_TARGET
-                )),
-                install::Installed::No(reason) => {
-                    log.line(&format!("multiplayer disabled (fail-closed): {reason}"));
+            // Native mods the launcher enabled (proposed D29): one that
+            // changes the simulation and cannot run keeps the game out of
+            // rooms.
+            if let Some(reason) = native_mods::decide(&profiles, &profile.build.sha256, &mut log) {
+                log.line(&format!("multiplayer disabled (fail-closed): {reason}"));
+            } else {
+                match install::install(&profile, &link_name, Logger::open(data_dir.as_deref())) {
+                    install::Installed::Yes { step_rva } => log.line(&format!(
+                        "step gate installed on {} at {step_rva:#x}; the session is attached to {link_name:?}",
+                        install::STEP_TARGET
+                    )),
+                    install::Installed::No(reason) => {
+                        log.line(&format!("multiplayer disabled (fail-closed): {reason}"));
+                    }
                 }
             }
         }

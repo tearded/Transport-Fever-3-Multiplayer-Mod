@@ -1,0 +1,30 @@
+[package]
+name = "tpf3mp-nativemods"
+description = "Native mods (proposed D29): the signed index, package resolution, the installer and what the hook enables"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Downloads over HTTPS. The hook and the agent build without it
+# (`default-features = false`): they only read and write what is on disk.
+default = ["install"]
+install = ["dep:ureq"]
+
+[dependencies]
+base64.workspace = true
+ring.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ureq = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

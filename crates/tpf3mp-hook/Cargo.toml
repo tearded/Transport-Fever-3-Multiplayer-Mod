@@ -16,6 +16,8 @@ crate-type = ["cdylib", "rlib"]
 tpf3mp-bridge.workspace = true
 tpf3mp-hookcore.workspace = true
 tpf3mp-ipc.workspace = true
+# Without the installer: only what the launcher enabled (proposed D29).
+tpf3mp-nativemods.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 tpf3mp-proto.workspace = true

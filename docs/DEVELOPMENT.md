@@ -129,6 +129,7 @@ TPF3's commands, and the release-day measurements in
 | `crates/tpf3mp-hook` | The library the launcher loads into the game it starts. |
 | `crates/tpf3mp-launch` | Starts the game with the hook in that one process. |
 | `crates/tpf3mp-modscan` | Sorts mods into personal, carried and shared, with the reasons, and finds the mods a player has installed ([MODS.md](MODS.md)). |
+| `crates/tpf3mp-nativemods` | Native mods, proposed D29: the signed index, package resolution, the installer and its registry, what the hook enables, and the room's terms ([NATIVE_MODS.md](NATIVE_MODS.md)). |
 | `crates/tpf3mp-bigmap` | Big maps, prototype: the size ladder, the ceilings a size hits, the terms a room shares, which features a build can run ([BIGMAPS.md](BIGMAPS.md)). |
 | `crates/tpf3mp-testkit` | Toy game, bots, network emulator, load tester, regression harness. |
 | `crates/tpf3mp-buildinfo` | The build scripts' helper: the commit, build time and build number built into the binaries, and their Windows version resource ("Which build is this"). |

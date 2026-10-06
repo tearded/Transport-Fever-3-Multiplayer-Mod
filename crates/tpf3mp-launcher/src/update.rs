@@ -38,20 +38,19 @@
 use std::{
     ffi::OsString,
     fs::{self, File},
-    io::{self, Read, Write},
+    io::{self, Write},
     path::{Component, Path, PathBuf},
     sync::{Arc, Mutex, PoisonError},
     time::{Duration, Instant},
 };
 
-use base64::Engine;
 use eframe::egui;
-use ring::{
-    digest::{Context, SHA256},
-    signature::{ED25519, UnparsedPublicKey},
-};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tpf3mp_nativemods::{
+    fetch::{self, FetchError},
+    signed::{self, parse_keys},
+};
 use tracing::{info, warn};
 
 /// This build's version.
@@ -169,12 +168,8 @@ impl Manifest {
     /// The manifest in `json`, if `signature` is one of `keys`' signature
     /// of it.
     pub fn verified(json: &[u8], signature: &[u8], keys: &[Vec<u8>]) -> Result<Self, UpdateError> {
-        let signed = keys.iter().any(|key| {
-            UnparsedPublicKey::new(&ED25519, key)
-                .verify(json, signature)
-                .is_ok()
-        });
-        if !signed {
+        // The same check as the native-mods index's (D7, proposed D29).
+        if !signed::verify(json, signature, keys) {
             return Err(UpdateError::BadSignature);
         }
         let manifest: Self = serde_json::from_slice(json)
@@ -375,18 +370,6 @@ pub fn setup_complete(root: &Path, version: &str) {
         },
         version,
     );
-}
-
-fn parse_keys(text: &str) -> Vec<Vec<u8>> {
-    text.split(|c: char| c == ',' || c.is_whitespace())
-        .filter(|entry| !entry.is_empty())
-        .filter_map(|entry| {
-            let key = base64::engine::general_purpose::STANDARD
-                .decode(entry)
-                .ok()?;
-            (key.len() == 32).then_some(key)
-        })
-        .collect()
 }
 
 /// Where releases come from.
@@ -1027,69 +1010,34 @@ fn check_and_download(
     Ok(Checked::Downloaded(manifest.version))
 }
 
-/// Downloads `package` into `path`, checking its size and hash on the way.
+/// Downloads `package` into `path`, checking its size and hash on the way
+/// (`tpf3mp_nativemods::fetch`, which native mods download with too).
 fn download(
     agent: &ureq::Agent,
     url: &str,
     path: &Path,
     package: &Package,
-    mut progress: impl FnMut(u64),
+    progress: impl FnMut(u64),
 ) -> Result<(), UpdateError> {
-    let mut response = agent
-        .get(url)
-        .header("User-Agent", format!("tpf3mp-launcher/{VERSION}"))
-        .call()?;
-    let mut reader = response
-        .body_mut()
-        .with_config()
-        .limit(package.size + 1)
-        .reader();
-    let mut file = File::create(path)?;
-    let mut digest = Context::new(&SHA256);
-    let mut buffer = vec![0; 256 * 1024];
-    let mut total = 0u64;
-    loop {
-        let read = reader.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        total += read as u64;
-        if total > package.size {
-            return Err(UpdateError::Mismatch);
-        }
-        digest.update(&buffer[..read]);
-        file.write_all(&buffer[..read])?;
-        progress(total);
-    }
-    file.sync_all()?;
-    if total != package.size || hex(digest.finish().as_ref()) != package.sha256 {
-        return Err(UpdateError::Mismatch);
-    }
-    Ok(())
+    fetch::download(
+        agent,
+        url,
+        path,
+        package.size,
+        &package.sha256,
+        &format!("tpf3mp-launcher/{VERSION}"),
+        progress,
+    )
+    .map_err(|error| match error {
+        FetchError::Io(error) => UpdateError::Io(error),
+        FetchError::Http(error) => UpdateError::Http(error),
+        FetchError::Mismatch => UpdateError::Mismatch,
+    })
 }
 
 /// Whether the file at `path` is `package`.
 fn matches(path: &Path, package: &Package) -> Result<bool, UpdateError> {
-    let Ok(mut file) = File::open(path) else {
-        return Ok(false);
-    };
-    if file.metadata()?.len() != package.size {
-        return Ok(false);
-    }
-    let mut digest = Context::new(&SHA256);
-    let mut buffer = vec![0; 256 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-    Ok(hex(digest.finish().as_ref()) == package.sha256)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    Ok(fetch::file_matches(path, package.size, &package.sha256)?)
 }
 
 /// Installs the newest downloaded update that is newer than this version,
@@ -1358,6 +1306,7 @@ mod tests {
         sync::atomic::{AtomicBool, Ordering},
     };
 
+    use base64::Engine;
     use ring::{rand::SystemRandom, signature::Ed25519KeyPair, signature::KeyPair};
 
     use super::*;
@@ -1637,7 +1586,7 @@ mod tests {
         format!(
             r#"{{"version":"{version}","packages":{{"windows-x64":{{"name":"{name}","size":{},"sha256":"{}"}}}}}}"#,
             bytes.len(),
-            hex(ring::digest::digest(&SHA256, bytes).as_ref())
+            signed::sha256_hex(bytes)
         )
     }
 

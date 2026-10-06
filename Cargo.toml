@@ -22,6 +22,8 @@ tpf3mp-bridge = { path = "crates/tpf3mp-bridge" }
 tpf3mp-launch = { path = "crates/tpf3mp-launch" }
 tpf3mp-modscan = { path = "crates/tpf3mp-modscan" }
 tpf3mp-buildinfo = { path = "crates/tpf3mp-buildinfo" }
+# The hook takes it without the installer; the launcher adds `install`.
+tpf3mp-nativemods = { path = "crates/tpf3mp-nativemods", default-features = false }
 
 anyhow = "1.0.104"
 base64 = "0.23.1"

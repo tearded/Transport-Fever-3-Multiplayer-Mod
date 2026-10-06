@@ -10,6 +10,7 @@ mod follower;
 pub mod game_logs;
 pub mod launcher;
 pub mod logs;
+pub mod native_mods;
 pub mod own_mod;
 pub mod picker;
 mod playout;
