@@ -50,6 +50,7 @@ pub mod log;
 pub mod lua;
 pub mod menu;
 pub mod modules;
+pub mod netread;
 pub mod network;
 pub mod order;
 pub mod perf;

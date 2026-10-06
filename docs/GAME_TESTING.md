@@ -123,8 +123,12 @@ It:
    without the mod's page, or is not at its menu after `-MenuWait`
    seconds (180) fails the setup; nothing is typed into it;
 5. waits until the room has saved that world and the guests have loaded it
-   from their main menus;
-6. closes the host's console and zooms in.
+   from their main menus (with `-Players 1`, a game alone in its room, for
+   measuring without a second game on the PC: until the host plays the
+   room's world from step 1);
+6. closes the host's console and zooms in. On a tall window the console's
+   close button is elsewhere: `-CloseConsoleAt x,y` names it, in the
+   coordinates of a half-size capture (`gamewin.ps1 shot`).
 
 It ends by printing:
 
