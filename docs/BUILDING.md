@@ -333,6 +333,29 @@ in both games. The change does not repair already broken placements.
 
 ### Module edits and upgrades
 
+Stock rail-station edits without external street changes now use
+`createProposalReplaceConstruction` on each replica, as the game's own
+construction UI does (Steam 40408, `gui/construction/construction.tl:1295`).
+This preserves the full native replacement graph instead of reconstructing
+it from a `SimpleProposal`. The regenerated proposal must replace exactly
+the intended construction and recapture to the same file, name, parameters
+and transform, without introducing external street edits. Ownership and
+build errors still refuse the action. Build 40408's runtime rejects a full
+`Proposal` in `makeProposalData`, despite its API declaration; native edits
+therefore use the stock command path with `ignoreErrors=false` and verify
+the resulting construction parameters. Native replacements already include
+their track snapping and do not receive a second refresh.
+
+This addresses the replay path implicated by five Basingstoke Station
+module edits rejected with `Construction Not Possible` on 2026-10-05.
+Stand-in engine regression coverage exercises bulk, liquid, flatbed and
+goods module parameters with different local entity IDs, and refuses
+changed parameters, moved constructions, extra additions/removals, external
+street edits and critical errors. Two local games on a copy of the affected
+save accepted a bulk-platform replacement and an additional track at
+Basingstoke Station; both replayed the edits and subsequent rolling checks
+agreed. The original save and the player's session were not modified.
+
 The old construction and the new parameters come off the proposal; every
 instance upgrades the construction with the same file within 10 m at the
 stamp. Two traps:
@@ -445,6 +468,16 @@ list and the apply rewrites its lines and station group before it dies. The
 script's proposal conversion copies all of that, so placement and deletion are
 lossless from Lua. Rules:
 
+When the tool supplies neither an explicit edge parameter nor a model
+transform, capture finds the closest point on the edge's 3D Hermite curve
+to the viewing ray from `api.gui.camera.getEye()` through the cursor's
+terrain hit. Projecting the terrain hit horizontally loses the height of
+a bridge and can move the signal tens of metres along it. Explicit native
+proposal coordinates still take priority. Replay uses the captured world
+position, never another player's camera. A stand-in regression covers the
+elevated case and explicit-coordinate precedence; real-game results are
+recorded separately in the validation report.
+
 - the `left` byte is the engine's, not the geometric side. Two signals that
   both stood geometrically left of their track carried `left` 0 and 1; a
   waypoint on the centreline has no side at all. Ship the engine's byte with
@@ -552,6 +585,19 @@ The Lua mod builds an action from a captured
 command, the payload travels opaque through the server, and every replica
 resolves it against its own world by the rules above. Everything a TPF2
 command carried as text travels here as typed, bounded fields.
+
+`CalendarSpeed` carries `millis_per_day`, the exact integer from the game's
+calendar speed control. Zero pauses the date; positive values set the day
+length independently of simulation speed. The GUI guard queues the command
+instead of running it locally, and each replica applies it through
+`makeGameSetCalendarSpeedCmd` at the ordered action's step. Values outside
+0–2,147,483,647 are refused before reaching the engine. The variant is
+appended, preserving the existing schema-25 variants' bytes; old clients
+cannot decode the new variant and must use the same mod build as the room.
+Capture, wire round-trip and two Lua replica replays are covered by tests.
+On 2026-10-06 two local build-40408 games also verified date pause from the
+host and resume from the guest through the ordinary calendar UI, while
+simulation updates continued during calendar pause.
 
 **References.** An action never names an engine entity id. It uses:
 

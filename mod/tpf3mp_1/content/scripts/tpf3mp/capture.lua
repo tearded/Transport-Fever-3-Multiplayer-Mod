@@ -14,6 +14,16 @@
 
 local capture = {}
 
+-- CalendarEditorDateSpeedControl sends a day length, with zero for a
+-- paused date. Carry the exact integer rather than recomputing a factor.
+function capture.calendarSpeed(_ctx, millisPerDay)
+	if type(millisPerDay) ~= "number" or millisPerDay ~= math.floor(millisPerDay)
+		or millisPerDay < 0 or millisPerDay > 2147483647 then
+		error("calendar day length must be a non-negative signed integer", 0)
+	end
+	return { CalendarSpeed = { millis_per_day = millisPerDay } }
+end
+
 local function get(value, key)
 	local ok, v = pcall(function() return value[key] end)
 	if ok then return v end

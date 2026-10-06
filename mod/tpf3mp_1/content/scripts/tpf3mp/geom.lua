@@ -121,4 +121,31 @@ function geom.parameterAt(a, ta, b, tb, x, y)
 	return u, math.sqrt(d2(u))
 end
 
+-- Nearest point of the curve to the cursor's forward viewing ray. The
+-- terrain hit lies beyond elevated track, so projecting that hit vertically
+-- onto the track can move a signal tens of metres along a bridge.
+function geom.parameterOnRay(a, ta, b, tb, eye, hit)
+	local dx, dy, dz = hit[1]-eye[1], hit[2]-eye[2], hit[3]-eye[3]
+	local length2 = dx*dx + dy*dy + dz*dz
+	if length2 <= 0 then return nil end
+	local function distance2(u)
+		local q = geom.hermitePos(a, ta, b, tb, u)
+		local x, y, z = q[1]-eye[1], q[2]-eye[2], q[3]-eye[3]
+		local t = math.max(0, (x*dx + y*dy + z*dz) / length2)
+		x, y, z = x-t*dx, y-t*dy, z-t*dz
+		return x*x + y*y + z*z
+	end
+	local best, bestD = 0, distance2(0)
+	for i = 1, 64 do
+		local u, d = i / 64, distance2(i / 64)
+		if d < bestD then best, bestD = u, d end
+	end
+	local lo, hi = math.max(0, best - 1/64), math.min(1, best + 1/64)
+	for _ = 1, 48 do
+		local u1, u2 = lo + (hi-lo)/3, hi - (hi-lo)/3
+		if distance2(u1) < distance2(u2) then hi = u2 else lo = u1 end
+	end
+	return (lo + hi) / 2
+end
+
 return geom

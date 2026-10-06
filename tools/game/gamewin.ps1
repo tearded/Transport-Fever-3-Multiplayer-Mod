@@ -5,6 +5,7 @@
 #
 #   gamewin.ps1 shot <name>              capture to <work>\<name>.png (half size)
 #   gamewin.ps1 click <x> <y>            left click
+#   gamewin.ps1 dblclick <x> <y>         double click (for example, add a vehicle)
 #   gamewin.ps1 rclick <x> <y>           right click
 #   gamewin.ps1 move <x> <y>             move the cursor (a tooltip, a tool's preview)
 #   gamewin.ps1 drag <x1,y1> <x2,y2>     press, move in steps, release (a road)
@@ -19,6 +20,7 @@
 # Every command but shot first brings the game to the front, and refuses
 # (throws, sends nothing) when it cannot.
 param([string]$cmd, [string]$a, [string]$b, [int]$GamePid = 0, [int]$Clicks = 0, [switch]$Open)
+$ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\env.ps1"
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @"
@@ -60,11 +62,13 @@ public static class TpfWin {
   public static void Press(ushort code) { Scan(code, false); System.Threading.Thread.Sleep(40); Scan(code, true); System.Threading.Thread.Sleep(60); }
   // Text as characters, not keys: quotes and brackets arrive as written
   // whatever the layout.
-  public static void Unicode(string text) {
+  public static void Unicode(string text, IntPtr window) {
     foreach (char c in text) {
+      if (GetForegroundWindow() != window) throw new InvalidOperationException("Game lost focus while typing; Enter was not sent. Clear the partial console input before retrying.");
       INPUT down = new INPUT(); down.type = 1; down.ki.wScan = c; down.ki.dwFlags = 4;
       INPUT up = down; up.ki.dwFlags = 4 | 2;
-      SendInput(2, new INPUT[] { down, up }, Marshal.SizeOf(typeof(INPUT)));
+      if (SendInput(2, new INPUT[] { down, up }, Marshal.SizeOf(typeof(INPUT))) != 2)
+        throw new InvalidOperationException("Windows refused console input; Enter was not sent.");
       System.Threading.Thread.Sleep(4);
     }
   }
@@ -146,6 +150,18 @@ switch ($cmd) {
     Start-Sleep -Milliseconds 80
     [TpfWin]::mouse_event(0x4, 0, 0, 0, [UIntPtr]::Zero)
     "clicked $a,$b"
+  }
+  "dblclick" {
+    Front
+    [void][TpfWin]::SetCursorPos((ScreenX $a), (ScreenY $b))
+    Start-Sleep -Milliseconds 200
+    for ($i = 0; $i -lt 2; $i++) {
+      [TpfWin]::mouse_event(0x2, 0, 0, 0, [UIntPtr]::Zero)
+      Start-Sleep -Milliseconds 60
+      [TpfWin]::mouse_event(0x4, 0, 0, 0, [UIntPtr]::Zero)
+      Start-Sleep -Milliseconds 60
+    }
+    "double-clicked $a,$b"
   }
   "rclick" {
     Front
@@ -240,7 +256,8 @@ switch ($cmd) {
       Start-Sleep -Milliseconds 600
     }
     for ($i = 0; $i -lt 4; $i++) { [TpfWin]::Press(0x0E) }
-    [TpfWin]::Unicode($a)
+    [TpfWin]::Unicode($a, $h)
+    if ([TpfWin]::GetForegroundWindow() -ne $h) { throw 'Game lost focus; Enter was not sent' }
     [TpfWin]::Scan(0x1C, $false)
     Start-Sleep -Milliseconds 650
     [TpfWin]::Scan(0x1C, $true)

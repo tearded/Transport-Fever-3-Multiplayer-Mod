@@ -25,6 +25,21 @@ fn text<const N: usize>(value: &str) -> Text<N> {
     Text::new(value).unwrap()
 }
 
+#[test]
+fn calendar_speed_refuses_values_outside_the_engine_integer_range() {
+    let bad = Action::CalendarSpeed {
+        millis_per_day: u32::MAX,
+    };
+    assert!(matches!(bad.validate(), Err(ActionError::CalendarSpeed)));
+    assert!(bad.to_payload().is_err());
+    let bytes = postcard::to_stdvec(&(ACTION_SCHEMA_VERSION, &bad)).unwrap();
+    assert!(matches!(
+        Action::from_payload(&Payload::new(bytes).unwrap()),
+        Err(ActionError::CalendarSpeed)
+    ));
+    assert!(lua::action_from_lua(&lua::action_to_lua(&bad).unwrap()).is_err());
+}
+
 fn list<T, const N: usize>(items: Vec<T>) -> BoundedVec<T, N> {
     BoundedVec::new(items).unwrap()
 }
@@ -535,6 +550,10 @@ fn samples() -> Vec<Action> {
             index: 0,
             preserved: true,
         }),
+        Action::CalendarSpeed { millis_per_day: 0 },
+        Action::CalendarSpeed {
+            millis_per_day: 2000,
+        },
     ]
 }
 
@@ -701,13 +720,13 @@ fn check(bytes: &[u8]) {
 #[test]
 fn every_variant_round_trips() {
     let samples = samples();
-    // Every top-level variant is sampled: postcard tags them 0..=22.
+    // Every top-level variant is sampled: postcard tags them 0..=23.
     let mut tags: Vec<u8> = samples
         .iter()
         .map(|action| postcard::to_stdvec(action).unwrap()[0])
         .collect();
     tags.dedup();
-    assert_eq!(tags, (0..=22).collect::<Vec<u8>>());
+    assert_eq!(tags, (0..=23).collect::<Vec<u8>>());
 
     for action in samples {
         let bytes = postcard::to_stdvec(&action).unwrap();

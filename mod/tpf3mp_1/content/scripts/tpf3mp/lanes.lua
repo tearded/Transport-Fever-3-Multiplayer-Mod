@@ -336,6 +336,22 @@ end
 
 readers[lanes.VEHICLES] = function(api, emit, ids)
 	local rows = {}
+	-- Geometry is diagnostic only, cached across vehicles and bounded per dump.
+	local geometry, geometryReads, routeRecords = {}, 0, 0
+	local function edgeGeometry(entity)
+		if entity == nil then return "geometry=missing" end
+		if geometry[entity] then return geometry[entity] end
+		if geometryReads >= 1024 then return "geometry=budget" end
+		geometryReads = geometryReads + 1
+		local edge = component(api, entity, "BASE_EDGE")
+		local text = "geometry=unavailable"
+		if edge then
+			text = "p0=" .. vecFull(get(edge, "position0")) .. " p1=" .. vecFull(get(edge, "position1"))
+				.. " t0=" .. vecFull(get(edge, "tangent0")) .. " t1=" .. vecFull(get(edge, "tangent1"))
+		end
+		geometry[entity] = text
+		return text
+	end
 	for _, e in ipairs(entities(api, "TRANSPORT_VEHICLE")) do
 		local v = component(api, e, "TRANSPORT_VEHICLE")
 		local path = component(api, e, "MOVE_PATH")
@@ -353,7 +369,7 @@ readers[lanes.VEHICLES] = function(api, emit, ids)
 			local detail = ""
 			if route then
 				local edges = get(route, "edges") or {}
-				local entries, nearby = {}, {}
+				local entries, nearby, recorded = {}, {}, 0
 				local current = get(pos, "edgeIndex") or 0
 				for i = 1, math.min(#edges, 4096) do
 					local edge = edges[i]
@@ -362,10 +378,20 @@ readers[lanes.VEHICLES] = function(api, emit, ids)
 					if direction == nil then direction = get(edge, 2) end
 					local text = full(get(id, "entity")) .. "/" .. full(get(id, "index")) .. "/" .. tostring(direction)
 					entries[#entries + 1] = text
+					-- Bounded ordered route prefix, not just ten nearby edges.
+					-- Geometry helps distinguish local IDs from different routes.
+					if recorded < 256 and routeRecords < 2048 then
+						emit("vehicles", e, "-", "route_index=" .. (i - 1) .. " edge_entity=" .. full(get(id, "entity"))
+						.. " lane_index=" .. full(get(id, "index")) .. " direction=" .. tostring(direction)
+						.. " " .. edgeGeometry(get(id, "entity")), nil, string.format("/path-%04d", i - 1))
+						recorded, routeRecords = recorded + 1, routeRecords + 1
+					end
 					if i >= current - 1 and i <= current + 8 then nearby[#nearby + 1] = (i - 1) .. ":" .. text end
 				end
 				detail = " path_count=" .. #edges .. " path_hash=" .. hashStr(table.concat(entries, ";"))
 					.. " path_sampled=" .. #entries .. " path_near=" .. table.concat(nearby, ",")
+					.. " path_omitted=" .. math.max(0, #edges - #entries) .. " path_hash_scope=local_ids"
+					.. " route_records=" .. recorded .. " route_omitted=" .. (#edges - recorded)
 					.. " path_end=" .. full(get(route, "endOffset")) .. " decision_offset=" .. full(get(route, "terminalDecisionOffset"))
 					.. " end_param=" .. full(get(path, "endParam")) .. " end_pos=" .. full(get(path, "endPos"))
 					.. " blocked=" .. full(get(path, "blocked")) .. " move_state=" .. full(get(path, "state"))
@@ -780,7 +806,7 @@ function lanes.dump(api, lane, reg, box)
 		return "entity-" .. tostring(e)
 	end
 	local entries = {}
-	local function emit(kind, e, row, fields, points)
+	local function emit(kind, e, row, fields, points, suffix)
 		if box and not (type(points) == "table" and inBox(box, points)) then return end
 		local id = idOf(kind, e)
 		local key, order
@@ -793,9 +819,44 @@ function lanes.dump(api, lane, reg, box)
 			key = "row:" .. string.gsub(row, "%s", "_")
 			order = "1 " .. row .. "\30" .. string.format("%015d", tonumber(e) or 0)
 		end
+		key = key .. (suffix or "")
+		-- Keep all summaries before optional routes at the hook's output limit.
+		order = (suffix and "2 " or "") .. order .. (suffix or "")
+		-- Only the diagnostic spelling changes: '@' in numeric vehicle rows
+		-- looks like an email to the relay's privacy filter. Hash input is untouched.
+		if kind == "vehicles" then row = string.gsub(row, "@", "~") end
 		local text = key .. " " .. fields
 		if e ~= nil then text = text .. " entity=" .. tostring(e) end
-		entries[#entries + 1] = { order = order, text = text .. " row=" .. row }
+		text = text .. " row=" .. row
+		if kind == "vehicles" and #text > 850 then
+			-- Keep below DiagnosticText's 1024 bytes including timestamp and
+			-- lane/step prefix. Each piece has its own stable comparison key.
+			local chunks, chunk = {}, ""
+			for word in (fields .. " entity=" .. tostring(e) .. " row=" .. row):gmatch("%S+") do
+				local name, value = word:match("^([^=]+)=(.*)$")
+				local words = { word }
+				if #word > 650 and name then
+					words = {}
+					for at = 1, #value, 600 do
+						words[#words + 1] = name .. "_part" .. #words .. "=" .. value:sub(at, at + 599)
+					end
+				end
+				for _, part in ipairs(words) do
+					if #chunk + #part > 700 then
+						chunks[#chunks + 1] = chunk
+						chunk = ""
+					end
+					chunk = chunk == "" and part or chunk .. " " .. part
+				end
+			end
+			if chunk ~= "" then chunks[#chunks + 1] = chunk end
+			for i, part in ipairs(chunks) do
+				local tail = i == 1 and "" or string.format("/detail-%03d", i)
+				entries[#entries + 1] = { order = order .. tail, text = key .. tail .. " " .. part }
+			end
+		else
+			entries[#entries + 1] = { order = order, text = text }
+		end
 	end
 	local ok, text = pcall(reader, api, emit, ids)
 	if not ok or type(text) ~= "string" then return { "err " .. tostring(text) } end

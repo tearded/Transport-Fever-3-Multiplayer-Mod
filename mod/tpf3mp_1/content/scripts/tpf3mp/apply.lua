@@ -381,6 +381,48 @@ end
 -- verdict first, and built as the player's own build, paid by the player
 -- (buildProposal). The new one stands where the old one stood, so the next
 -- edit, a depot or a line finds it by the same file and place.
+-- The stock rail editor's own replacement generator preserves its track
+-- reconstruction and snapping information. A SimpleProposal only carries
+-- the new construction parameters. Regenerate locally, then recapture to
+-- ensure the engine has not expanded this into a different requested edit.
+-- Reference: build 40408 gui/construction/construction.tl:1295.
+local function sameParameter(a, b, tolerance)
+	if type(a) ~= type(b) then return false end
+	if type(a) == "number" then return a == b or math.abs(a - b) <= tolerance end
+	if type(a) ~= "table" then return a == b end
+	for k, v in pairs(a) do if not sameParameter(v, b[k], tolerance) then return false end end
+	for k in pairs(b) do if a[k] == nil then return false end end
+	return true
+end
+
+local function railReplacement(build, old, entity)
+	local rail = "::/stations/rail/modular_station/modular_station.con"
+	if build.file ~= rail or build.replaces.file ~= rail or build.connection ~= nil then return nil end
+	local util = api.engine.util and api.engine.util.proposal
+	if not util or not util.createProposalReplaceConstruction then
+		error("the game cannot regenerate the rail station edit", 0)
+	end
+	local full = util.createProposalReplaceConstruction(old, entity.params)
+	if full == nil then error("the game could not regenerate the rail station edit", 0) end
+	if #full.toRemove ~= 1 or full.toRemove[1] ~= old or #full.toAdd ~= 1 then
+		error("the game regenerated a different rail station edit", 0)
+	end
+	local capture = ug_require and ug_require("tpf3mp_1::/scripts/tpf3mp/capture.lua")
+		or require("tpf3mp.capture")
+	local action, why = capture.construction(full)
+	local rebuilt = action and action.BuildConstruction
+	if not rebuilt then error("the regenerated rail station edit cannot travel: " .. tostring(why), 0) end
+	local same = sameParameter
+	if rebuilt.file ~= build.file or rebuilt.name ~= build.name
+		or rebuilt.connection ~= nil or not same(rebuilt.replaces, build.replaces, 0.0011)
+		or not same(rebuilt.transform.origin, build.transform.origin, 0.0011)
+		or not same(rebuilt.transform.basis, build.transform.basis, 0.0000011)
+		or not same(params(rebuilt.params), params(build.params), 0.0000011) then
+		error("the game regenerated a different rail station edit", 0)
+	end
+	return full
+end
+
 local function replaceConstruction(build, proposal, entity)
 	local old, oldComponent = constructionAt(build.replaces)
 	mine(old, "construction")
@@ -398,11 +440,26 @@ local function replaceConstruction(build, proposal, entity)
 	context.player = company()
 	context.gatherBuildings = true
 	context.gatherFields = true
-	buildProposal(proposal, context)
+	local native = railReplacement(build, old, entity)
+	if native then
+		-- Build 40408's makeProposalData binding only accepts SimpleProposal,
+		-- despite its Teal declaration. The stock UI sends this full native
+		-- proposal directly, with errors enabled. Do not discard its graph
+		-- just to pass it through the simple-proposal validator.
+		if dry then error({ dry = true, proposal = native, context = context }, 0) end
+		run(api.cmd.makeWorldBuildProposalCmd(native, context, false, true))
+	else
+		buildProposal(proposal, context)
+	end
 	-- What it made, where the action says: this game could name it.
-	local new = constructionAt({ file = build.file, at = build.transform.origin })
+	local new, component = constructionAt({ file = build.file, at = build.transform.origin })
+	if native and not sameParameter(component and component.params, entity.params, 0.0000011) then
+		error("the game did not apply the requested rail station parameters", 0)
+	end
 	-- The acting company's, whatever the engine made of it, as a new one.
 	settleConstruction(new, build.file)
+	-- The native replacement already includes its snapped track graph.
+	if native then return true, new end
 	-- The new one makes its entrances again itself, unsnapped, as a build
 	-- does: a road station edited by the street came loose from it, its
 	-- entrance no longer joined to the junction (2026-10-03, in both games).
@@ -1793,6 +1850,29 @@ function HANDLERS.SellVehicle(sell, ctx)
 	return run(api.cmd.makeVehicleSellCmd(vehicles))
 end
 
+-- Small before/after records at the action boundary, not a per-tick scan.
+-- A new train diverged immediately after BuyVehicle/AssignLine; these show
+-- whether movement already differed before the engine chose its route.
+local function vehicleActionState(entity, canonical, phase, line, first)
+	local ok, why = pcall(function()
+		local c = api.type.ComponentType
+		local v = api.engine.getComponent(entity, c.TRANSPORT_VEHICLE)
+		local p = api.engine.getComponent(entity, c.MOVE_PATH)
+		local d = p and p.dyn
+		local pos = d and d.pathPos
+		log("vehicle-action " .. phase .. " vehicle-" .. tostring(canonical)
+			.. " line-" .. tostring(line) .. " first=" .. tostring(first)
+			.. " time=" .. tostring(now()) .. " entity=" .. tostring(entity)
+			.. " state=" .. tostring(v and v.state) .. " stop=" .. tostring(v and v.stopIndex)
+			.. " edge=" .. tostring(pos and pos.edgeIndex) .. " pos=" .. tostring(pos and pos.pos)
+			.. " speed=" .. tostring(d and d.speed))
+	end)
+	if not ok then
+		log("vehicle-action " .. phase .. " vehicle-" .. tostring(canonical)
+			.. " unavailable: " .. tostring(why))
+	end
+end
+
 function HANDLERS.AssignLine(assign, ctx)
 	if assign.line == nil then
 		return false, "this version of the mod does not take vehicles off their line yet"
@@ -1802,7 +1882,10 @@ function HANDLERS.AssignLine(assign, ctx)
 	local first = assign.first_stop
 	if first == nil then first = -1 end
 	for _, v in ipairs(assign.vehicles) do
-		run(api.cmd.makeVehicleSetLineCmd(ownOf(ctx, "vehicles", v), line, first))
+		local entity = ownOf(ctx, "vehicles", v)
+		vehicleActionState(entity, v, "before-assign", assign.line, first)
+		run(api.cmd.makeVehicleSetLineCmd(entity, line, first))
+		vehicleActionState(entity, v, "after-assign", assign.line, first)
 	end
 	return true
 end
@@ -2127,6 +2210,16 @@ function HANDLERS.Perk(op, ctx)
 		return run(api.cmd.makeJournalBookAssetCmd(company(), entry, api.type.Vec3f.new(0, 0, 0)))
 	end
 	return false, "a perk of no kind"
+end
+
+-- The shared date pace; zero holds the date without stopping vehicles.
+function HANDLERS.CalendarSpeed(p)
+	local value = p.millis_per_day
+	-- Also validate direct Lua replay, before constructing an engine command.
+	local capture = ug_require and ug_require("tpf3mp_1::/scripts/tpf3mp/capture.lua")
+		or require("tpf3mp.capture")
+	capture.calendarSpeed(nil, value)
+	return run(api.cmd.makeGameSetCalendarSpeedCmd(value))
 end
 
 -- A town building's Historic Preservation (action::Preservation), as its

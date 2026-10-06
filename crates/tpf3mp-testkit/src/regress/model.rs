@@ -632,6 +632,8 @@ impl State {
             // A town building's preservation: the model keeps no towns'
             // buildings.
             Action::Preserve(_) => Ok(()),
+            // The model has no native calendar.
+            Action::CalendarSpeed { .. } => Ok(()),
             Action::CompanyOp(_) => unreachable!("handled above"),
         }
     }

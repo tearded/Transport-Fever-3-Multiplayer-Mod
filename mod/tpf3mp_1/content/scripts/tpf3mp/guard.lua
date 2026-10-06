@@ -64,6 +64,7 @@ end
 -- given the context naming what they name (env.context, see capture.lua);
 -- nil, or an error, for one it does not carry, which is then refused.
 guard.CARRY = {
+	makeGameSetCalendarSpeedCmd = by("calendarSpeed"),
 	-- The finance window's loans (finances_loan_gui.tl): the loan script's
 	-- events, with the loans as the script keeps them. The construction
 	-- menu's prospecting: the company script's spawnIndustry

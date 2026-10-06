@@ -3676,6 +3676,28 @@ and nothing more.
   lanes at every checkpoint, for chasing a desync on purpose: `all`, or
   lane numbers (`3`, `0,3`). `off` dumps nothing, not even after a
   divergence. The hook says in its log what it read.
+- **Vehicle diagnostic detail.** Long vehicle entries are split into
+  `vehicle-N/detail-NNN` records below the relay's 1024-byte line limit;
+  long capacity fields become numbered `free_partN` fields. The diagnostic
+  row uses `~` instead of `@` so a numeric position is not redacted as an
+  email address. The lane hash input is unchanged.
+  `vehicle-N/path-NNNN` records show route order, raw edge entity, lane
+  index, direction, and edge endpoints/tangents where available. The old
+  `path_hash` explicitly says `path_hash_scope=local_ids`: different raw
+  IDs alone do not prove route divergence. Compare geometry and lane index
+  too. The dump records at most 256 route edges per vehicle, 2048 per dump,
+  with at most 1024 distinct geometry reads, cached within that dump.
+  `route_omitted` and `geometry=budget` make these limits visible;
+  `geometry=unavailable` means the native edge could not be read. Vehicle
+  summaries precede route records so optional detail cannot crowd them out
+  at the hook's line limit. These extra reads happen only during dumps,
+  not ordinary rolling checks. They describe the sampled state, not every
+  earlier routing decision; a root cause can still require reproduction.
+  Line assignments also log `vehicle-action before-assign` and
+  `after-assign`, with canonical vehicle/line IDs, game time and the local
+  vehicle's state, stop, path position and speed. These bounded action-time
+  reads help distinguish an existing displacement from a departure that
+  diverges after assignment; they do not scan vehicles every tick.
 - **A box of the network.** `TPF3MP_HOOK_LANE_DUMP_BOX=x0,y0,x1,y1` (the
   world's x and y, metres, any two opposite corners) dumps the network lane
   at every checkpoint in `TPF3MP_HOOK_LANE_DUMP_BOX_STEPS=from-to` (steps,

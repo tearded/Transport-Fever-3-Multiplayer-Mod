@@ -101,6 +101,12 @@ app.saveGame("tpf3mp_fixture4", function() print("@@saved") end, false, true)
 
 ## Starting a room
 
+The helper waits for every game's main menu before typing the host's load
+command, so a guest opening its window cannot interrupt that input. Console
+typing stops without pressing Enter if focus changes or Windows rejects an
+input event. Clear any partial console input before retrying; a returned
+typing error is not evidence that the command ran.
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\game\room.ps1 -Players 2
 ```

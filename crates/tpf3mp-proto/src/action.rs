@@ -1196,10 +1196,17 @@ pub enum Action {
     /// A town building's Historic Preservation (`Preservation`). Appended
     /// under schema version 24: the variants before it keep their bytes.
     Preserve(Preservation),
+    /// Shared calendar pace, independent of simulation speed. Zero pauses
+    /// the date; positive values are the game's day length in milliseconds.
+    CalendarSpeed {
+        millis_per_day: u32,
+    },
 }
 
 #[derive(Debug, Error)]
 pub enum ActionError {
+    #[error("calendar day length exceeds the game's signed integer range")]
+    CalendarSpeed,
     #[error("invalid junction configuration: {0}")]
     Junction(&'static str),
     #[error("action schema {found}; this game speaks {ACTION_SCHEMA_VERSION}")]
@@ -1249,6 +1256,7 @@ impl Action {
             Action::Rename { .. } => "Rename",
             Action::Perk(_) => "Perk",
             Action::Preserve(_) => "Preserve",
+            Action::CalendarSpeed { .. } => "CalendarSpeed",
         }
     }
 
@@ -1257,6 +1265,9 @@ impl Action {
     /// ([`ActionError::SellOnArrival`]).
     pub fn validate(&self) -> Result<(), ActionError> {
         let changes = match self {
+            Self::CalendarSpeed { millis_per_day } if *millis_per_day > i32::MAX as u32 => {
+                return Err(ActionError::CalendarSpeed);
+            }
             Self::VehicleOp(VehicleOp {
                 change: VehicleChange::ToDepot { sell: true },
                 ..

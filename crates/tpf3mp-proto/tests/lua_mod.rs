@@ -2157,10 +2157,10 @@ fn a_lane_dump_is_the_lanes_text_entry_by_entry_keyed_and_in_the_same_order_on_e
         [
             "lane 3 step 300 vehicle-0 state=1 stop=0 line=nil edge=3 pos=10.199999999999999 speed=5 \
              arrival=nil/nil arrival_locked=nil load=nil pending=nil free=nil \
-             entity=401 row=1:0:3@10.20 v5.00",
+             entity=401 row=1:0:3~10.20 v5.00",
             "lane 3 step 300 vehicle-1 state=2 stop=1 line=nil edge=0 pos=0 speed=0 \
              arrival=nil/nil arrival_locked=nil load=nil pending=nil free=nil entity=402 \
-             row=2:1:0@0.00 v0.00",
+             row=2:1:0~0.00 v0.00",
             &format!("lane 3 step 300 summary {}", read_lanes(&a)[3].1),
         ],
         "keyed, full precision, then the text the hook hashes"
@@ -2542,6 +2542,61 @@ fn physical_paths_are_dumped_without_changing_the_vehicle_digest() {
     .exec()
     .unwrap();
     assert_eq!(da, dump_at_checkpoint(&b, 50, "3"));
+}
+
+#[test]
+fn long_vehicle_diagnostics_survive_upload_and_bound_route_reads() {
+    let game = dumping_game(false);
+    game.load(r#"
+        WORLD[9][401].path = { edges = {}, endOffset = 7, terminalDecisionOffset = 98 }
+        for i = 1, 300 do
+            WORLD[9][401].path.edges[i] = { edgeId = { entity = 8000 + i, index = i % 3 }, dir = false }
+        end
+        WORLD[4][401].lineStop2cargo2available = {}
+        for i = 1, 15 do
+            local cargo = {}
+            for j = 1, 40 do cargo[j] = j end
+            WORLD[4][401].lineStop2cargo2available[i] = cargo
+        end
+        local original = api.engine.getComponent
+        GEOMETRY_READS = 0
+        api.engine.getComponent = function(e, kind)
+            if e > 8000 and e <= 8300 then
+                GEOMETRY_READS = GEOMETRY_READS + 1
+                return { position0 = {x=e,y=0,z=5}, position1 = {x=e+1,y=0,z=5},
+                    tangent0 = {x=1,y=0,z=0}, tangent1 = {x=1,y=0,z=0} }
+            end
+            return original(e, kind)
+        end
+    "#).exec().unwrap();
+    let before = read_lanes(&game);
+    assert_eq!(
+        game.load("return GEOMETRY_READS").eval::<usize>().unwrap(),
+        0
+    );
+    let dump = dump_at_checkpoint(&game, 50, "3");
+    assert_eq!(
+        before,
+        read_lanes(&game),
+        "diagnostics never change lane digests"
+    );
+    assert_eq!(
+        game.load("return GEOMETRY_READS").eval::<usize>().unwrap(),
+        256
+    );
+    for line in &dump {
+        assert!(line.len() < 1024, "{} bytes: {line}", line.len());
+        assert_eq!(&tpf3mp_proto::redact(line), line);
+    }
+    let text = dump.join("\n");
+    assert!(text.contains("route_records=256 route_omitted=44"));
+    assert!(text.contains("free_part0="));
+    assert!(text.contains("decision_offset=98"));
+    assert!(text.contains(
+        "/path-0138 route_index=138 edge_entity=8139 lane_index=1 direction=false p0=8139,0,5"
+    ));
+    assert!(text.contains("path_hash_scope=local_ids"));
+    assert!(text.contains("row=1:0:3~10.20"));
 }
 
 #[test]
@@ -3690,6 +3745,20 @@ fn every_game_replaces_the_edited_station_in_one_proposal() {
         why,
         "no ::/stations/street/modular_street_station/modular_terminal.con there"
     );
+}
+
+#[test]
+fn specialised_rail_platform_edits_use_the_native_replacement_and_validate_it() {
+    for local_id in [77, 910] {
+        let (lua, _) = engine();
+        lua.load(FAKE_STATION).exec().unwrap();
+        lua.globals().set("LOCAL_ID", local_id).unwrap();
+        lua.load(format!("EDIT = {EDIT_PROPOSAL}")).exec().unwrap();
+        lua.load(include_str!("lua/rail_platform_edit.lua"))
+            .set_name("@rail_platform_edit.lua")
+            .exec()
+            .unwrap_or_else(|error| panic!("local entity {local_id}: {error}"));
+    }
 }
 
 /// The station 77 by FAKE_NETWORK's node 7: its own entrance, edge 6000
@@ -5779,8 +5848,20 @@ fn the_game_script_buys_the_vehicle_and_tells_the_buyer_which() {
     assert_eq!(
         bought, "25|202|41|false|3|0.25|777000|true|1|500|301|1",
         "bought at the depot's construction there, as the store configured it; \
-         then vehicle-2, the new one, on line-0"
+        then vehicle-2, the new one, on line-0"
     );
+    let assignment_log: String = lua
+        .load("return table.concat(HOOK.logged, '\\n')")
+        .eval()
+        .unwrap();
+    for phase in ["before-assign", "after-assign"] {
+        assert!(
+            assignment_log.contains(&format!(
+                "vehicle-action {phase} vehicle-2 line-0 first=1 time=777000 entity=500"
+            )),
+            "missing assignment boundary: {assignment_log}"
+        );
+    }
     let applied: String = lua
         .load(
             "local out = {} for _, a in ipairs(HOOK.applied) do \
@@ -7529,6 +7610,36 @@ fn a_stop_the_stop_tool_placed_goes_to_the_room_and_every_game_places_it() {
         "1|-1|0|8|9|::/street/country.street_template|1|-400000000|0|100|8,9|-1|0.5000|true\
          |::/stations/street/small_stops/small_new.con|25|25|true|true"
     );
+}
+
+#[test]
+fn bridge_signals_follow_the_cursor_ray_instead_of_the_ground_beyond_it() {
+    let (lua, _) = engine();
+    lua.load(FAKE_NETWORK).exec().unwrap();
+    lua.load(FAKE_STOPS).exec().unwrap();
+    lua.load(format!("P = {}", stop_proposal("", "", "")))
+        .exec()
+        .unwrap();
+    lua.load(r#"
+        NODES[8] = {x=50,y=-100,z=50}
+        NODES[9] = {x=50,y=100,z=50}
+        P.proposal.edgeObjectsToAdd[1].modelInstance = nil
+        P.proposal.edgeObjectsToAdd[1].category = 2
+        P.proposal.addedSegments[1].comp.objects[1][2] = 2
+        api.gui = {
+            mouse = { hasTerrainPosition = function() return true end,
+                getTerrainPosition = function() return {x=50,y=50,z=0} end },
+            camera = {getEye = function() return {x=50,y=-100,z=150} end}
+        }
+        local engine = ug_require('tpf3mp_1::/scripts/tpf3mp/engine.lua')
+        local action = assert(engine.placeStop(P, 'signal.con', true)).PlaceStop
+        assert(math.abs(action.at.y) < 0.001, 'bridge signal moved towards the ground hit: ' .. action.at.y)
+        assert(math.abs(action.at.z - 50) < 0.001)
+        assert(action.object == 'Signal' and action.one_way)
+        P.proposal.edgeObjectsToAdd[1].param = 0.25
+        local explicit = assert(engine.placeStop(P, 'signal.con', false)).PlaceStop
+        assert(explicit.at.y < -20, 'explicit proposal position must win over the camera')
+    "#).exec().unwrap();
 }
 
 /// Several stops clicked quickly in a row (the stop tool takes each click
@@ -13708,6 +13819,91 @@ fn historic_preservation_goes_to_the_room_by_its_construction() {
                 && l.ends_with("a town building the room cannot name")),
         "{logged:?}"
     );
+}
+
+#[test]
+fn calendar_pause_and_pace_go_through_the_room_and_replay_in_both_games() {
+    use tpf3mp_proto::{
+        action::Action,
+        lua::{action_from_lua, action_to_lua},
+    };
+    let source = gui();
+    source.load(FAKE_HOOK).exec().unwrap();
+    source.load(FAKE_CMD).exec().unwrap();
+    source
+        .load(
+            r#"
+        api.cmd.makeGameSetCalendarSpeedCmd = function(value) return { calendar = value } end
+        M = mount(loadPlugin()) M.step() HOOK.room = true
+        for _, value in ipairs({ 0, 8000, 4000, 2000, 1000, 500, 0, 2000 }) do
+            api.cmd.sendCommand(api.cmd.makeGameSetCalendarSpeedCmd(value))
+        end
+        for _, value in ipairs({ -1, 0.5, 2147483648, math.huge, 0/0, '2000' }) do
+            api.cmd.sendCommand(api.cmd.makeGameSetCalendarSpeedCmd(value))
+        end
+        M.step()
+        assert(#SENT == 0, 'nothing may change locally before room replay')
+        assert(#HOOK.commands == 8, 'invalid values must not reach the room')
+    "#,
+        )
+        .exec()
+        .unwrap();
+    let actions: Vec<mlua::Value> = source.load("return HOOK.commands").eval().unwrap();
+    for _ in 0..2 {
+        let (replica, _script) = engine();
+        replica
+            .load(
+                r#"
+            CALENDAR = {}
+            api.cmd.makeGameSetCalendarSpeedCmd = function(value) return { calendar = value } end
+            local original = api.cmd.sendCommand
+            api.cmd.sendCommand = function(cmd, ...)
+                if cmd.calendar ~= nil then CALENDAR[#CALENDAR + 1] = cmd.calendar end
+                return original(cmd, ...)
+            end
+            HOOK.room = true UPDATE({}, STATE, 0.2)
+        "#,
+            )
+            .exec()
+            .unwrap();
+        for captured in &actions {
+            let action = action_from_lua(&common::tree(captured)).unwrap();
+            let decoded = Action::from_payload(&action.to_payload().unwrap()).unwrap();
+            replica
+                .globals()
+                .set(
+                    "ACTION",
+                    common::value(&replica, &action_to_lua(&decoded).unwrap()),
+                )
+                .unwrap();
+            replica
+                .load("HOOK.batch = { ACTION }; UPDATE({}, STATE, 0.2)")
+                .exec()
+                .unwrap();
+        }
+        replica.load("assert(#HOOK.applied == 8, table.concat(HOOK.logged, '|')); for _, answer in ipairs(HOOK.applied) do assert(answer.ok, answer.why) end").exec().unwrap();
+        let values: Vec<u32> = replica.load("return CALENDAR").eval().unwrap();
+        assert_eq!(
+            values,
+            [0, 8000, 4000, 2000, 1000, 500, 0, 2000],
+            "{}",
+            log(&replica)
+        );
+        replica
+            .load("for _, answer in ipairs(HOOK.applied) do assert(answer.ok, answer.why) end")
+            .exec()
+            .unwrap();
+    }
+    source
+        .load(
+            r#"
+        HOOK.room = false
+        api.cmd.sendCommand(api.cmd.makeGameSetCalendarSpeedCmd(2000))
+        assert(#SENT == 1 and SENT[1].command.calendar == 2000, 'single player stays native')
+    "#,
+        )
+        .exec()
+        .unwrap();
 }
 
 /// Every game sets the town building at that place in the construction's

@@ -98,12 +98,12 @@ function Hook-Says([string]$player, [string]$pattern) {
   $log = "$runDir\$player\hook.log"
   (Test-Path $log) -and (Select-String -Path $log -Pattern $pattern -Quiet)
 }
-function Wait-Menu([string]$player, [int]$gp) {
+function Wait-Menu([string]$player, [int]$gp, [bool]$RequireRoom = $true) {
   # The console takes input once the game is at its main menu: the hook has
   # served the menu's page and, on one of the menu's frames, seen the room
   # begin. Then -MenuSettle seconds for the page to be built.
   $deadline = (Get-Date).AddSeconds($MenuWait)
-  while (-not ((Hook-Says $player "main_page.tl SERVED") -and (Hook-Says $player "the room began at the main menu"))) {
+  while (-not ((Hook-Says $player "main_page.tl SERVED") -and ((-not $RequireRoom) -or (Hook-Says $player "the room began at the main menu")))) {
     if (Hook-Says $player "main_page.tl MISSED") {
       throw "$player's main menu came without the mod's page; see $runDir\$player\hook.log. Games left running"
     }
@@ -124,6 +124,12 @@ function Load-Fixture([string]$player, [int]$gp) {
   if (-not ($said -match "@@loading $Fixture")) { "${player}: the console did not echo the fixture's load; waiting for the hook anyway" }
 }
 
+# Wait for every window to finish opening before typing into the host. A
+# guest opening its main menu can otherwise steal focus halfway through the
+# load command, leaving an incomplete Lua chunk and a room that never starts.
+for ($i = 0; $i -lt $pids.Count; $i++) {
+  Wait-Menu "p$($i + 1)" $pids[$i] $false
+}
 Load-Fixture "p1" $pids[0]
 # The hook's own lines for the room's save; a bare "holding" also matches
 # the paused-tick fix's "holding tickCount" lines.

@@ -1224,6 +1224,9 @@ mod tests {
         forget_menu_sight();
         crate::menu::tests::menu51();
         assert!(!crate::menu::available());
+        // Other serialized tests have stepped a world. This scenario models
+        // a fresh process, so its last-step clock must start fresh as well.
+        LAST_STEP.store(0, Ordering::Release);
         let mut script = Script::default();
         script.begin.push_back(Some(begin()));
         script.gates.push_back(StepGate::Wait);

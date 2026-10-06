@@ -74,6 +74,7 @@ impl fmt::Display for Class {
 pub const ROOM_CARRIED: &[&str] = &[
     "makeEntitySetColorCmd",
     "makeEntitySetNameCmd",
+    "makeGameSetCalendarSpeedCmd",
     "makeGameSetSpeedCmd",
     "makeLineCreateCmd",
     "makeLineDestroyCmd",

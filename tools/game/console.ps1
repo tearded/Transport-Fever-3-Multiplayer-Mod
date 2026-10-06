@@ -10,6 +10,7 @@
 # it, or with a Lua error, are shown. -File keeps quotes intact, which a
 # -Lua argument passed through `powershell -File` does not.
 param([int]$GamePid, [string]$Lua, [string]$File, [switch]$Open, [double]$Wait = 2, [string]$Tag = "@@")
+$ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\env.ps1"
 if ($File) { $Lua = (Get-Content $File -Raw) }
 # One line: the console runs what is typed when Enter is pressed.

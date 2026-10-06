@@ -1103,8 +1103,9 @@ function engine.placeStop(proposal, noted, oneWay)
 		local ref, curve = edgeRef(old, network)
 		-- Where along the edge: the proposal's own parameter where it has
 		-- one, else the point of the centreline nearest the stop's model,
-		-- else nearest the ground under the cursor, where the tool puts the
-		-- stop (build 40408's proposal has neither). Every game builds it
+		-- else nearest the cursor's viewing ray (build 40408's proposal has
+		-- neither). A terrain point alone is offset behind elevated track.
+		-- Every game builds it
 		-- where this one says.
 		local u = get(eo, "param")
 		if type(u) ~= "number" or u < 0 or u > 1 then
@@ -1115,11 +1116,18 @@ function engine.placeStop(proposal, noted, oneWay)
 					if api.gui.mouse.hasTerrainPosition() then
 						local p = api.gui.mouse.getTerrainPosition()
 						x, y = p.x, p.y
+						local eye = api.gui.camera and api.gui.camera.getEye()
+						if eye then
+							u = geom.parameterOnRay(curve.a, curve.ta, curve.b, curve.tb,
+								{eye.x, eye.y, eye.z}, {p.x, p.y, p.z})
+						end
 					end
 				end)
 			end
 			if type(x) ~= "number" or type(y) ~= "number" then error("a stop with no place", 0) end
-			u = geom.parameterAt(curve.a, curve.ta, curve.b, curve.tb, x, y)
+			if type(u) ~= "number" or u < 0 or u > 1 then
+				u = geom.parameterAt(curve.a, curve.ta, curve.b, curve.tb, x, y)
+			end
 		end
 		local at = geom.hermitePos(curve.a, curve.ta, curve.b, curve.tb, u)
 		local d = geom.hermiteTangent(curve.a, curve.ta, curve.b, curve.tb, u)
