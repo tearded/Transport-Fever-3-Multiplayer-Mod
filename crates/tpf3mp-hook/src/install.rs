@@ -863,6 +863,9 @@ fn install_inner(profile: &Profile, link_name: &str) -> Result<u64, String> {
     } else {
         format!("perf: timing off ({} says so)", crate::perf::ENV)
     });
+    // Guarded reads (docs/HOOKS.md, "Reading the game's memory"): the
+    // handler goes in before any fix reads.
+    log_line(&crate::image::guarded::configure_from_env());
     if let Some(line) = crate::steptrace::configure_from_env() {
         log_line(&line);
     }
@@ -1230,6 +1233,10 @@ mod tests {
             script,
             Box::new(FakeControl::default()),
         )));
+        // No step ran in this game: a test that ran the step's detour
+        // before this one leaves its time behind, and the menu then waits
+        // for the world it thinks is closing.
+        LAST_STEP.store(0, Ordering::Release);
         let mut cmenu = [0usize; 3];
         crate::menu::set_load_field(16);
         let at = cmenu.as_mut_ptr() as usize;

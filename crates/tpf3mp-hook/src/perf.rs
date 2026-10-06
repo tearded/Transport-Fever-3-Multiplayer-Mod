@@ -250,6 +250,10 @@ pub struct Window {
     /// system.
     pub cache_hits: u64,
     pub cache_misses: u64,
+    /// Guarded reads ([`crate::image::guarded`]), and those a fault
+    /// refused.
+    pub guarded_reads: u64,
+    pub guarded_faults: u64,
 }
 
 /// The window's two lines: the game's step and the hook's total against
@@ -285,8 +289,8 @@ pub fn lines(window: &Window) -> [String; 2] {
         hook.millis() / seconds,
     );
     let first = format!(
-        "{first}; readable cache {} hits, {} misses",
-        window.cache_hits, window.cache_misses
+        "{first}; readable cache {} hits, {} misses; guarded reads {}, {} faults",
+        window.cache_hits, window.cache_misses, window.guarded_reads, window.guarded_faults
     );
     let mut second = String::from("perf: ");
     for (i, (piece, sample)) in Piece::ALL.iter().zip(window.pieces.iter()).enumerate() {
@@ -317,6 +321,7 @@ pub fn lines(window: &Window) -> [String; 2] {
 /// Takes every counter, zero again, into a window of `seconds`.
 fn take(seconds: f64) -> Window {
     let (cache_hits, cache_misses) = crate::image::take_counts();
+    let (guarded_reads, guarded_faults) = crate::image::take_guarded_counts();
     let mut pieces = [Sample::default(); Piece::ALL.len()];
     for (sample, counter) in pieces.iter_mut().zip(PIECES.iter()) {
         *sample = counter.take();
@@ -329,6 +334,8 @@ fn take(seconds: f64) -> Window {
         road_refusals: crate::order::road::take_refusals(),
         cache_hits,
         cache_misses,
+        guarded_reads,
+        guarded_faults,
     }
 }
 
@@ -426,8 +433,10 @@ mod tests {
             updates: 600,
             pieces,
             road_refusals: vec![("the edge's entity has no slot", 12)],
-            cache_hits: 90_000,
-            cache_misses: 1_200,
+            cache_hits: 0,
+            cache_misses: 0,
+            guarded_reads: 90_000,
+            guarded_faults: 3,
         }
     }
 
@@ -437,7 +446,7 @@ mod tests {
         assert_eq!(
             first,
             "perf: 10.0s: game step 2000.0 ms (200.0 ms/s) in 600 batches, 600 updates \
-             (3.333 ms/update); hook 42.5 ms (4.25 ms/s, 2.12% of the game's step); readable cache 90000 hits, 1200 misses"
+             (3.333 ms/update); hook 42.5 ms (4.25 ms/s, 2.12% of the game's step); readable cache 0 hits, 0 misses; guarded reads 90000, 3 faults"
         );
     }
 

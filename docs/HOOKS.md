@@ -4627,19 +4627,26 @@ playtest's hook.log, about 70% of the appends) and the vehicles' lists
 were never sorted; the persons' (`Add`) were.
 
 Every read on the hot paths (this walk, the order fixes' vectors, the
-game scripts' reseed) is checked through `image::Readable`: a per-thread
-cache of the regions `VirtualQuery` found committed and readable, dropped
-(`image::invalidate`) before every simulation update, before every call
-of the game's step, when a world's GUI starts and when a load is asked
-for, so a region is asked of the system about once per update, not once
-per word (13 times per edge before). The system call costs about 1.7 µs on
-the development PC and tens of microseconds inside Sandboxie, which hooks
-system calls: in the three-player playtest (`f622599`) the boxed games
-spent 37 to 42% of their step time in the hook, most of it in these
-checks. Every address the hook reads comes from a structure the engine
-keeps live; the checks guard against a layout the hook misreads, and
-dropping the cache wherever the engine frees keeps a freed region from
-answering. The sort is `road::place`, in place: one scan
+game scripts' reseed) goes through `image::Readable`, which reads through
+guarded reads ("Reading the game's memory: guarded reads" below): no
+system call, and a misread address is refused by the hook's vectored
+handler instead of crashing the game. Before those, `Readable` was a
+per-thread cache of the regions `VirtualQuery` found committed and
+readable, dropped (`image::invalidate`) before every simulation update,
+before every call of the game's step, when a world's GUI starts and when
+a load is asked for, so a region was asked of the system about once per
+update, not once per word (13 times per edge before). The system call
+costs about 1.7 µs on the development PC and tens of microseconds inside
+Sandboxie, which hooks system calls: in the three-player playtest
+(`f622599`) the boxed games spent 37 to 42% of their step time in the
+hook, most of it in these checks, and even with the cache a big map's
+road fix still cost about 6 µs per append (about 1.5 `VirtualQuery` calls
+an append: 11 ms per update, 19% of the game's step). That cache is
+still the path with guarded reads off. Every address the hook reads
+comes from a structure the engine keeps live; the checks guard against a
+layout the hook misreads, and dropping the cache wherever the engine
+frees keeps a freed region from answering. The sort is `road::place`, in
+place: one scan
 finds how far the list is strictly ascending; a list kept sorted is then
 either whole (nothing written) or out of order only in the entry just
 appended, which is moved into place by binary search; anything else is
@@ -4647,9 +4654,11 @@ sorted whole through a reused buffer. It gives exactly the order of the
 reference `road::entry_order` (checked on random lists in the tests),
 refuses the same lists, and writes nothing when it refuses. On the
 development PC one append to an edge of 2 to 32 entries went from about
-5 to 8 µs to about 0.1 µs (`order::splice_tests::road_append_bench`; a
-check from the cache is about 7 ns against 1.7 µs asking the system,
-`image::tests::readable_bench`), the sort alone
+5 to 8 µs to about 0.1 µs through the cache and 33 to 47 ns with guarded
+reads (`order::splice_tests::road_append_bench`, which hits the cache
+every time; in a game the misses were the cost; a check from the cache
+is about 6 ns, a guarded one 1 to 2 ns, against 0.5 to 1.7 µs asking the
+system, `image::tests::readable_bench`), the sort alone
 from 94 to 31 ns at 2 entries and 508 to 117 ns at 128
 (`order::tests::road_sort_bench`). Both appenders must be detoured, or none sorts. The callbacks run
 serially at the end of a modification (INFERRED from their callers, the
@@ -4726,6 +4735,80 @@ directly; a lane that differs names the container. The hashes are FNV-1a
 64 over the raw values, so an entity id that legitimately differs shows
 too; TF3's ids are expected equal (the survey), and the `reordered`
 counts say whether the sorts changed anything.
+
+### Reading the game's memory: guarded reads
+
+Every native read the hook makes on the game's threads must fail closed:
+an address the hook got wrong (a layout it misread, a build that moved a
+field) is refused, never a crash. `crates/tpf3mp-hook/src/image/guarded.rs`
+does this without asking the system first:
+
+- **Two routines** in assembly do every hot-path read: `touch(first,
+  last)` reads one byte of each page a range spans (the check behind
+  `Readable::readable` and `image::readable_cached`), `copy(dst, src,
+  len)` copies bytes out (behind `Readable::read`). They are leaf
+  functions that use only volatile registers and never move `rsp`, so at
+  any instruction in them the return address is at `[rsp]`, and they
+  share one recovery stub that answers 0.
+- **A vectored exception handler**, added first
+  (`AddVectoredExceptionHandler(1, …)`) when the hook installs
+  (`image: guarded reads on (…)` in hook.log), acts on exactly one kind
+  of exception: `EXCEPTION_ACCESS_VIOLATION`,
+  `STATUS_GUARD_PAGE_VIOLATION` or `EXCEPTION_IN_PAGE_ERROR` whose
+  instruction pointer is inside the two routines **and** whose first
+  parameter says it was a read. It moves the thread to the recovery stub
+  (`EXCEPTION_CONTINUE_EXECUTION`), and the caller sees a refusal.
+  Everything else, a write fault in the routines included, returns
+  `EXCEPTION_CONTINUE_SEARCH` untouched: the game's own handlers and its
+  crash reporter see every other fault exactly as without the hook. (The
+  game's own vectored handler, also added first, at startup, acts only on
+  heap corruption, `0xC0000374`; its crash reporter is a last-chance
+  filter, `SetUnhandledExceptionFilter`, which a child process in the
+  tests stands in for.)
+- **Addresses that cannot be user memory** (below 64 KiB, which Windows
+  never maps, past `0x7FFF_FFFE_FFFF`, or wrapping) are refused without
+  a read, so a null pointer plus an offset costs no fault.
+- **Guard pages.** Reading a `PAGE_GUARD` page clears the guard and
+  raises `STATUS_GUARD_PAGE_VIOLATION` (a thread's own stack guard page
+  is the kernel's to handle: it grows the stack and the read succeeds, as
+  any stack use would). Another thread's stack, or a guarded heap, relies
+  on that guard, so the handler puts it back (`VirtualProtect` with the
+  page's protection plus `PAGE_GUARD`) before refusing: the same answer
+  the `VirtualQuery` check gave, with the guard kept. Between the system
+  clearing it and the handler re-arming it are a few microseconds, in
+  which a second read of the same page would succeed (it is committed
+  memory, so that read is safe too); only a misread pointer reaches a
+  guard page at all.
+- **Writes.** A read proves nothing about writing, and neither did the
+  `VirtualQuery` check (it refused only no-access and guard pages, not
+  read-only ones). The fixes that sort in place (the road fix, the order
+  and person-order fixes) write through memory a check found readable,
+  as before: a vector the engine itself just wrote, on the engine's
+  thread, so the guarantee is the same as it was.
+- **Cost.** A check of readable memory, or a check and an 8-byte read,
+  is 1 to 2 ns, against 6 to 8 ns from the old cache when it hits and
+  0.5 to 1.7 µs (tens in Sandboxie) when it asks `VirtualQuery`
+  (`image::tests::readable_bench`, release build, development PC). A
+  refused read costs one exception dispatch, 1.2 to 1.8 µs; refusals mean
+  a misread layout, so they are rare, and the `perf:` line counts them.
+- **The kill switch** `TPF3MP_HOOK_GUARDED_READS=0` (or `off`) in the
+  game's environment, a handler the system refuses, or a build that is
+  not x86-64 Windows: the hook checks with `VirtualQuery` through the
+  region caches, as before (`image: guarded reads off (…)` or
+  `… unavailable …` in hook.log). Elsewhere than Windows nothing native
+  is read, as before.
+- The handler is never removed: the hook stays loaded for the life of
+  the game. The cold paths (code checks before a patch, install-time
+  reads) still ask `VirtualQuery` through `image::readable`.
+
+The tests (`image::guarded::windows_tests`) read committed, reserved,
+freed, no-access and read-only pages, ranges that run from a committed
+page into an uncommitted one and a no-access page in the middle of a
+long range, a guard page (refused, and its guard still there
+afterwards), sixteen threads faulting at once, a later vectored handler
+that still receives a fault outside the routines and a write fault
+inside them, and a child process whose stray fault still ends in its
+last-chance filter.
 
 ### The person-order fixes
 
@@ -5005,7 +5088,7 @@ Every 10 seconds of wall time, after a call of the step, two lines go to
 hook.log (nothing while no step runs, at the main menu):
 
 ```
-perf: 10.0s: game step 2000.0 ms (200.0 ms/s) in 600 batches, 600 updates (3.333 ms/update); hook 42.5 ms (4.25 ms/s, 2.12% of the game's step); readable cache 90000 hits, 1200 misses
+perf: 10.0s: game step 2000.0 ms (200.0 ms/s) in 600 batches, 600 updates (3.333 ms/update); hook 42.5 ms (4.25 ms/s, 2.12% of the game's step); readable cache 0 hits, 0 misses; guarded reads 90000, 3 faults
 perf: road-entry 19000/9.50ms/0.50us, platform-visit 0/0.00ms/0.00us, platform-candidates 0/0.00ms/0.00us, land-vehicle 0/0.00ms/0.00us, vehicles-at-stop 0/0.00ms/0.00us, person-order 0/0.00ms/0.00us, reseed 6000/30.00ms/5.00us, paused-tick 0/0.00ms/0.00us, lanes 0/0.00ms/0.00us, lane-dump 0/0.00ms/0.00us, gate 600/3.00ms/5.00us; road-entry refused 12 (12 the edge's entity has no slot)
 ```
 
@@ -5016,7 +5099,10 @@ per-update detour, so `0` without it), and the step's time per update;
 then the hook: the sum of every piece below, per second, and as a share
 of the game's step time; then the readability checks answered from
 `image::Readable`'s cache and those that asked the system (each miss is
-one `VirtualQuery` or more). Each piece of the second line is
+one `VirtualQuery` or more; both 0 with guarded reads on), and the
+guarded checks and reads made and how many of them a fault refused (0
+with `TPF3MP_HOOK_GUARDED_READS=0`; each thread adds its reads in
+batches of 256, so a window's count may lag by that much a thread). Each piece of the second line is
 `<name> <calls>/<total ms>/<mean µs>` over the window:
 
 | piece | what is timed | calls are |
@@ -5059,6 +5145,7 @@ lines' `ms/update` and the piece's total:
 | `TPF3MP_HOOK_SCRIPT_RESEED` | the game scripts' per-call reseed (the per-update detour stays, so the mod's own `tpf3mp_native.seed` still works) |
 | `TPF3MP_HOOK_LANE_DUMP=off` | lane dumps, even after a divergence |
 | `TPF3MP_HOOK_MEASURE_ORDER` | (unset by default) the order measurement, which adds its own detours and hashing when set |
+| `TPF3MP_HOOK_GUARDED_READS` | guarded reads: the hot paths check with `VirtualQuery` through the region caches instead (same answers, slower) |
 | `TPF3MP_HOOK_PERF` | the timing and these lines |
 
 Each switch changes what the game computes, so a game with one off
