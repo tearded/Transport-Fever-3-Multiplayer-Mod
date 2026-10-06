@@ -404,7 +404,10 @@ Rejected:
 ## D12 (2026-09-27): the launcher plays on the project's server alone
 
 *A proposed amendment below, not decided, lets players change the server in
-the launcher's settings; invites still never switch servers.*
+the launcher's settings; invites still never switch servers. A second
+proposed amendment (2026-10-06), not decided either, lets a release list
+several operated servers: rooms are listed from all of them and hosted on
+the closest.*
 
 A package's launcher plays on the one server it was built for, the
 project's own (D4), set when the release is built
@@ -474,6 +477,72 @@ of following an invite to its server stays. The release workflow still
 drafts no release without `TPF3MP_DEFAULT_SERVER`, so each release names
 its server on purpose; the relay in the code is the fallback for builds
 without it.
+
+### D12 amendment (PROPOSED amendment, not decided, 2026-10-06): several operated servers, rooms hosted on the closest
+
+**Proposed, for the owner (Juliansgith) to approve or refuse in the pull
+request. D12 above, and its proposed amendment of 2026-09-30, stay as they
+are until then; nothing here is decided.**
+
+Asked by a contributor (silver2127), who runs a second server on a VPS:
+"set up the server on the VPS as well and add in to the game that hosts
+pick the closest server but players can see games on both." D12 already
+says regional servers "come later through the launcher itself, never
+through what an invite says"; this is that step:
+
+- **A release lists its servers.** The default server
+  (`TPF3MP_DEFAULT_SERVER`, named by `TPF3MP_SERVER_NAME`) comes first,
+  then the others the release vouches for (`TPF3MP_SERVERS`, such as
+  `US=us.example.org:29470`, names and `host:port`s separated by commas).
+  The list is built in, as the default server is: players still never
+  type a server to meet, and a list that does not read stops the
+  launcher rather than guessing.
+- **Rooms are hosted on the closest server.** The launcher connects to
+  the closest listed server that answers, by the round trip of the QUIC
+  connection it already opens, and before creating a room it moves to the
+  closest again. Pings within 10 ms of the lowest count as equal: the
+  server played on stays, else the one listed first. A server that does
+  not answer is passed over; when none answers, connecting fails as it
+  always did.
+- **Players see the rooms of every server.** While connected, the
+  launcher keeps a quiet connection to each other listed server (no
+  content declared, no room, no diagnostics) and asks each for its public
+  rooms with its own: the room list shows them together, each with its
+  server's name and ping.
+- **Invites stay codes, and stay on the list.** An invite is still a code
+  alone (D13). Joining a room from the list goes to its server; a code
+  typed or pasted is tried on the server played on, then on the others
+  that answer, closest first, while each says it has no such room (each
+  such try counts against that server's limit on wrong invites). An
+  invite that names a server the release does not list is refused, as
+  under D12: no message sends a player to a server nobody vouches for.
+- **Trust is unchanged** (D4): every listed server needs a certificate
+  from a public authority, as the relay's. Each server keeps its own
+  `invite.key`, rooms and logs; nothing passes between servers.
+- **Everything else stays.** `--server` plays on one server alone for a
+  playtest; a server the player types in Settings (the proposed amendment
+  of 2026-09-30) is played on alone, and **Reset to default** returns to
+  the release's servers. A release that lists only its default server
+  behaves exactly as before. No protocol change: the launcher only opens
+  more of the connections it already makes.
+
+Trade-offs: each launcher holds one idle connection per other server
+while connected (keep-alives only, while idle), and every server
+sees each connected player's session, not only the one they play on. A
+code that is not in the list costs a join on each server until one has
+it. Rooms of one page are merged from every server's same page, so the
+game's window shows the first 20 of a page when several servers are
+full.
+
+Rejected:
+
+- **Invites naming their server** (longer codes, or `EU-K7QM2X`): D13's
+  six characters stay what players read out; the launcher finds the room.
+- **Choosing the closest by geography or by the player's region
+  setting**: a measured round trip needs no setting and follows the
+  network players actually have.
+- **Servers syncing rooms with each other**: every server stays on its
+  own, and the launchers do the listing.
 
 ## D13 (2026-09-27): invites and support codes are six letters and digits
 
