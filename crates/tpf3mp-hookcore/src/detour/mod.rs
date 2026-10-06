@@ -89,9 +89,9 @@ mod sys;
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{CallRedirect, InlineDetour, Splice};
+pub use x86_64::{CallRedirect, InlineDetour, Rewrite, Splice};
 
 #[cfg(not(target_arch = "x86_64"))]
 mod unsupported;
 #[cfg(not(target_arch = "x86_64"))]
-pub use unsupported::{CallRedirect, InlineDetour, Splice};
+pub use unsupported::{CallRedirect, InlineDetour, Rewrite, Splice};

@@ -1637,3 +1637,28 @@ signature = "48 8B 4D 80 8B 89 0C 02 00 00 39 08 75"
 offset = 4
 prologue = "8B 89 0C 02 00 00 39 08"
 required = false
+
+# Faster saves (crates/tpf3mp-hook/src/savefast.rs), after silver2127's Big
+# Maps for TPF2 (tpf2-bigmap, save_fast). The save writer's zstd stream is
+# set up in Serializer.cpp's PushCompressor (0x32d450; its only caller is
+# the save stream setup 0x32c1a0): `mov eax,[0x37c2ab8]` reads the level,
+# 3, which PushDecompressor (0x32d6e0) reads too, so the instruction is
+# rewritten to `mov eax,1`, never the constant; and `mov r8d,0x80` hands the
+# compressor's stream buffer 128 bytes, rewritten to 64 KiB. The buffer
+# pattern alone matches twice, here and in PushDecompressor (0x32d865), so
+# its signature carries this site's call. One match each on this build
+# (tpfre). The save's bytes decode the same; only how hard they are
+# compressed changes.
+[[target]]
+name = "save: PushCompressor level load"
+signature = "8B 05 ?? ?? ?? ?? 41 89 43 10 49 8D 43 88"
+offset = 0
+prologue = "8B 05 4E 56 49 03"
+required = false
+
+[[target]]
+name = "save: PushCompressor buffer size"
+signature = "4C 8B CB 41 B8 80 00 00 00 48 8D 54 24 30 48 8B C8 E8 F9 B9 FE FF"
+offset = 3
+prologue = "41 B8 80 00 00 00"
+required = false

@@ -471,6 +471,98 @@ impl Drop for Splice {
 // SAFETY: as for `InlineDetour`: owned addresses of this process's memory.
 unsafe impl Send for Splice {}
 
+/// Bytes rewritten in place: an instruction's operand changed where the
+/// code around it stays the game's, for a change no hook has to run for
+/// (a constant, a buffer size). Restored when detached or dropped.
+pub struct Rewrite {
+    site: *mut u8,
+    original: Vec<u8>,
+    active: bool,
+}
+
+impl Rewrite {
+    /// Writes `replacement` over the site after checking it holds exactly
+    /// `expected`, of the same length. A site holding anything else is left
+    /// alone and refused.
+    ///
+    /// # Safety
+    ///
+    /// No thread may execute the site's bytes while they are written, and
+    /// `replacement` must be whole instructions in place of whole
+    /// instructions, valid wherever the original ran.
+    pub unsafe fn install(
+        site: *mut u8,
+        expected: &[u8],
+        replacement: &[u8],
+    ) -> Result<Self, DetourError> {
+        if expected.is_empty() || expected.len() != replacement.len() {
+            return Err(DetourError::UnsupportedPrologue {
+                reason: format!(
+                    "a rewrite replaces bytes one for one, not {} with {}",
+                    expected.len(),
+                    replacement.len()
+                ),
+            });
+        }
+        if sys::readable(site as usize, expected.len()) < expected.len() {
+            return Err(DetourError::UnsupportedPrologue {
+                reason: "the site is not readable".to_owned(),
+            });
+        }
+        // SAFETY: `expected.len()` readable bytes at `site`.
+        let found = unsafe { std::slice::from_raw_parts(site, expected.len()) };
+        if found != expected {
+            return Err(DetourError::UnsupportedPrologue {
+                reason: format!(
+                    "the site holds {} where {} was expected",
+                    hex(found),
+                    hex(expected)
+                ),
+            });
+        }
+        // SAFETY: the caller guarantees the site is quiescent.
+        unsafe {
+            sys::write_code(site, replacement)?;
+        }
+        Ok(Self {
+            site,
+            original: expected.to_vec(),
+            active: true,
+        })
+    }
+
+    /// Restores the site's bytes.
+    ///
+    /// # Safety
+    ///
+    /// As with install, no thread may execute the site during this.
+    pub unsafe fn detach(mut self) -> Result<(), DetourError> {
+        // SAFETY: forwarded under the same contract.
+        unsafe { self.restore() }
+    }
+
+    unsafe fn restore(&mut self) -> Result<(), DetourError> {
+        if self.active {
+            // SAFETY: writing the saved original bytes back.
+            unsafe {
+                sys::write_code(self.site, &self.original)?;
+            }
+            self.active = false;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Rewrite {
+    fn drop(&mut self) {
+        // SAFETY: same contract as install.
+        let _ = unsafe { self.restore() };
+    }
+}
+
+// SAFETY: as for `InlineDetour`: owned addresses of this process's memory.
+unsafe impl Send for Rewrite {}
+
 fn hex(bytes: &[u8]) -> String {
     bytes
         .iter()
@@ -838,6 +930,31 @@ mod tests {
             0x1234 + 0x11 + 0x33,
             "detached, the site is its own again"
         );
+    }
+
+    #[test]
+    fn a_rewrite_changes_an_operand_and_gives_it_back() {
+        let buffer = splice_fixture();
+        // SAFETY: the buffer holds our hand-written function of no arguments.
+        let fun: Fun = unsafe { std::mem::transmute::<*const u8, Fun>(buffer.as_ptr()) };
+        // SAFETY: nothing runs the buffer while it is written.
+        let site = unsafe { buffer.as_mut_ptr().add(0x1C) };
+        // mov rax,0x1234 becomes mov rax,0x4321.
+        let mut faster = SITE_BYTES[..7].to_vec();
+        faster[3] = 0x21;
+        faster[4] = 0x43;
+        let rewrite = unsafe { Rewrite::install(site, &SITE_BYTES[..7], &faster) }.unwrap();
+        assert_eq!(fun(), 0x4321 + 0x11 + 0x33);
+        // SAFETY: as above.
+        unsafe { rewrite.detach() }.unwrap();
+        assert_eq!(fun(), 0x1234 + 0x11 + 0x33);
+
+        // Bytes it did not expect, or a length change, are refused unwritten.
+        let mut wrong = SITE_BYTES[..7].to_vec();
+        wrong[3] = 0x35;
+        assert!(unsafe { Rewrite::install(site, &wrong, &faster) }.is_err());
+        assert!(unsafe { Rewrite::install(site, &SITE_BYTES[..7], &faster[..6]) }.is_err());
+        assert_eq!(fun(), 0x1234 + 0x11 + 0x33);
     }
 
     #[test]

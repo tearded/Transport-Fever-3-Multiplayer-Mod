@@ -59,6 +59,7 @@ pub mod previewcancel;
 pub mod previews;
 pub mod probe;
 pub mod roadtrace;
+pub mod savefast;
 pub mod seeds;
 pub mod step;
 pub mod steptrace;

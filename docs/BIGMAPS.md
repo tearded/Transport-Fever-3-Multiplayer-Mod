@@ -134,6 +134,21 @@ a TPF3 design: the stall timeout in [PROTOCOL.md](PROTOCOL.md) is sized as
 is an order of magnitude larger and pauses the game for 15-20 s on a fast
 machine, and a snapshot of that world is 1.4 GB on the wire.
 
+**On TF3 (build 40408)** the save writer is the same: `PushCompressor`
+(`0x32d450`) reads zstd level 3 at `0x32d464` and hands its stream a
+128-byte buffer at `0x32d5c4`. Stage 0 measured saves of 3.3 s at
+Gigantomaniac 1:1 (164 MB) and 7.7 s for a 45 km world (438 MB). The hook
+rewrites both instructions in place, as tpf2-bigmap's `save_fast` did:
+`mov eax,1` for the level and `mov r8d,0x10000` for the buffer
+(`crates/tpf3mp-hook/src/savefast.rs`, profile targets "save:
+PushCompressor …"). Each checks its bytes first and installs alone; the
+loader is untouched (`PushDecompressor` keeps reading the constant), and a
+save stays a standard zstd frame any game loads. Rooms judge lane digests,
+not save files, so games with and without it agree. On by default;
+`TPF3MP_HOOK_SAVE_FAST=0` keeps the game's own. hook.log says what was
+applied (`faster saves: zstd level 1, a 64 KiB buffer`). The TF3 speed-up
+is not measured yet.
+
 ## What a load actually does
 
 The save holds the 4 m heightmap and every alignment. A load therefore

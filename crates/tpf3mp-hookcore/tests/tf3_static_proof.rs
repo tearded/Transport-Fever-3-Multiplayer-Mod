@@ -199,6 +199,9 @@ const TARGETS: &[(&str, u64)] = &[
     ("UI::BuilderRenderer::EndHeightMod", 0x7bbae0),
     ("terrain::ViewTerrain::ApplyBlocks", 0x396a00),
     ("UI::StreetBuilder::ResetProposal", 0x576330),
+    // Faster saves (crates/tpf3mp-hook/src/savefast.rs).
+    ("save: PushCompressor level load", 0x32d464),
+    ("save: PushCompressor buffer size", 0x32d5c4),
 ];
 
 #[test]
