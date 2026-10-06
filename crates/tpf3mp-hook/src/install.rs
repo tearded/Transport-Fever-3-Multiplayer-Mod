@@ -917,6 +917,15 @@ fn install_inner(profile: &Profile, link_name: &str) -> Result<u64, String> {
     for line in crate::streettrace::install(&absolute) {
         log_line(&line);
     }
+    // The game's own systems timed (crate::simperf) and the faster component
+    // lookup (crate::fastindex), each failing closed on its own.
+    for line in crate::simperf::install(&absolute, base as u64) {
+        log_line(&line);
+    }
+    log_line(&crate::fastindex::install(&absolute));
+    // The fused emission grid (crate::emission): bit-identical, on unless
+    // TPF3MP_HOOK_FAST_EMISSION=0.
+    log_line(&crate::emission::install(&absolute));
     Ok(step_rva)
 }
 

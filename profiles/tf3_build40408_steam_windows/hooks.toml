@@ -1662,3 +1662,85 @@ signature = "4C 8B CB 41 B8 80 00 00 00 48 8D 54 24 30 48 8B C8 E8 F9 B9 FE FF"
 offset = 3
 prologue = "41 B8 80 00 00 00"
 required = false
+
+# Simulation timers (crates/tpf3mp-hook/src/simperf.rs; investigation/
+# TF3_SIM_COST_2026-10-05.md). Timing only: the three systems are
+# wrapped at their vtable slot (simperf.rs in this bundle; each function is
+# reached only through its slot), the parcel walk at its only call. Each
+# target is optional; a timer whose target is absent is left out and says so.
+#
+# ecs::EmissionGridSystem::Update (0xaa9230, vtable 0x1436fcab8 slot 11):
+# rcx this, rdx the engine, r8 the node list, xmm3 dt.
+[[target]]
+name = "simperf: EmissionGridSystem::Update"
+signature = "48 8B C4 48 89 58 18 48 89 50 10 48 89 48 08 55 56 57 41 54 41 55 41 56 41 57 48 8D 68 A1 48 81 EC 00 01 00 00 C5 F8 29 70 B8 C5 F8 28 F3 4C 8B EA 48 8B D9 48 3B 51 40 0F 85 ?? ?? ?? ?? C5 FA 10 05 ?? ?? ?? ??"
+offset = 0
+prologue = "48 8B C4 48 89 58 18 48 89 50 10 48 89 48 08 55"
+required = false
+
+# ecs::EmissionEmitterSystem::Update2 (0xaa51c0, vtable 0x1436fc430 slot
+# 12): rcx this, rdx the engine, r8d, xmm3 dt.
+[[target]]
+name = "simperf: EmissionEmitterSystem::Update2"
+signature = "C5 FA 11 5C 24 20 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 98 48 81 EC 68 01 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 45 58 44 89 44 24 78"
+offset = 0
+prologue = "C5 FA 11 5C 24 20 55 53 56 57 41 54 41 55 41 56"
+required = false
+
+# ecs::TownSystem slot 12 (0xb61cc0, vtable slot 0x143708bb8): rcx this,
+# rdx the engine, r8d; calls town_util::CalculateTownPollution.
+[[target]]
+name = "simperf: TownSystem::Update2"
+signature = "48 8B C4 48 89 58 08 44 89 40 18 48 89 50 10 55 56 57 41 54 41 55 41 56 41 57 48 8D 68 A1 48 81 EC C0 00 00 00 C5 F8 29 70 B8 41 8B F8 4C 8B E9"
+offset = 0
+prologue = "48 8B C4 48 89 58 08 44 89 40 18 48 89 50 10 55"
+required = false
+
+# parcel_util::UpdateParcelCollision (0x9312e0): rcx, rdx, r8 the boxes
+# (std::vector of {min x, min y, max x, max y}), r9; asserts !boxes.empty()
+# and walks the octree over the boxes' union + 50 m.
+[[target]]
+name = "simperf: UpdateParcelCollision"
+signature = "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 00 FD FF FF 48 81 EC 00 04 00 00 C5 F8 29 B4 24 F0 03 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 85 E0 02 00 00 4C 89 4C 24 40 4D 8B E0 4C 8B EA 4C 8B F9 48 8D 8D D0 00 00 00"
+offset = 0
+prologue = "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57"
+required = false
+
+# Its only call (0x1425fcb9a, construction_util_engine.cpp), redirected to
+# the timer.
+[[target]]
+name = "simperf: UpdateParcelCollision call"
+signature = "48 89 3B 48 83 C3 08 48 3B D8 75 F4 4C 8D 4D AF 4C 8D 45 97 49 8B D4 49 8B CF E8 ?? ?? ?? ?? 90 48 8B 4D C7 48 85 C9 74 51"
+offset = 26
+prologue = "E8 41 47 33 FE"
+required = false
+
+# The faster component lookup (crates/tpf3mp-hook/src/fastindex.rs).
+# ecs::Engine::GetComponentDataIndex (0xa4b90, Engine.h:0x143): the
+# signature is the whole hit path, entry to `ret` (the cookie's RIP
+# displacement and the __security_check_cookie call wildcarded): list =
+# [engine+0x90] + entity*24, first pair whose type == r8d, its index; a
+# miss asserts. The hook jumps from the entry to a frameless copy of this
+# path and hands a miss back to the original.
+[[target]]
+name = "fast-component-index: Engine::GetComponentDataIndex"
+signature = "48 89 5C 24 20 89 54 24 10 57 48 81 EC E0 00 00 00 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 84 24 D0 00 00 00 48 89 4C 24 40 44 89 44 24 30 C7 44 24 38 00 00 00 00 48 63 C2 48 8D 14 40 48 8B 81 90 00 00 00 4C 8D 0C D0 49 8B 49 08 49 8B 01 48 3B C1 74 0E 44 39 00 74 09 48 83 C0 08 48 3B C1 75 F2 49 3B 41 08 74 24 8B 40 04 48 8B 8C 24 D0 00 00 00 48 33 CC E8 ?? ?? ?? ?? 48 8B 9C 24 08 01 00 00 48 81 C4 E0 00 00 00 5F C3"
+offset = 0
+prologue = "48 89 5C 24 20 89 54 24 10 57 48 81 EC E0 00 00 00"
+required = false
+
+# The fused emission grid (crates/tpf3mp-hook/src/emission; investigation/
+# TF3_SIM_COST_2026-10-05.md §1). ecs::EmissionGridSystem::Update
+# (0xaa9230, vtable 0x1436fcab8 slot 11; Game/ecs/EmissionGridSystem.cpp):
+# rcx the system, rdx the engine, xmm3 dt; per grid and step it calls the
+# Diffuse, Wind (pollution only) and Average dispatchers at +0x1f2, +0x29e
+# and +0x31c, swapping the buffers after each. The hook redirects those three
+# calls and runs the step fused, bit-identical; emission.rs records the
+# dispatchers' and kernels' offsets from here and the FNV-1a hash of every
+# byte the model covers, which the hook checks before it patches anything.
+[[target]]
+name = "emission::EmissionGridSystem::Update"
+signature = "48 8B C4 48 89 58 18 48 89 50 10 48 89 48 08 55 56 57 41 54 41 55 41 56 41 57 48 8D 68 A1 48 81 EC 00 01 00 00 C5 F8 29 70 B8 C5 F8 28 F3 4C 8B EA 48 8B D9 48 3B 51 40 0F 85"
+offset = 0
+prologue = "48 8B C4 48 89 58 18 48 89 50 10 48 89 48 08"
+required = false

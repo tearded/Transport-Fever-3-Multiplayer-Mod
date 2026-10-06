@@ -4457,6 +4457,7 @@ name = "tpf3mp-hook"
 version = "1.2.8"
 dependencies = [
  "ctor",
+ "iced-x86",
  "libc",
  "mlua",
  "ring",

@@ -202,6 +202,19 @@ const TARGETS: &[(&str, u64)] = &[
     // Faster saves (crates/tpf3mp-hook/src/savefast.rs).
     ("save: PushCompressor level load", 0x32d464),
     ("save: PushCompressor buffer size", 0x32d5c4),
+    // Simulation timers and the faster component lookup
+    // (crates/tpf3mp-hook/src/simperf.rs, fastindex.rs).
+    ("simperf: EmissionGridSystem::Update", 0xaa9230),
+    ("simperf: EmissionEmitterSystem::Update2", 0xaa51c0),
+    ("simperf: TownSystem::Update2", 0xb61cc0),
+    ("simperf: UpdateParcelCollision", 0x9312e0),
+    ("simperf: UpdateParcelCollision call", 0x25fcb9a),
+    (
+        "fast-component-index: Engine::GetComponentDataIndex",
+        0xa4b90,
+    ),
+    // The fused emission grid (crates/tpf3mp-hook/src/emission).
+    ("emission::EmissionGridSystem::Update", 0xaa9230),
 ];
 
 #[test]
@@ -383,6 +396,34 @@ fn every_target_resolves_uniquely_in_the_installed_game() {
         &text_bytes[at(0x6a3676)..at(0x6a3676) + 7],
         &[0x48, 0x8B, 0x81, 0xD0, 0x1B, 0x00, 0x00]
     );
+    // Simulation timers: the parcel walk's only call reaches it, and each
+    // system's vtable slot (.rdata, the file's pointers at the preferred
+    // base) holds its function; nothing in .text calls them directly.
+    assert_eq!(callee(0x25fcb9a), 0x9312e0);
+    let systems = [
+        (0x36fcb10u64, 0xaa9230u64),
+        (0x36fc490, 0xaa51c0),
+        (0x3708bb8, 0xb61cc0),
+    ];
+    let rdata = pe.section(".rdata").expect("an .rdata section");
+    let rdata_bytes = rdata.raw(&image).expect(".rdata raw bytes");
+    for (slot, function) in systems {
+        let i = usize::try_from(slot - u64::from(rdata.virtual_address)).unwrap();
+        let pointer = u64::from_le_bytes(rdata_bytes[i..i + 8].try_into().unwrap());
+        assert_eq!(pointer, 0x1_4000_0000 + function, "slot {slot:#x}");
+    }
+    for i in 0..text_bytes.len().saturating_sub(5) {
+        if text_bytes[i] != 0xE8 && text_bytes[i] != 0xE9 {
+            continue;
+        }
+        let rel = i32::from_le_bytes(text_bytes[i + 1..i + 5].try_into().unwrap());
+        let reached = (base as i64 + i as i64 + 5 + i64::from(rel)) as u64;
+        assert!(
+            systems.iter().all(|&(_, function)| reached != function),
+            "{reached:#x} is reached directly from {:#x}",
+            base + i as u64
+        );
+    }
 
     // A required target's bytes changed: resolution fails closed.
     let mut tampered = text_bytes.to_vec();
