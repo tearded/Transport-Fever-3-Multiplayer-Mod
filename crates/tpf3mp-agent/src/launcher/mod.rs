@@ -908,12 +908,8 @@ async fn act(
             let generate_world = start_save
                 .as_deref()
                 .is_some_and(|save| save.trim().is_empty());
-            if generate_world {
-                shared.view().start_save = None;
-            }
-            if let Some(picked) = start_save.filter(|picked| !picked.trim().is_empty()) {
-                // Offered first next time.
-                shared.view().start_save = Some(picked.trim().to_owned());
+            if let Some(picked) = start_save.as_deref() {
+                shared.view().start_save = offered_start(picked);
             }
             renew_unused_link(&config.link, game, idle)?;
             begin_session(
@@ -1472,6 +1468,15 @@ fn names_start_again(room: &tpf3mp_proto::RoomView, picked: &str) -> bool {
             .is_some_and(|start| start.save.name.as_str() == picked)
 }
 
+/// The save the launcher offers first after the owner named `picked` for a
+/// room: that save, next time too; none for a new world, which the room's
+/// owner then sets up (the game's Multiplayer window offers Set up world
+/// instead of Ready while it names none).
+fn offered_start(picked: &str) -> Option<String> {
+    let picked = picked.trim();
+    (!picked.is_empty()).then(|| picked.to_owned())
+}
+
 async fn choose_start(
     shared: &Arc<Shared>,
     config: &LauncherConfig,
@@ -1508,10 +1513,7 @@ async fn choose_start(
         own_start(shared, file.as_deref())
     };
     let picked = picked.trim();
-    if !picked.is_empty() {
-        // Offered first next time.
-        shared.view().start_save = Some(picked.to_owned());
-    }
+    shared.view().start_save = offered_start(picked);
     info!(
         none = picked.is_empty(),
         "the owner picks the save the room starts from"
@@ -2541,6 +2543,17 @@ mod tests {
             (named.name.as_str(), named.map.as_str(), named.year),
             ("Güterzug", "dry", 1900)
         );
+    }
+
+    #[test]
+    fn a_new_world_picked_in_the_room_offers_no_save() {
+        // The window offers Set up world instead of Ready while the
+        // launcher offers no save: a new world picked after a save must
+        // not leave that save offered, or the owner readies a room with no
+        // world and its start waits for one the main menu cannot load.
+        assert_eq!(offered_start(" Güterzug "), Some("Güterzug".to_owned()));
+        assert_eq!(offered_start(""), None);
+        assert_eq!(offered_start("  "), None);
     }
 
     #[test]

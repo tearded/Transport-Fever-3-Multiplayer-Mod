@@ -165,7 +165,10 @@ for the time of the pick; the page reads them at each draw:
   (`savegame_react_util.SavegameCard`);
 - the list of saves starts with a **New world** tile
   (`tile_list_react_util.TileList`): the room then starts from a world the
-  game's New Game page makes;
+  game's New Game page makes. Picked in a room that had a save, the
+  launcher stops offering that save, so the room's page shows **Set up
+  world** instead of Ready: the owner cannot ready, nor start, a room
+  without a world;
 - its load (`app.loadGame`, after `app.setWaitForStartReadyGame`) takes
   the save and what the page holds for it (its mods, in the game's
   activation order, each with its name and source from the game's
