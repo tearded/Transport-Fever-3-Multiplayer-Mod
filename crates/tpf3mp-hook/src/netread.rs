@@ -1026,36 +1026,58 @@ pub fn read_part(
     let ms = |a: std::time::Instant, b: std::time::Instant| (b - a).as_secs_f64() * 1000.0;
     let t0 = std::time::Instant::now();
     let store = Store::new(memory, engine, image)?;
-    let edge_kind = store.kind(
-        layout::BASE_EDGE_POOL_VTABLE,
-        layout::BASE_EDGE_SIZE,
-        "BaseEdge",
-    )?;
-    let node_kind = store.kind(
-        layout::BASE_NODE_POOL_VTABLE,
-        layout::BASE_NODE_SIZE,
-        "BaseNode",
-    )?;
-    let config_kind = store.kind(
-        layout::BASE_NODE_CONFIG_POOL_VTABLE,
-        layout::BASE_NODE_CONFIG_SIZE,
-        "BaseNodeConfig",
-    )?;
-    let cons = store.kind(
-        layout::CONSTRUCTION_POOL_VTABLE,
-        layout::CONSTRUCTION_SIZE,
-        "Construction",
-    )?;
+    // Finding a type walks the pool table and reads each pool's head. Most
+    // scheduled batches read just one kind, so leave the other pools alone.
+    let edge_kind = kinds
+        .network()
+        .then(|| {
+            store.kind(
+                layout::BASE_EDGE_POOL_VTABLE,
+                layout::BASE_EDGE_SIZE,
+                "BaseEdge",
+            )
+        })
+        .transpose()?;
+    let node_kind = kinds
+        .junctions
+        .then(|| {
+            store.kind(
+                layout::BASE_NODE_POOL_VTABLE,
+                layout::BASE_NODE_SIZE,
+                "BaseNode",
+            )
+        })
+        .transpose()?;
+    let config_kind = kinds
+        .junctions
+        .then(|| {
+            store.kind(
+                layout::BASE_NODE_CONFIG_POOL_VTABLE,
+                layout::BASE_NODE_CONFIG_SIZE,
+                "BaseNodeConfig",
+            )
+        })
+        .transpose()?;
+    let cons = kinds
+        .constructions
+        .then(|| {
+            store.kind(
+                layout::CONSTRUCTION_POOL_VTABLE,
+                layout::CONSTRUCTION_SIZE,
+                "Construction",
+            )
+        })
+        .transpose()?;
     // One pass over the bits for the kinds read.
     let mut wanted: Vec<&Kind> = Vec::new();
-    if kinds.network() {
-        wanted.push(&edge_kind);
+    if let Some(kind) = edge_kind.as_ref() {
+        wanted.push(kind);
     }
-    if kinds.junctions {
-        wanted.push(&config_kind);
+    if let Some(kind) = config_kind.as_ref() {
+        wanted.push(kind);
     }
-    if kinds.constructions {
-        wanted.push(&cons);
+    if let Some(kind) = cons.as_ref() {
+        wanted.push(kind);
     }
     let mut lists = store.with_all(&wanted)?.into_iter();
     let mut next = |wanted: bool| {
@@ -1073,13 +1095,14 @@ pub fn read_part(
     let mut edges = Vec::new();
     let mut ends = Ends::default();
     if kinds.network() && !kinds.edges {
+        let edge_kind = edge_kind.as_ref().ok_or("no BaseEdge kind for network")?;
         // Only the ends junction rows name: an edge's nodes and network,
         // the front of its BaseEdge.
-        let found = located(&store, &edge_kind, &edge_ids)?;
+        let found = located(&store, edge_kind, &edge_ids)?;
         ends.reserve(found.len());
         each_element::<{ layout::EDGE_ROAD_TYPE + 4 }>(
             &store,
-            &edge_kind,
+            edge_kind,
             &found,
             |entity, _, edge| {
                 ends.insert(entity, edge_ends(edge, entity)?);
@@ -1087,13 +1110,14 @@ pub fn read_part(
             },
         )?;
     } else if kinds.network() {
-        let found = located(&store, &edge_kind, &edge_ids)?;
+        let edge_kind = edge_kind.as_ref().ok_or("no BaseEdge kind for network")?;
+        let found = located(&store, edge_kind, &edge_ids)?;
         if kinds.junctions {
             ends.reserve(found.len());
         }
         each_element::<{ layout::BASE_EDGE_SIZE }>(
             &store,
-            &edge_kind,
+            edge_kind,
             &found,
             |entity, at, edge| {
                 if kinds.edges {
@@ -1118,6 +1142,10 @@ pub fn read_part(
     let mut deferred = Vec::new();
     let mut nodes_seen = 0;
     if kinds.junctions {
+        let config_kind = config_kind
+            .as_ref()
+            .ok_or("no BaseNodeConfig kind for junctions")?;
+        let node_kind = node_kind.as_ref().ok_or("no BaseNode kind for junctions")?;
         let (mut j, configs, street_node) = junction_reader(&store, &ends)?;
         // Only nodes of the street or track network; their configuration's
         // and their place's index from one read of their list, in bunches;
@@ -1127,7 +1155,7 @@ pub fn read_part(
             .filter(|node| street_node.contains_key(node))
             .collect();
         let mut places = Vec::with_capacity(ours.len());
-        for (node, [config, place]) in store.locate(&ours, [&config_kind, &node_kind])? {
+        for (node, [config, place]) in store.locate(&ours, [config_kind, node_kind])? {
             if config.is_none() {
                 return Err(format!(
                     "entity {node} has the BaseNodeConfig bit but no BaseNodeConfig"
@@ -1140,7 +1168,7 @@ pub fn read_part(
         }
         nodes_seen = places.len();
         let mut in_part = Vec::new();
-        each_element::<{ layout::BASE_NODE_SIZE }>(&store, &node_kind, &places, |node, _, raw| {
+        each_element::<{ layout::BASE_NODE_SIZE }>(&store, node_kind, &places, |node, _, raw| {
             let p = j.keep_position(node, raw)?;
             if part_of(millimetres(p[0])?, millimetres(p[1])?, CELL_MM, n) == k {
                 in_part.push(node);
@@ -1160,9 +1188,12 @@ pub fn read_part(
     let mut constructions = Vec::new();
     let mut cons_seen = 0;
     if kinds.constructions {
-        let found = located(&store, &cons, &cons_ids)?;
+        let cons = cons
+            .as_ref()
+            .ok_or("no Construction kind for constructions")?;
+        let found = located(&store, cons, &cons_ids)?;
         cons_seen = found.len();
-        each_element::<{ layout::CONSTRUCTION_Y + 4 }>(&store, &cons, &found, |_, at, bytes| {
+        each_element::<{ layout::CONSTRUCTION_Y + 4 }>(&store, cons, &found, |_, at, bytes| {
             let (x, y) = (
                 f32_at(bytes, layout::CONSTRUCTION_X),
                 f32_at(bytes, layout::CONSTRUCTION_Y),
@@ -1925,6 +1956,7 @@ mod tests {
     struct Fake {
         blocks: BTreeMap<usize, Vec<u8>>,
         next: usize,
+        reads: std::cell::Cell<usize>,
     }
 
     impl Fake {
@@ -1932,6 +1964,7 @@ mod tests {
             Self {
                 blocks: BTreeMap::new(),
                 next: 0x10_0000,
+                reads: std::cell::Cell::new(0),
             }
         }
         fn alloc(&mut self, bytes: Vec<u8>) -> usize {
@@ -1947,6 +1980,7 @@ mod tests {
 
     impl Memory for Fake {
         fn read(&self, address: usize, len: usize) -> Option<Vec<u8>> {
+            self.reads.set(self.reads.get() + 1);
             let (base, block) = self.blocks.range(..=address).next_back()?;
             let start = address - base;
             block.get(start..start + len).map(<[u8]>::to_vec)
@@ -2365,6 +2399,93 @@ mod tests {
         id: usize,
         size: usize,
         elements: Vec<(usize, Vec<u8>)>,
+    }
+
+    #[test]
+    fn a_part_reads_only_the_component_pools_its_kind_needs() {
+        for (vtable, id, size, kinds) in [
+            (
+                layout::BASE_EDGE_POOL_VTABLE,
+                3,
+                layout::BASE_EDGE_SIZE,
+                Kinds {
+                    edges: true,
+                    junctions: false,
+                    constructions: false,
+                },
+            ),
+            (
+                layout::CONSTRUCTION_POOL_VTABLE,
+                66,
+                layout::CONSTRUCTION_SIZE,
+                Kinds {
+                    edges: false,
+                    junctions: false,
+                    constructions: true,
+                },
+            ),
+        ] {
+            let mut fake = Fake::new();
+            let engine = build(
+                &mut fake,
+                &[Spec {
+                    vtable,
+                    id,
+                    size,
+                    elements: Vec::new(),
+                }],
+                0,
+            );
+            let part = read_part(&fake, engine, IMAGE, 8, 0, kinds).unwrap();
+            assert!(part.edges.is_empty());
+            assert!(part.junctions.is_empty());
+            assert!(part.constructions.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_single_kind_part_does_one_pool_search_not_four() {
+        let mut fake = Fake::new();
+        let specs = [
+            (layout::BASE_EDGE_POOL_VTABLE, 3, layout::BASE_EDGE_SIZE),
+            (layout::BASE_NODE_POOL_VTABLE, 9, layout::BASE_NODE_SIZE),
+            (
+                layout::BASE_NODE_CONFIG_POOL_VTABLE,
+                70,
+                layout::BASE_NODE_CONFIG_SIZE,
+            ),
+            (
+                layout::CONSTRUCTION_POOL_VTABLE,
+                66,
+                layout::CONSTRUCTION_SIZE,
+            ),
+        ]
+        .map(|(vtable, id, size)| Spec {
+            vtable,
+            id,
+            size,
+            elements: Vec::new(),
+        });
+        let engine = build(&mut fake, &specs, 0);
+        for kinds in [
+            Kinds {
+                edges: true,
+                junctions: false,
+                constructions: false,
+            },
+            Kinds {
+                edges: false,
+                junctions: false,
+                constructions: true,
+            },
+        ] {
+            fake.reads.set(0);
+            read_part(&fake, engine, IMAGE, 8, 0, kinds).unwrap();
+            // Store head once; pool table and four pool heads once; the
+            // chosen pool's full head once. The old eager four searches
+            // made 29 reads of this fixture before scanning any entities.
+            assert_eq!(fake.reads.get(), 8);
+        }
     }
 
     /// An engine with the pools of `specs` and `entities` entities.

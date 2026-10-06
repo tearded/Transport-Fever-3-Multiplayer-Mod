@@ -3684,6 +3684,10 @@ Measured on build 40408, Sep's `tpf3mp_silver_ab_20261001` (5,852 edges,
 The finding of a batch is about 2 to 3 ms, mostly memory latency: one pass
 over the component bits and three or four scattered reads an object. The
 rest is the batch's rows.
+An edges-only or constructions-only batch now resolves only its own component
+pool. In the four-pool, empty-world test this removes three repeated pool
+table walks (29 memory reads before, 8 after). This is a read-count result,
+not a measured frame-time improvement.
 
 Earlier, a full read of both lanes at the checkpoint (the first form of
 this reader) took 26-30 ms on `MP_crash_1004` and moved a 40 to 90 ms
