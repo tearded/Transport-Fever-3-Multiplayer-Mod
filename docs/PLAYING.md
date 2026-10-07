@@ -214,6 +214,24 @@ never switches servers: an invite to a room on another server is refused,
 so friends who play elsewhere all set the same server here. The browser
 page (`--browser`) has the same setting, under **Settings: server**.
 
+### When TPF3-MP has several servers
+
+*This follows a second proposed change to the project's decisions (D12,
+2026-10-06), which the owner has yet to approve.* A release may come with
+more than one server, such as **EU** and **US**. Then, as long as you have
+not typed a server of your own in Settings:
+
+- the launcher connects to the server closest to you, the one with the
+  lowest ping, and Settings lists every server with its ping;
+- **Public rooms** shows the rooms of every server, each card with its
+  server and ping (`US · 110 ms`); a click joins it on its server;
+- a room you host goes to the closest server;
+- an invite code works whatever server its room is on: the launcher finds
+  it. An invite that names a server TPF3-MP does not list is refused.
+
+A server you type in Settings is played on alone, as before; **Reset to
+default** brings back all of them.
+
 ## Playing from the game's Multiplayer button
 
 Connecting, rooms, the lobby and chat are in the game. Everything you do

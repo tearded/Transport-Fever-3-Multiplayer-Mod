@@ -471,6 +471,9 @@ either.
    [DECISIONS.md](DECISIONS.md); under its proposed amendment players may
    change it in Settings). For the project's relay that is
    `tpf3mp.213-133-98-90.sslip.io:29470`, with `TPF3MP_SERVER_NAME` `EU`.
+   With more servers (D12's PROPOSED amendment of 2026-10-06, not
+   decided), also set `TPF3MP_SERVERS`; see
+   [More than one server](#more-than-one-server).
 5. **Rebuild the draft:** re-run the latest `release` run of `main` (in
    Actions), or promote a new commit to `main`. It stops, and makes no
    draft, while `TPF3MP_UPDATE_PUBLIC_KEY` or `TPF3MP_DEFAULT_SERVER` is
@@ -488,6 +491,46 @@ either.
 From then on, releasing again needs a version bump in `Cargo.toml`, on a
 feature branch like any change, and launchers of earlier versions update
 themselves once the new release is published and signed.
+
+
+## More than one server
+
+*Under D12's PROPOSED amendment of 2026-10-06 (DECISIONS.md), which the
+owner has yet to approve.* A release may list several operated servers,
+such as the project's relay in Europe and a second one in America.
+Launchers then show the public rooms of all of them, each with its server
+and ping, host new rooms on the closest, and find a room by its invite
+code on whichever server has it. The servers know nothing of each other.
+
+For each further server:
+
+1. **Deploy it as the first** ([First deployment](#first-deployment)),
+   with its own `invite.key`, data directory and admin token: nothing is
+   shared with the other servers. It must run the same release as them.
+2. **Give it a certificate from a public authority** for the name players
+   reach it by, as the relay has: Let's Encrypt for its host name (a
+   VPS's own name, or an sslip.io name of its address). Launchers trust
+   servers by the public authorities alone; a self-signed certificate is
+   refused. Open UDP 29470 (and TCP 443 for the tunnel, under
+   [Tunnels](#tunnels)), and check it from another machine with
+   `tpf3mp-agent connect <host>:29470`.
+3. **Add it to the repository variable `TPF3MP_SERVERS`** (Settings,
+   Secrets and variables, Actions, Variables): `NAME=host:port`, more
+   than one separated by commas, such as `US=<host>:29470`. Names are 1 to
+   24 letters, digits, spaces, dots or dashes, and are what players see.
+   The default server stays in `TPF3MP_DEFAULT_SERVER` and
+   `TPF3MP_SERVER_NAME`, and is listed first. The release workflow refuses
+   an entry that does not read.
+4. **Release**: only packages built with the variable know the server.
+   Launchers of earlier releases keep playing on the default server alone.
+
+A server that is down is passed over: rooms are hosted on the others and
+its rooms are missing from the list until it answers again (launchers
+look again every 30 seconds). Each connected launcher holds one quiet
+session on every listed server, so every server's session count includes
+the players connected to the others; they join no room there and send no
+diagnostics. Taking a server off the list takes a release; until then,
+launchers find it down.
 
 ## Releases
 
@@ -531,6 +574,10 @@ distributions with an older C library too.
   the relay's (Let's Encrypt, for its sslip.io name) is; `--pin-cert` is
   for development servers. The packages also
   carry `PLAYING.md`.
+- **More servers.** `TPF3MP_SERVERS`, empty by default, lists the
+  release's other servers as `NAME=host:port` separated by commas, such
+  as `US=us.example.org:29470`; see
+  [More than one server](#more-than-one-server).
 - **Updates.** The launcher installs a release only if it is signed with
   a key it trusts. Whoever holds that key can run code on every player's
   machine, so it lives where no branch or workflow but one can read it,

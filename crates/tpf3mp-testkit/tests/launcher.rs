@@ -139,6 +139,7 @@ fn launcher_config(
         server_fixed: false,
         default_server: None,
         server_name: None,
+        servers: Vec::new(),
         tunnel: TunnelChoice::Off,
         remember: None,
         trust: trust.clone(),

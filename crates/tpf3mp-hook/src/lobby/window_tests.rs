@@ -1550,6 +1550,8 @@ fn public_room(name: &str, map: &str, players: u8, password: bool) -> LobbyPubli
         year: 1873,
         companies: 2,
         competitive: false,
+        server: Text::new("").unwrap(),
+        ping_ms: 0,
     }
 }
 
@@ -1559,6 +1561,7 @@ fn browsing(rooms: Vec<LobbyPublicRoom>, page: u16, more: bool) -> LobbyView {
             page,
             rooms: BoundedVec::new(rooms).unwrap(),
             more,
+            servers: BoundedVec::empty(),
         }),
         ..online()
     }
@@ -2305,6 +2308,60 @@ fn a_rooms_play_style_shows_in_the_room_and_the_list() {
     call(&lua, "render", "join");
     let text: String = cards(&lua)[0].get("text").unwrap();
     assert!(text.contains("Competitive"), "{text}");
+}
+
+#[test]
+fn rooms_from_several_servers_show_their_server_and_ping() {
+    let lua = menu();
+    let mut near = public_room("Near", "dry", 2, false);
+    near.server = Text::new("EU").unwrap();
+    near.ping_ms = 24;
+    let mut far = public_room("Far away", "temperate", 1, false);
+    far.server = Text::new("US").unwrap();
+    far.ping_ms = 110;
+    let mut view = browsing(vec![near, far], 0, false);
+    view.rooms.as_mut().unwrap().servers = BoundedVec::new(vec![
+        tpf3mp_bridge::LobbyServer {
+            name: Text::new("EU").unwrap(),
+            ping_ms: 24,
+            here: true,
+            reachable: true,
+        },
+        tpf3mp_bridge::LobbyServer {
+            name: Text::new("US").unwrap(),
+            ping_ms: 110,
+            here: false,
+            reachable: true,
+        },
+    ])
+    .unwrap();
+    show(&lua, Some(&view));
+    open(&lua, Some("join"));
+    call(&lua, "tick", ());
+    let shown = cards(&lua);
+    let text: String = shown[1].get("text").unwrap();
+    assert!(text.contains("US · 110 ms"), "{text}");
+    let detail: String = shown[0].get("tooltip").unwrap();
+    assert!(detail.contains("On EU · 24 ms"), "{detail}");
+    let all = texts(&lua);
+    assert!(
+        all.contains("Public rooms on EU (24 ms) and US (110 ms)"),
+        "{all}"
+    );
+    // A room joins by its invite alone: the launcher knows its server.
+    shown[1]
+        .get::<Function>("click")
+        .unwrap()
+        .call::<()>(())
+        .unwrap();
+    call(&lua, "render", ());
+    assert_eq!(
+        sent(&lua),
+        [LobbyAction::Join {
+            invite: Text::new("INV8").unwrap(),
+            password: None,
+        }]
+    );
 }
 
 #[test]

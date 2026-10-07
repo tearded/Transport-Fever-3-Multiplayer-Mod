@@ -206,8 +206,14 @@ function renderServerSetting(s) {
     $("server-setting").value = s.server || "";
   }
   $("server-setting").placeholder = s.server_default || "host:port";
-  const onDefault = !!s.server && sameServer(s.server, s.server_default);
-  text($("server-setting-line"), !s.server ? "No server is set: type one below."
+  // On the release's several servers (D12's proposed amendment of
+  // 2026-10-06) the launcher is on its default wherever it plays.
+  const listed = s.servers || [];
+  const onDefault = listed.length > 0 || (!!s.server && sameServer(s.server, s.server_default));
+  text($("server-setting-line"), listed.length > 0
+    ? "You play on TPF3-MP's servers: " + serversLine(listed) + ". Rooms you host go to the"
+      + " closest, and the room list shows the rooms of all of them."
+    : !s.server ? "No server is set: type one below."
     : onDefault ? "You play on " + (s.server_name ? s.server_name + " (" + s.server + ")" : s.server)
       + ", the default server."
     : "You play on " + s.server + ".");
@@ -218,10 +224,20 @@ function renderServerSetting(s) {
   const free = !s.room;
   $("server-apply").disabled = !free || !typed || !!problem || sameServer(typed, s.server);
   $("server-reset").disabled = !free || !s.server_default || onDefault;
-  text($("server-setting-note"), free
-    ? "Changing the server disconnects you and connects to the new one. Invites join rooms on your"
-      + " server only: to play with friends on another server, all of you set the same one here."
-    : "Leave the room to change the server.");
+  text($("server-setting-note"), !free ? "Leave the room to change the server."
+    : listed.length > 0
+    ? "Invites join rooms on any of TPF3-MP's servers. A server typed here is played on alone, and"
+      + " only its rooms are joined; Reset to default comes back to all of them."
+    : "Changing the server disconnects you and connects to the new one. Invites join rooms on your"
+      + " server only: to play with friends on another server, all of you set the same one here.");
+}
+
+// The release's servers with their pings, as "EU · 24 ms (you are here),
+// US · 110 ms".
+function serversLine(listed) {
+  return listed.map(server => server.name
+    + (!server.reachable ? " · not answering" : server.ping_ms != null ? " · " + server.ping_ms + " ms" : "")
+    + (server.here ? " (you are here)" : "")).join(", ");
 }
 
 function show(id, visible) { $(id).classList.toggle("hidden", !visible); }

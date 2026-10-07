@@ -883,7 +883,7 @@ impl LobbyState {
                 ));
                 for room in list.rooms.iter() {
                     out.push_str(&format!(
-                        " {{ invite = {}, name = {}, rules = {}, players = {}, max_players = {}, has_password = {}, running = {}, map = {}, year = {}, companies = {}, competitive = {} }},",
+                        " {{ invite = {}, name = {}, rules = {}, players = {}, max_players = {}, has_password = {}, running = {}, map = {}, year = {}, companies = {}, competitive = {}, server = {}, ping = {} }},",
                         lua_str(room.invite.as_str()),
                         lua_str(room.name.as_str()),
                         lua_str(room.rules.as_str()),
@@ -894,7 +894,20 @@ impl LobbyState {
                         lua_str(room.map.as_str()),
                         room.year,
                         room.companies,
-                        room.competitive
+                        room.competitive,
+                        lua_str(room.server.as_str()),
+                        room.ping_ms
+                    ));
+                }
+                // The release's servers, when the list has several's rooms.
+                out.push_str(" }, servers = {");
+                for server in list.servers.iter() {
+                    out.push_str(&format!(
+                        " {{ name = {}, ping = {}, here = {}, reachable = {} }},",
+                        lua_str(server.name.as_str()),
+                        server.ping_ms,
+                        server.here,
+                        server.reachable
                     ));
                 }
                 out.push_str(" } }");
@@ -1371,6 +1384,15 @@ mod tests {
                     year: 1850,
                     companies: 1,
                     competitive: false,
+                    server: Text::new("EU").unwrap(),
+                    ping_ms: 24,
+                }])
+                .unwrap(),
+                servers: BoundedVec::new(vec![tpf3mp_bridge::LobbyServer {
+                    name: Text::new("EU").unwrap(),
+                    ping_ms: 24,
+                    here: true,
+                    reachable: true,
                 }])
                 .unwrap(),
             }),

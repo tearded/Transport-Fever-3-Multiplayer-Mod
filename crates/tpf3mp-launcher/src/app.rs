@@ -1387,6 +1387,9 @@ impl<B: Backend> LauncherApp<B> {
             ui.add_space(10.0);
             let note = if state.room.is_some() {
                 "Leave the room to change the server."
+            } else if !state.servers.is_empty() {
+                "Invites join rooms on any of TPF3-MP's servers. A server typed here is played on \
+                 alone, and only its rooms are joined; Reset to default comes back to all of them."
             } else {
                 "Changing the server disconnects you and connects to the new one. Invites join \
                  rooms on your server only: to play with friends on another server, all of you \
@@ -1852,7 +1855,10 @@ impl ServerSetting {
                 && !typed.is_empty()
                 && problem.is_none()
                 && !state.server.as_deref().is_some_and(|now| same(now, typed)),
+            // On the release's servers the launcher is on its default
+            // already, wherever it plays.
             can_reset: free
+                && state.servers.is_empty()
                 && state.server_default.as_deref().is_some_and(|default| {
                     !state
                         .server
@@ -1864,8 +1870,36 @@ impl ServerSetting {
     }
 }
 
+/// The release's servers, with their pings, as "EU · 24 ms (you are
+/// here), US · 110 ms"; `None` when the launcher plays on one server.
+pub fn servers_line(state: &State) -> Option<String> {
+    if state.servers.is_empty() {
+        return None;
+    }
+    let named: Vec<String> = state
+        .servers
+        .iter()
+        .map(|server| {
+            let ping = match (server.reachable, server.ping_ms) {
+                (false, _) => " · not answering".to_owned(),
+                (true, Some(ms)) => format!(" · {ms} ms"),
+                (true, None) => String::new(),
+            };
+            let here = if server.here { " (you are here)" } else { "" };
+            format!("{}{ping}{here}", server.name)
+        })
+        .collect();
+    Some(named.join(", "))
+}
+
 /// What the server setting says of the server played on.
 pub fn server_setting_line(state: &State) -> String {
+    if let Some(servers) = servers_line(state) {
+        return format!(
+            "You play on TPF3-MP's servers: {servers}. Rooms you host go to the closest, and \
+             the room list shows the rooms of all of them."
+        );
+    }
     let Some(server) = &state.server else {
         return "No server is set: type one below.".to_owned();
     };

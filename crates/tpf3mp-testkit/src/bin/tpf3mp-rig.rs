@@ -268,6 +268,7 @@ async fn run(args: Args) -> Result<ExitCode> {
             server_fixed: true,
             default_server: Some(server.clone()),
             server_name: None,
+            servers: Vec::new(),
             trust: trust.clone(),
             identity,
             name: name.clone(),

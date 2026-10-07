@@ -120,6 +120,10 @@ struct AutoRoom {
 const DEFAULT_SERVER: Option<&str> = option_env!("TPF3MP_DEFAULT_SERVER");
 /// What players see of that server, such as EU, set when it is built.
 const SERVER_NAME: Option<&str> = option_env!("TPF3MP_SERVER_NAME");
+/// The package's other servers, as `NAME=host:port` separated by commas,
+/// set when it is built (D12's PROPOSED amendment of 2026-10-06). Without
+/// it, the package plays on its default server alone, as before.
+const MORE_SERVERS: Option<&str> = option_env!("TPF3MP_SERVERS");
 
 /// The launcher's default server and its name: the ones the package was
 /// built with (`built`, `named`), else the project's relay, named
@@ -149,6 +153,12 @@ fn main() -> ExitCode {
         if args.launcher.server_name.is_none() {
             args.launcher.server_name = name;
         }
+    }
+    if args.launcher.more_servers.is_none() {
+        args.launcher.more_servers = MORE_SERVERS
+            .map(str::trim)
+            .filter(|list| !list.is_empty())
+            .map(str::to_owned);
     }
     let logs = logs::dir().ok();
     // The log's lines also wait here to go to the server, redacted.

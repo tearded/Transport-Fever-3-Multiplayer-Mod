@@ -137,7 +137,10 @@ A room has a name, an owner, a player limit, settings, members, and a phase:
   whether it has a password, its phase and its listing: a public room's
   invite is for anyone to join with, and its password still guards it. A
   private room is never listed, and its invite never leaves the server
-  but as the answer to its creator. The server keeps a public room's
+  but as the answer to its creator. A launcher on a release's several
+  servers (DECISIONS.md, D12's PROPOSED amendment of 2026-10-06) asks
+  each server for its list on a connection of its own and merges them;
+  servers know nothing of each other, and the protocol is unchanged. The server keeps a public room's
   invite in memory only: a room restored after a restart is private. A
   public room nobody is connected to is not listed while it waits out its
   grace period. The owner updates the listing with `DescribeRoom(RoomListing)`, such as the

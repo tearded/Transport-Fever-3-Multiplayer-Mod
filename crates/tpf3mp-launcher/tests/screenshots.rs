@@ -19,7 +19,7 @@ use eframe::egui;
 use egui_kittest::{Harness, kittest::Queryable};
 use tpf3mp_agent::launcher::{
     Action, ChatLine, Connection, Differences, Game, InstalledGame, Member, MemberContent, Phase,
-    Room, RulesChoice, State, World,
+    Room, RulesChoice, ServerRow, State, World,
 };
 use tpf3mp_launcher::{
     app::{Extras, LauncherApp, Shown},
@@ -299,6 +299,31 @@ fn screens() {
     render_clicking(
         "9-settings",
         connected(),
+        0.0,
+        Some("Settings"),
+        Place::Launcher,
+    );
+    // A release with several servers (D12's proposed amendment of
+    // 2026-10-06): the setting names each with its ping.
+    render_clicking(
+        "9b-settings-servers",
+        State {
+            servers: vec![
+                ServerRow {
+                    name: "EU".into(),
+                    ping_ms: Some(24),
+                    here: true,
+                    reachable: true,
+                },
+                ServerRow {
+                    name: "US".into(),
+                    ping_ms: Some(108),
+                    here: false,
+                    reachable: true,
+                },
+            ],
+            ..connected()
+        },
         0.0,
         Some("Settings"),
         Place::Launcher,
