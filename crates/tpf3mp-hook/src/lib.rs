@@ -44,6 +44,7 @@ pub mod emission;
 pub mod fastindex;
 pub mod guiplayer;
 pub mod image;
+pub mod industries;
 mod install;
 pub mod junctions;
 pub mod lanedump;

@@ -1,0 +1,15 @@
+{
+    "authors": [
+        {
+            "name": "TPF3-MP recon",
+            "role": "CREATOR"
+        }
+    ],
+    "description": "Test-only world mutation. When explicitly enabled with TPF3MP_INDUSTRY_FIXTURE=1 and TPF3MP_INDUSTRY_FIXTURE_UPDATE, appends one previously missing valid cargo demand to the lowest-ID town at that exact simulation update. Installs no production behavior and is not ordinary-play acceptance.",
+    "name": "TPF3-MP probe: controlled industry demand",
+    "summary": "Controlled, opt-in industry-demand trigger for local replica tests. Test only.",
+    "tags": [
+        "Script Mod"
+    ],
+    "url": "https://github.com/Juliansgith/Transport-Fever-3-Multiplayer-Mod"
+}

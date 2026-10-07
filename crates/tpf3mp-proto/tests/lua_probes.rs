@@ -15,7 +15,12 @@ use std::{
 use mlua::Lua;
 
 const FAKE_GUI: &str = include_str!("lua/fake_gui.lua");
-const PROBES: [&str; 3] = ["tpf3mp_apidump_1", "tpf3mp_rundump_1", "tpf3mp_detprobe_1"];
+const PROBES: [&str; 4] = [
+    "tpf3mp_apidump_1",
+    "tpf3mp_rundump_1",
+    "tpf3mp_detprobe_1",
+    "tpf3mp_industryfixture_1",
+];
 
 fn tf3_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/probe/tf3")
@@ -585,4 +590,206 @@ fn the_lanes_read_tpf2s_shape_too() {
     TPF2_WORLD.with(|flag| flag.set(false));
     let first = samples.values().next().unwrap_or_else(|| panic!("{log}"));
     assert!(!first.contains("=err"), "{first}");
+}
+
+const INDUSTRY_WORLD: &str = r#"
+local CT = { GAME_TIME = 1, TOWN = 2 }
+local LU = { RESIDENTIAL = 0, COMMERCIAL = 1, INDUSTRIAL = 2 }
+TEST = {
+    update = 9,
+    ids = { 20, 10 },
+    towns = {
+        [10] = { cargoNeeds = { { { 200, 1.0 } }, { { 80, 1.0 } }, { { 90, 1.0 } } } },
+        [20] = { cargoNeeds = { {}, {}, {} } },
+    },
+    cargos = { [300] = true, [200] = true, [100] = true },
+    cargoById = {
+        [100] = { category = "food" },
+        [200] = { category = "food" },
+        [300] = { category = "fuel" },
+    },
+    commands = {},
+    log = {},
+}
+os = { getenv = function(key) return FIXTURE_ENV[key] end }
+function debugPrint(message) TEST.log[#TEST.log + 1] = message end
+tpf3mp_native = { log = function(message) TEST.log[#TEST.log + 1] = message end }
+api = {
+    type = { ComponentType = CT, ["enum"] = { LandUseType = LU } },
+    engine = {
+        util = {
+            getWorld = function() return 0 end,
+            stock = { isCargoTypeCurrentlyProduced = function() return true end },
+        },
+        forEachEntityWithComponent = function(callback, component)
+            assert(component == CT.TOWN)
+            for _, entity in ipairs(TEST.ids) do callback(entity) end
+        end,
+        getComponent = function(entity, component)
+            if component == CT.GAME_TIME then return { updateCount = TEST.update } end
+            if component == CT.TOWN then return TEST.towns[entity] end
+            return nil
+        end,
+    },
+    res = {
+        getBaseConfig = function() return { economyId = 1 } end,
+        economyRep = {
+            find = function(id) assert(id == 1); return 7 end,
+            get = function(index)
+                assert(index == 7)
+                return { cargoCategories = {
+                    food = { landUses = { 0 } },
+                    fuel = { landUses = { 1 } },
+                } }
+            end,
+        },
+        cargoTypeRep = {
+            getAll = function() return TEST.cargos end,
+            get = function(id) return TEST.cargoById[id] end,
+        },
+    },
+    cmd = {
+        makeTownUpdateCargoNeedsCmd = function(town, needs, update_buildings)
+            return { kind = "needs", town = town, needs = needs, updateBuildings = update_buildings }
+        end,
+        makeScriptingSendEventCmd = function(player, channel, event, payload)
+            return { kind = "event", player = player, channel = channel, event = event, payload = payload }
+        end,
+        sendCommand = function(command) TEST.commands[#TEST.commands + 1] = command end,
+    },
+}
+"#;
+
+fn industry_fixture(enabled: bool, target_update: Option<&str>) -> Lua {
+    let lua = Lua::new();
+    let env = lua.create_table().unwrap();
+    if enabled {
+        env.set("TPF3MP_INDUSTRY_FIXTURE", "1").unwrap();
+    }
+    if let Some(target) = target_update {
+        env.set("TPF3MP_INDUSTRY_FIXTURE_UPDATE", target).unwrap();
+    }
+    lua.globals().set("FIXTURE_ENV", env).unwrap();
+    lua.load(INDUSTRY_WORLD)
+        .set_name("@industry-world")
+        .exec()
+        .unwrap();
+    let source = std::fs::read_to_string(
+        tf3_dir()
+            .join("tpf3mp_industryfixture_1")
+            .join("content/tpf3mp_industryfixture/industry_fixture.script.lua"),
+    )
+    .unwrap();
+    lua.load(&source)
+        .set_name("@industry_fixture.script.lua")
+        .exec()
+        .unwrap();
+    lua.load("INDUSTRY_FIXTURE = data()").exec().unwrap();
+    lua
+}
+
+#[test]
+fn industry_fixture_is_opt_in_exact_step_and_appends_deterministically() {
+    let disabled = industry_fixture(false, Some("10"));
+    disabled
+        .load("TEST.update = 10; INDUSTRY_FIXTURE.update()")
+        .exec()
+        .unwrap();
+    assert_eq!(
+        disabled
+            .load("return #TEST.commands")
+            .eval::<usize>()
+            .unwrap(),
+        0
+    );
+
+    let lua = industry_fixture(true, Some("10"));
+    lua.load(
+        r#"
+        INDUSTRY_FIXTURE.update()
+        assert(#TEST.commands == 0, "must wait for the requested update")
+        TEST.update = 10
+        INDUSTRY_FIXTURE.update()
+        assert(#TEST.commands == 2, "send the update and its matching event")
+        local update, event = TEST.commands[1], TEST.commands[2]
+        assert(update.kind == "needs" and update.town == 10)
+        assert(update.updateBuildings == true)
+        assert(#update.needs == 3)
+        assert(#update.needs[1] == 2 and update.needs[1][1] == 200 and update.needs[1][2] == 100)
+        assert(#update.needs[2] == 1 and update.needs[2][1] == 80)
+        assert(#update.needs[3] == 1 and update.needs[3][1] == 90)
+        assert(event.kind == "event" and event.player == "")
+        assert(event.channel == "Towns" and event.event == "NewCargoTypeDemand")
+        TEST.update = 11
+        INDUSTRY_FIXTURE.update()
+        assert(#TEST.commands == 2, "fire at most once")
+        "#,
+    )
+    .exec()
+    .unwrap();
+}
+
+#[test]
+fn industry_fixture_fails_closed_on_missing_target_or_unknown_world_shape() {
+    let missing_target = industry_fixture(true, None);
+    missing_target
+        .load("TEST.update = 9; INDUSTRY_FIXTURE.update()")
+        .exec()
+        .unwrap();
+    assert_eq!(
+        missing_target
+            .load("return #TEST.commands")
+            .eval::<usize>()
+            .unwrap(),
+        0
+    );
+
+    let missed_update = industry_fixture(true, Some("10"));
+    missed_update
+        .load("TEST.update = 11; INDUSTRY_FIXTURE.update()")
+        .exec()
+        .unwrap();
+    assert_eq!(
+        missed_update
+            .load("return #TEST.commands")
+            .eval::<usize>()
+            .unwrap(),
+        0
+    );
+
+    let malformed = industry_fixture(true, Some("10"));
+    malformed
+        .load(
+            r#"
+            TEST.towns[10].cargoNeeds = { {}, {}, [4] = {} }
+            TEST.update = 10
+            INDUSTRY_FIXTURE.update()
+            assert(#TEST.commands == 0)
+            "#,
+        )
+        .exec()
+        .unwrap();
+    let log: String = malformed
+        .load("return table.concat(TEST.log, '\\n')")
+        .eval()
+        .unwrap();
+    assert!(log.contains("cargoNeeds"), "{log}");
+
+    let ambiguous = industry_fixture(true, Some("10"));
+    ambiguous
+        .load(
+            r#"
+            api.res.economyRep.get = function()
+                return { cargoCategories = {
+                    food = { landUses = { 0, 1 } },
+                    fuel = { landUses = { 1, 2 } },
+                } }
+            end
+            TEST.update = 10
+            INDUSTRY_FIXTURE.update()
+            assert(#TEST.commands == 0)
+            "#,
+        )
+        .exec()
+        .unwrap();
 }

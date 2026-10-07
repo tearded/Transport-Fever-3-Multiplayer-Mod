@@ -1,0 +1,61 @@
+# Optional read-only industry-demand diagnostics for the exact 40408 build.
+# This is separate from hooks.toml: the release hook works without these
+# targets, and the 40418 Preview bundle is not claimed to contain them.
+name = "Transport Fever 3 Build 40408 (Steam, Windows x64)"
+image_base = 0x140000000
+region = ".text"
+
+[build]
+sha256 = "de1daad3a13f3b7e9f79903361bb43769cf4f15e59271a263aefe1f075f23ef2"
+size = 69711288
+pe_timestamp = 0x6AB69FE5
+
+# Seed splice at sub_150310+0x13d, after the four GameTime bytes were
+# folded into FNV-1a in rdi. It preserves the following instructions.
+[[target]]
+name = "industry spawn seed"
+signature = "4C 8B 46 08 48 8B 16 48 8D 8C 24 A0 00 00 00"
+offset = 0
+prologue = "4C 8B 46 08 48 8B 16"
+required = true
+
+[[target]]
+name = "industry candidate loop"
+signature = "C6 44 24 70 00 44 8B CF 4D 8B C5 48 8D 55 50"
+offset = 0
+prologue = "C6 44 24 70 00 44 8B CF"
+required = true
+
+# The call at sub_158cb0+0x153 invokes sub_14fc50, which checks the cargo's
+# industry-closed log entry; this records its one-byte result unchanged.
+[[target]]
+name = "industry candidate gate result"
+signature = "48 89 8D B0 00 00 00 48 89 9D B8 00 00 00 48 8D 8D B0 00 00 00"
+offset = 0
+prologue = "48 89 8D B0 00 00 00"
+required = true
+
+# After sub_8ed760 returns, the stack result is an entity ID or -1.
+[[target]]
+name = "industry emitted entity"
+signature = "8B 5D 84 83 FB FF 0F 84 36 04 00 00"
+offset = 0
+prologue = "8B 5D 84 83 FB FF"
+required = true
+
+# Immediately after its lambda returns, emit one bounded record.
+[[target]]
+name = "industry spawn callback end"
+signature = "E8 ?? ?? ?? ?? 90 48 8B 9C 24 B0 00 00 00 48 85 DB 74 ??"
+offset = 5
+prologue = "90 48 8B 9C 24 B0 00 00 00"
+required = true
+
+# The two MSVC std::string lookup keys start at RDX and RDX+0x20;
+# unchanged EAX is the free target capacity (-1 when absent).
+[[target]]
+name = "GetFreeTargetCapacity"
+signature = "48 89 74 24 20 41 56 48 83 EC 20 48 83 7A 30 00"
+offset = 0
+prologue = "48 89 74 24 20 41 56 48 83 EC 20 48 83 7A 30 00"
+required = true

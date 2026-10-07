@@ -702,6 +702,11 @@ fn install_inner(profile: &Profile, link_name: &str) -> Result<u64, String> {
     };
     let resolved = profile::resolve(profile, code, u64::from(text.virtual_address))
         .map_err(|refusal| format!("the profile does not resolve here: {refusal:?}"))?;
+    // Scan the opt-in diagnostic sites before installing any hook patches.
+    // They are pinned to 40408 and do not extend the release profile shared
+    // with the independently verified Preview build.
+    let industry_probe =
+        crate::industries::resolve_probe(profile, code, u64::from(text.virtual_address));
     let step_rva = resolved
         .get(STEP_TARGET)
         .ok_or_else(|| format!("the profile has no {STEP_TARGET}"))?
@@ -921,6 +926,18 @@ fn install_inner(profile: &Profile, link_name: &str) -> Result<u64, String> {
     }
     for outcome in crate::order::install(&absolute) {
         log_line(&outcome.to_string());
+    }
+    match industry_probe {
+        Ok(Some(mut diagnostic)) => {
+            for target in &mut diagnostic.targets {
+                target.address = target.address.saturating_add(base as u64);
+            }
+            for line in crate::industries::install(&diagnostic) {
+                log_line(&line);
+            }
+        }
+        Ok(None) => {}
+        Err(error) => log_line(&format!("industry-spawn probe: off; {error}")),
     }
     log_line(&crate::townfield::install(&absolute));
     log_line(&crate::probe::install(&absolute));

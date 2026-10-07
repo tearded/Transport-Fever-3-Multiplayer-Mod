@@ -4679,6 +4679,32 @@ Unknown map key types or pre-existing metatables are refused. Native
 validation and its current limits are recorded in
 `investigation/TPF3_ROAD_TERMINALS_2026-10-01.md`.
 
+### Automatic industry spawn probe
+
+Steam build 40408 has a separate native demand-spawn path. For a local
+diagnostic run only, set `TPF3MP_HOOK_TRACE_INDUSTRIES=1` in the launcher's
+environment. The exact-build hook then records each demand callback's native
+GameTime and FNV-1a seed, both target-capacity key strings and the unchanged
+capacity result, candidate/resource loop order and its `industry_closed_`
+gate result, and each returned industry entity ID (`-1` means no entity was
+emitted). A `?` marks an input that failed the bounded memory/layout check.
+The entity ID can be matched to the industry/construction lanes to inspect
+the resulting placement.
+
+This is a read-only diagnostic: it never changes native values or sends the
+records to the room. The game-thread callbacks copy fixed-size records into a
+64-entry queue; a separate logger thread formats and writes them. The probe
+records at most 32 loop candidates per callback and 512 callbacks per game;
+queue overflow is reported explicitly. Its six signatures live in a separate
+compiled 40408-only diagnostic profile, leaving the release targets and the
+40418 Preview coverage contract unchanged. The probe enables only on an exact
+`TPF3MP_HOOK_TRACE_INDUSTRIES=1` opt-in and when every site resolves before
+the ordinary hooks patch the image. Any splice mismatch rolls back the detour
+and earlier splices. The capacity
+detour also checks its compiled 40408 entry bytes before installation, so a
+shadow profile cannot redirect that name to a function with another ABI. With
+the switch unset, the probe installs nothing.
+
 The native collection fixes below were ported with the seeds, from the
 same commits. Their original static analysis follows; later real-game
 results are recorded in `investigation/TPF3_ROAD_TERMINALS_2026-10-01.md`.
