@@ -2677,6 +2677,7 @@ mod tests {
             server_fixed: false,
             default_server: None,
             server_name: None,
+            servers: Vec::new(),
             trust: ServerTrust::WebPki,
             identity: Arc::new(identity),
             name: "renderer recovery test".into(),
