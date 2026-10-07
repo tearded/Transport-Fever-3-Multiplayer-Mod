@@ -126,6 +126,24 @@ pub(crate) fn update_count_now() -> Option<u32> {
         .map(|c| c.update_count)
 }
 
+/// The `CGameTime` the game's step running now called its speed getter on,
+/// 0 outside the step ([`crate::netread`]).
+pub(crate) fn game_time_now() -> usize {
+    GAME_TIME.load(Ordering::Acquire)
+}
+
+/// The thread running the game's step now, if it runs.
+static STEP_THREAD: Mutex<Option<std::thread::ThreadId>> = Mutex::new(None);
+
+/// Whether this thread is the one running the game's step, inside it: the
+/// only place the engine may be read natively ([`crate::netread`]), as
+/// nothing changes it beside the step's own work on its own thread then.
+/// The mod's game script's `postUpdate` runs there (build 40408: its
+/// `update` runs on the game's pool of threads).
+pub(crate) fn on_step_thread() -> bool {
+    *STEP_THREAD.lock().unwrap_or_else(PoisonError::into_inner) == Some(std::thread::current().id())
+}
+
 /// Writes `line` to the hook's log, if it has one.
 pub(crate) fn log_line(line: &str) {
     if let Some(log) = LOG.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
@@ -418,8 +436,10 @@ unsafe fn run_step(
     // The free-id trace learns which engine this game simulates.
     crate::persons::freed_ids::trace::note_step(this as u64, room);
     crate::order::set_in_step(true);
+    *STEP_THREAD.lock().unwrap_or_else(PoisonError::into_inner) = Some(std::thread::current().id());
     // SAFETY: the caller's.
     unsafe { original(this, a, b, c) };
+    *STEP_THREAD.lock().unwrap_or_else(PoisonError::into_inner) = None;
     crate::order::set_in_step(false);
     if let Some(started) = started {
         let nanos = crate::perf::nanos_since(started);

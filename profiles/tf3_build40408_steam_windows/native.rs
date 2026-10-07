@@ -14,6 +14,7 @@ pub mod guiplayer;
 pub mod junctions;
 pub mod menu;
 pub mod modules;
+pub mod netread;
 pub mod network;
 pub mod order;
 pub mod persons;
