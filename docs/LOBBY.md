@@ -246,7 +246,10 @@ talks to mod.io (D28 proposed):
   nothing. An answer this mod cannot read fails too, instead of waiting.
 
 A mod not from Mod Hub cannot be installed from the lobby: its tile says to
-ask the owner where to get it.
+ask the owner where to get it. Native mods (more than Lua, such as Big Maps)
+would be installed from the project's signed index instead, in one click and
+never from another player ([NATIVE_MODS.md](NATIVE_MODS.md), "In a room";
+proposed D29, not built in the lobby yet).
 
 ## The build profile
 

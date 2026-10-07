@@ -388,6 +388,13 @@ Dev B:
   room's world loaded with the room's mods and the player's own, and the
   personal mods' guard for game-script mods. Tick once the two-player test
   in MODS.md passes in the real game, and its measurements are made.
+- [ ] *Added (D29, proposed, for the owner):* native mods (more than Lua,
+  such as Big Maps) installed by the launcher from the project's signed
+  index, enabled in the hook only for their pinned build, and in a room
+  part of its terms ([NATIVE_MODS.md](NATIVE_MODS.md)). Built on
+  `feat/native-mod-index`: the index, the installer and its registry, the
+  hook's plan. Open: the key and signing workflow, the launcher's page,
+  the room's terms on the wire.
 
 Dev C:
 

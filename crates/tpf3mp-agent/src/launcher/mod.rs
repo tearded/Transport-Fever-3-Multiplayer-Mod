@@ -1370,6 +1370,11 @@ async fn launch_game(
     if session.is_none() {
         renew_unused_link(&config.link, game, idle)?;
     }
+    // The native mods the player enabled, for this build (proposed D29).
+    let native_mods = match setup::data_dir() {
+        Ok(data) => crate::native_mods::game_env(&data, &exe)?,
+        Err(_) => None,
+    };
     let launch = tpf3mp_launch::Launch {
         exe,
         args: Vec::new(),
@@ -1382,6 +1387,7 @@ async fn launch_game(
             ),
         ]
         .into_iter()
+        .chain(native_mods)
         .chain(config.game_env.iter().cloned())
         .collect(),
         ready_wait: tpf3mp_launch::HOOK_READY_WAIT,

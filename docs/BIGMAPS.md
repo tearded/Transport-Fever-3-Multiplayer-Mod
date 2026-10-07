@@ -378,6 +378,10 @@ derived (`WorldModel::TPF2_BUILD_35924`), until TF3's are measured.
 | The minimap | [MINIMAP.md](MINIMAP.md): a script mod on TF3. |
 | Terrain cache compression, dedup, lazy zeroing, the SSE2 terrain paths, generator buffers, faster saves | Not in the prototype: each rests on a TPF2 structure that has to be found in TF3 first ("Measure these first on TPF3" above). |
 
+Shipped, Big Maps would be a native package of the project's signed index,
+its features switched on by the launcher instead of by hand
+([NATIVE_MODS.md](NATIVE_MODS.md), proposed D29).
+
 `cargo run -p tpf3mp-bigmap -- ladder` prints the ladder under a settings
 file (`--config`, the example is `crates/tpf3mp-bigmap/tpf3mp_bigmap.example.toml`,
 Big Maps' own settings), and `check 320x320` what one size costs and

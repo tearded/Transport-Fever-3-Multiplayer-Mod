@@ -1280,3 +1280,83 @@ missing mod is installed from Mod Hub, never received from another player":
 this builds it. Not covered yet: the new world path (a room started from a
 new world keeps the mods the game's New Game page picks), and the game's
 experimental economy settings (`configDict`), which do not travel.
+
+## D29 (2026-10-06, *proposed*): native mods come from a signed index, and the hook enables only what is built into it
+
+*Proposed, for the owner (Juliansgith) to approve or refuse. Nothing here is
+decided until then.* The user asked on 2026-10-06 for CKAN-style management
+of **native mods**: mods that are more than Lua and so cannot live on Mod
+Hub or mod.io. Big Maps is the first (hook patches behind switches, targets
+in the build's profile, a New Game page the hook serves, a Lua mod folder,
+[BIGMAPS.md](BIGMAPS.md)). Today such a mod is switched on by hand with
+environment variables on its own branches. The design is in
+[NATIVE_MODS.md](NATIVE_MODS.md); `crates/tpf3mp-nativemods` builds the parts
+that work without Big Maps.
+
+- **One signed index.** The launcher installs a native mod only when it is
+  listed in `native-mods.json`, signed with a **native-mods key** of the
+  project (Ed25519, with the same code and key handling as releases, D7):
+  the public half is built into the launcher
+  (`TPF3MP_NATIVE_MODS_PUBLIC_KEY`), and a launcher built without one
+  installs none. As with D19's dev key, the key is its own: it cannot sign
+  a release, and a release key cannot sign the index. Signing is a workflow
+  in an environment whose required reviewer approves each index, as for
+  releases. Each index has a serial that only grows, so an older signed
+  index cannot be replayed to bring back a withdrawn package.
+- **Every entry pins what it may be.** A package names the game builds it
+  runs on by the executable's SHA-256, as hook profiles do; every file with
+  its size and SHA-256; its dependencies and conflicts; the hook features it
+  enables; its settings and their defaults; and whether it changes the
+  simulation. An index with one malformed entry is refused whole.
+- **The launcher installs into its own folder.** Packages go to
+  `native-mods/<id>/<version>/` in the launcher's data folder, never the
+  game's. Every file is checked against the index as it downloads, and a
+  version goes into place only once all of its files check out; the
+  version before an upgrade is kept for a rollback. A registry names every
+  file installed, and uninstalling deletes exactly those (D7's journal, for
+  mods). Installing is not enabling: the player switches a package on.
+- **The hook enables only what the launcher enabled, on the build it was
+  enabled for** (D11). The launcher names the enabled packages' file in the
+  game's environment (`TPF3MP_NATIVE_MODS`), written for the executable it
+  starts; no other switch turns a native feature on. A feature runs only if
+  this hook has it and the matched profile has every target it patches. A
+  package that changes only what one player sees is left off with a reason
+  when it cannot run; one that changes the simulation and cannot run keeps
+  the game out of rooms (fail closed, as for a build without a profile).
+- **First version: no new native code.** A package only *enables* features
+  compiled into TPF3-MP's hook (a registry of feature ids,
+  `features::BUILT_IN`) and ships data, Lua and settings. The index already
+  has a place for **signed plugin libraries** (`plugins`, with an
+  interface version), which this launcher refuses; loading them is a later
+  decision.
+- **In a room, simulation-changing native mods are part of the room's
+  terms**, with their exact versions and settings, compared as the room's
+  content is. A member who lacks one, or holds another version, installs
+  the room's version from the signed index in one click, never from another
+  player. A package that changes only what a player sees is the player's
+  own (as personal mods, D25). Until the protocol carries these terms, a
+  simulation-changing package refuses multiplayer (PLAN.md, Part 3: a
+  channel not checked yet is refused).
+
+Rejected:
+
+- **Open URLs, as CKAN does** (anyone publishes a metadata file pointing at
+  their download): native code from anywhere, run inside every player's
+  game. D4's servers are trusted because the project runs them; code that
+  runs beside them must be the project's too.
+- **Native mods through mod.io or Mod Hub**: Mod Hub carries Lua mods for
+  the game's own loader; the launcher does not talk to mod.io (D28), and a
+  mod.io file is not signed by the project.
+- **Players passing mods to each other**, as a room's owner sending what
+  a member lacks: a member would run what another player's machine handed
+  them. D28 refuses it for Lua mods; native mods have more reason to.
+- **Unsigned packages over HTTPS**: the reason D7 rejected unsigned updates.
+
+Touches: D7 (the same signing primitives, a second key for a second kind of
+artifact), D19 (the per-purpose key it set the pattern for), D11 (the
+launcher decides what the hook does in the game it starts), D28 (covers Mod
+Hub mods only; native mods are a separate channel and change nothing
+there), D4 (trust in the project, fail closed). PLAN.md, Part 3: a new item.
+Not covered yet: the room's terms on the wire (an additive field of the
+content declaration, with a protocol version bump), the launcher's page for
+native mods, and Big Maps itself as the first package.
