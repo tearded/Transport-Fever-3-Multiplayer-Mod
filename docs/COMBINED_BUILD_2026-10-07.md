@@ -35,6 +35,9 @@ both:
 - #121 fails clippy off Windows on its own branch (its probe's parts go
   unused there). The combined build allows dead code in `industries.rs`
   off Windows so the Linux and macOS tests run.
+- #108 fails clippy on Arm Macs on its own branch (`mem::forget` of a
+  `Rewrite` that has no `Drop` there); the combined build allows that lint
+  in `savefast.rs` off x86-64. It changes no compiled code.
 
 The package version is 1.2.8, but #122 raises the action schema to 26 and
 #116 the bridge version to 26: every player in a room needs this build.

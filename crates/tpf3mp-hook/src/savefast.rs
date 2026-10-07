@@ -16,6 +16,9 @@
 //! Each rewrite checks the site's bytes first and installs alone; a build
 //! where either is not exactly as expected keeps the game's own.
 
+// Off x86-64 a Rewrite has no Drop to skip (#108's own CI fails on that;
+// allowed here for the combined build).
+#![cfg_attr(not(target_arch = "x86_64"), allow(clippy::forget_non_drop))]
 #![allow(unsafe_code)]
 
 use tpf3mp_hookcore::detour::Rewrite;
