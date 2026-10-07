@@ -212,6 +212,9 @@ const TARGETS: &[(&str, u64)] = &[
     ),
     // The fused emission grid (crates/tpf3mp-hook/src/emission).
     ("emission::EmissionGridSystem::Update", 0xaa9230),
+    // Faster saves (crates/tpf3mp-hook/src/savefast.rs).
+    ("save: PushCompressor level load", 0x32d464),
+    ("save: PushCompressor buffer size", 0x32d5c4),
 ];
 
 #[test]
