@@ -1038,9 +1038,13 @@ end
 -- on each side. false for a proposal of nothing; nil and why the room
 -- cannot carry it.
 -- Signals and waypoints go the same way, on a track (category 2 and 1, the
--- engine's SIGNAL), one at a time, `oneWay` as the tool had it.
+-- engine's SIGNAL), one at a time, `oneWay` as the tool had it, and with
+-- the settings the tool builds them with (`params`, the schema's list:
+-- capture.stop reads them off the tool; nil where it could not, which
+-- refuses the signal rather than build it with the construction's
+-- defaults: a mod's settings on it, Auto Signals' spacing, would be lost).
 local OBJECT_KINDS = { [0] = "Stop", [1] = "Waypoint", [2] = "Signal" }
-function engine.placeStop(proposal, noted, oneWay)
+function engine.placeStop(proposal, noted, oneWay, params, paramsWhy)
 	local ok, action = pcall(function()
 		local street = get(proposal, "proposal")
 		if street == nil then error("a proposal with no street proposal", 0) end
@@ -1054,7 +1058,6 @@ function engine.placeStop(proposal, noted, oneWay)
 		local old, new, network = rebuiltEdge(street)
 		local _, had = objectsOf(old)
 		local now, has = objectsOf(new)
-		if #now ~= #toAdd then error("a stop build whose objects it cannot pair", 0) end
 		-- A stop dropped where one stood replaces it, and the game moves its
 		-- lines to the new one, which a replay cannot say (docs/BUILDING.md).
 		for entity in pairs(had) do
@@ -1066,12 +1069,25 @@ function engine.placeStop(proposal, noted, oneWay)
 		end
 		if #added == 0 then return false end
 		if #added > 2 then error("more than two stops at once", 0) end
+		-- The tool's record of each new object: its edgeObjectsToAdd lists
+		-- every object of the rebuilt edge, in the edge's order (the stop
+		-- tool), or the new ones alone (the signal tool on a track with
+		-- signals on it already: build 40408, 2026-10-06); any other count
+		-- cannot be paired.
+		local record = {}
+		if #toAdd == #now then
+			for _, k in ipairs(added) do record[k] = toAdd[k] end
+		elseif #toAdd == #added then
+			for i, k in ipairs(added) do record[k] = toAdd[i] end
+		else
+			error("a stop build whose objects it cannot pair", 0)
+		end
 		local types = enum("EdgeObjectType")
-		local kind = OBJECT_KINDS[get(toAdd[added[1]], "category")]
-		if kind == nil then error("an edge object of category " .. tostring(get(toAdd[added[1]], "category")), 0) end
+		local kind = OBJECT_KINDS[get(record[added[1]], "category")]
+		if kind == nil then error("an edge object of category " .. tostring(get(record[added[1]], "category")), 0) end
 		if kind ~= "Stop" and #added > 1 then error("more than one signal at once", 0) end
 		for _, k in ipairs(added) do
-			local eo = toAdd[k]
+			local eo = record[k]
 			if OBJECT_KINDS[get(eo, "category")] ~= kind then error("a stop and a signal at once", 0) end
 			if kind == "Stop" then
 				-- INFERRED: the engine lists a stop it calls left as STOP_LEFT.
@@ -1082,17 +1098,20 @@ function engine.placeStop(proposal, noted, oneWay)
 				error("a signal the engine lists as no signal", 0)
 			end
 		end
+		if kind ~= "Stop" and type(params) ~= "table" then
+			error("a signal whose settings the room cannot read" .. (paramsWhy and (": " .. tostring(paramsWhy)) or ""), 0)
+		end
 		local twoSided = #added == 2
-		if twoSided and (get(toAdd[added[1]], "left") == true) == (get(toAdd[added[2]], "left") == true) then
+		if twoSided and (get(record[added[1]], "left") == true) == (get(record[added[2]], "left") == true) then
 			error("two stops on one side", 0)
 		end
 		local index = added[1]
-		local eo = toAdd[index]
+		local eo = record[index]
 		local left = get(eo, "left") == true
 		-- The model and place of the first of its objects that has them.
 		local instance
 		for _, k in ipairs(added) do
-			instance = instance or get(toAdd[k], "modelInstance")
+			instance = instance or get(record[k], "modelInstance")
 		end
 		local model
 		if instance ~= nil then
@@ -1141,7 +1160,7 @@ function engine.placeStop(proposal, noted, oneWay)
 		-- then names it as the mod does (tpf3mp/apply.lua).
 		local name
 		for _, k in ipairs(added) do
-			local n = get(toAdd[k], "name")
+			local n = get(record[k], "name")
 			if name == nil and type(n) == "string" and n ~= "" and #n <= 64 then name = n end
 		end
 		return { PlaceStop = {
@@ -1154,6 +1173,7 @@ function engine.placeStop(proposal, noted, oneWay)
 			two_sided = twoSided,
 			object = kind,
 			one_way = kind ~= "Stop" and oneWay == true,
+			params = kind ~= "Stop" and params or {},
 		} }
 	end)
 	if not ok then return nil, tostring(action) end
@@ -1191,6 +1211,210 @@ function removeStop(street)
 		at = { x = x, y = y, z = z },
 		model = resName(get(c, "edgeObjectConstruction"), "the stop's construction"),
 	} } }
+end
+
+-- A stop's or signal's construction parameters (a table of key = value, as
+-- `EdgeObjectBuilder.params` and `EdgeObject.params` hold them) as the
+-- schema's flat list (action::Param), sorted by key; or raises. Only plain
+-- keys with numbers or booleans, as the signal tools set them: anything else
+-- is a setting the room cannot carry, never one dropped.
+engine.MAX_OBJECT_PARAMS = 32
+function engine.flatParams(t)
+	if t == nil then return {} end
+	local keys, values = {}, {}
+	local ok, why = pcall(function()
+		for k, v in pairs(t) do
+			keys[#keys + 1] = k
+			values[k] = v
+		end
+	end)
+	if not ok then error("settings it cannot read: " .. tostring(why), 0) end
+	for _, k in ipairs(keys) do
+		if type(k) ~= "string" or not k:match("^[%a_][%w_]*$") or #k > 128 then
+			error("a setting named " .. tostring(k), 0)
+		end
+	end
+	table.sort(keys)
+	if #keys > engine.MAX_OBJECT_PARAMS then error("more than " .. engine.MAX_OBJECT_PARAMS .. " settings", 0) end
+	local out = {}
+	for _, k in ipairs(keys) do
+		local v = values[k]
+		if type(v) == "number" and v == v and v ~= math.huge and v ~= -math.huge then
+			if v == math.floor(v) then out[#out + 1] = { key = k, value = { Int = v } }
+			else out[#out + 1] = { key = k, value = { Fixed = v } } end
+		elseif type(v) == "boolean" then
+			out[#out + 1] = { key = k, value = { Bool = v } }
+		else
+			error("setting " .. k .. " is a " .. type(v), 0)
+		end
+	end
+	return out
+end
+
+-- The entity a SimpleProposal gives the k-th of its edgeObjectsToAdd (from
+-- 1): -400000000, then down (build 40408: con_util_entity_index.h; the
+-- stop tool's proposals; Auto Signals counts its new signals so across all
+-- its edges).
+local NEW_EDGE_OBJECT = -400000000
+
+-- Whether two of the game's vectors are the same within a millimetre.
+local function sameVec(a, b)
+	a, b = vec3(a), vec3(b)
+	if a == nil or b == nil then return false end
+	for i = 1, 3 do
+		if type(a[i]) ~= "number" or type(b[i]) ~= "number" or math.abs(a[i] - b[i]) > 0.001 then return false end
+	end
+	return true
+end
+
+-- A script's build that rebuilds existing tracks in place with signals
+-- added to them or removed from them, and nothing else, as Auto Signals
+-- sends one after its player's signal (a SimpleProposal: the edges by
+-- entity in edgesToRemove, each again in edgesToAdd as a copy of its
+-- BASE_EDGE whose objects keep the others by entity and name each new
+-- signal by its place in edgeObjectsToAdd; the signals it replaces in
+-- edgeObjectsToRemove). A PlaceSignals action (tpf3mp_proto
+-- action::PlaceSignals): each edge by its ends, node 0 first, each new
+-- signal's place along it from node 0 and side, each removed one's place
+-- and construction; the new signals' construction, one-way and settings
+-- once for all of them. false for a build of nothing; nil and why for any
+-- other build, which the room cannot carry (docs/HOOKS.md, "Scripts'
+-- follow-up builds").
+function engine.placeSignals(simple)
+	local ok, action = pcall(function()
+		local street = get(simple, "streetProposal")
+		if street == nil then error("a signal build with no street part", 0) end
+		for _, name in ipairs({ "constructionsToAdd", "constructionsToRemove" }) do
+			if #list(get(simple, name)) > 0 then error("a signal build with constructions", 0) end
+		end
+		for _, name in ipairs({ "nodesToAdd", "nodesToRemove", "nodeConfigsToAdd", "nodeConfigsToRemove" }) do
+			if #list(get(street, name)) > 0 then error("a signal build that changes nodes or their junctions", 0) end
+		end
+		local crossings = get(street, "node2rcType")
+		if crossings ~= nil then
+			local any = false
+			local read = pcall(function() for _ in pairs(crossings) do any = true end end)
+			if not read or any then error("a signal build that changes level crossings", 0) end
+		end
+		local removes, adds = list(get(street, "edgesToRemove")), list(get(street, "edgesToAdd"))
+		local objectAdds = list(get(street, "edgeObjectsToAdd"))
+		local objectRemoves = list(get(street, "edgeObjectsToRemove"))
+		if #removes == 0 and #adds == 0 and #objectAdds == 0 and #objectRemoves == 0 then return false end
+		if #removes ~= #adds then error("a signal build that does not rebuild its edges one for one", 0) end
+		local C = api.type.ComponentType
+		local types = enum("EdgeObjectType")
+		-- The edges it removes, as they stand.
+		local old = {}
+		for _, id in ipairs(removes) do
+			if type(id) ~= "number" or id < 0 or old[id] then error("a signal build that removes an edge twice", 0) end
+			local c = api.engine.getComponent(id, C.BASE_EDGE)
+			if c == nil then error("a signal build that removes an edge that is not there", 0) end
+			old[id] = c
+		end
+		local removing = {}
+		for _, e in ipairs(objectRemoves) do
+			if type(e) ~= "number" or e < 0 or removing[e] then error("a signal build that removes an object twice", 0) end
+			removing[e] = true
+		end
+		local used, paired, segOf = {}, {}, {}
+		for i, seg in ipairs(adds) do
+			local entity = get(seg, "entity")
+			if type(entity) ~= "number" or entity >= 0 or segOf[entity] then error("a signal build whose new edges it cannot tell apart", 0) end
+			segOf[entity] = i
+		end
+		local model, oneWay, params, settings
+		local edges = {}
+		for _, seg in ipairs(adds) do
+			if networkOf(seg) ~= "Track" then error("a signal build on a street", 0) end
+			local new = get(seg, "comp")
+			if new == nil then error("an edge with no component", 0) end
+			-- The one removed edge between the same two nodes.
+			local match
+			for _, id in ipairs(removes) do
+				local c = old[id]
+				if not paired[id] and get(c, "node0") == get(new, "node0") and get(c, "node1") == get(new, "node1") then
+					if match ~= nil then error("a signal build of two edges between the same nodes", 0) end
+					match = id
+				end
+			end
+			if match == nil then error("a signal build that moves an edge", 0) end
+			paired[match] = true
+			local was = old[match]
+			if not sameVec(get(was, "tangent0"), get(new, "tangent0")) or not sameVec(get(was, "tangent1"), get(new, "tangent1"))
+				or get(was, "type") ~= get(new, "type") or get(was, "typeIndex") ~= get(new, "typeIndex")
+				or get(was, "roadTemplate") ~= get(new, "roadTemplate") then
+				error("a signal build that changes its track", 0)
+			end
+			local wasDistance, newDistance = get(was, "distance"), get(new, "distance")
+			if type(wasDistance) == "number" and (type(newDistance) ~= "number" or math.abs(wasDistance - newDistance) > 0.001) then
+				error("a signal build that changes its track", 0)
+			end
+			local had = {}
+			for _, o in ipairs(list(get(was, "objects"))) do had[get(o, 1)] = get(o, 2) end
+			local ref = edgeRef(was, "Track")
+			local entry = { edge = ref.ends, add = {}, remove = {} }
+			local kept = {}
+			for _, o in ipairs(list(get(new, "objects"))) do
+				local e, kind = get(o, 1), get(o, 2)
+				if type(e) ~= "number" then error("an edge object it cannot read", 0) end
+				if e >= 0 then
+					if had[e] == nil then error("a signal build that moves an object from another edge", 0) end
+					if had[e] ~= kind then error("a signal build that changes an object's kind", 0) end
+					if removing[e] then error("a signal build that keeps an object it removes", 0) end
+					if kept[e] then error("a signal build that lists an object twice", 0) end
+					kept[e] = true
+				else
+					if kind ~= types.SIGNAL then error("a script's build of a new stop", 0) end
+					local k = NEW_EDGE_OBJECT - e + 1
+					local eo = objectAdds[k]
+					if eo == nil or used[k] then error("a new signal with no record of its own", 0) end
+					used[k] = true
+					if segOf[get(eo, "edgeEntity")] == nil or get(eo, "edgeEntity") ~= get(seg, "entity") then
+						error("a new signal recorded on another edge", 0)
+					end
+					local u = get(eo, "param")
+					if type(u) ~= "number" or u ~= u or u < 0 or u > 1 then error("a new signal with no place on its edge", 0) end
+					local m = resName(get(eo, "model"), "the new signal's construction")
+					local w = get(eo, "oneWay") == true
+					local p = engine.flatParams(get(eo, "params"))
+					local key = {}
+					for _, s in ipairs(p) do key[#key + 1] = s.key .. "=" .. tostring(s.value.Int or s.value.Fixed or s.value.Bool) end
+					key = table.concat(key, ",")
+					if model == nil then
+						model, oneWay, params, settings = m, w, p, key
+					elseif m ~= model or w ~= oneWay or key ~= settings then
+						error("signals of more than one kind at once", 0)
+					end
+					entry.add[#entry.add + 1] = { at = u, left = get(eo, "left") == true }
+				end
+			end
+			for e, kind in pairs(had) do
+				if not kept[e] then
+					if not removing[e] then error("a signal build that drops an object without removing it", 0) end
+					if kind ~= types.SIGNAL then error("a script's build that removes a stop", 0) end
+					local c = api.engine.getComponent(e, C.EDGE_OBJECT)
+					local u = c and get(c, "param")
+					if type(u) ~= "number" or u < 0 or u > 1 then error("a removed signal with no place on its edge", 0) end
+					entry.remove[#entry.remove + 1] = {
+						at = u, model = resName(get(c, "edgeObjectConstruction"), "the removed signal's construction"),
+					}
+					removing[e] = nil
+				end
+			end
+			table.sort(entry.remove, function(a, b) return a.at < b.at end)
+			if #entry.add > 0 or #entry.remove > 0 then edges[#edges + 1] = entry end
+		end
+		if next(removing) ~= nil then error("a signal build that removes an object of no edge it rebuilds", 0) end
+		for k = 1, #objectAdds do
+			if not used[k] then error("a new signal on no edge", 0) end
+		end
+		if #edges == 0 then return false end
+		return { PlaceSignals = {
+			model = model or "", one_way = oneWay == true, params = params or {}, edges = edges,
+		} }
+	end)
+	if not ok then return nil, tostring(action) end
+	return action
 end
 
 -- The action table of a street or track tool's proposal; false for a

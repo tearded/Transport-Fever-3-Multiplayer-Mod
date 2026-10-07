@@ -34,7 +34,7 @@ use crate::{
 /// Version of the action schema, the first thing in an action's payload.
 /// Players in one room run the same mod, so their versions match; a payload
 /// of any other version is refused, never guessed at.
-pub const ACTION_SCHEMA_VERSION: u32 = 25;
+pub const ACTION_SCHEMA_VERSION: u32 = 26;
 
 /// Most vertices, and most links, in one road or track build. A 23-segment
 /// track was the longest single TPF2 build measured.
@@ -56,6 +56,14 @@ pub const MAX_BUILDINGS: usize = 64;
 pub const MAX_ASSETS: usize = 64;
 /// Most parameters of one construction, nested modules counted one by one.
 pub const MAX_PARAMS: usize = 1024;
+/// Most construction parameters of one stop or signal (the signal tool's
+/// settings: the base game's `oneWay` and a mod's own, schema 26).
+pub const MAX_OBJECT_PARAMS: usize = 32;
+/// Most edges one [`PlaceSignals`] rebuilds. Auto Signals walks up to 1000
+/// edges from the signal placed (schema 26).
+pub const MAX_SIGNAL_EDGES: usize = 1024;
+/// Most signals one [`PlaceSignals`] adds to, or removes from, one edge.
+pub const MAX_EDGE_SIGNALS: usize = 64;
 /// Most vehicle models in one consist.
 pub const MAX_CONSIST: usize = 64;
 /// Most vehicles one sell or line assignment names.
@@ -865,6 +873,94 @@ pub struct PlaceStop {
     /// it by the mod's own rule.
     #[serde(default)]
     pub name: Option<ObjectName>,
+    /// The construction parameters the originator's tool built it with
+    /// (`EdgeObjectBuilder.params`: the construction's own keys, values as
+    /// the tool's controls hold them), which every game builds it with
+    /// (`SimpleStreetProposal.EdgeObject.params`, build 40408). A mod's
+    /// settings on a signal travel here, Auto Signals' spacing among them.
+    /// Empty: the construction's defaults. Schema 26.
+    #[serde(default)]
+    pub params: BoundedVec<Param, MAX_OBJECT_PARAMS>,
+}
+
+/// Signals added to, and removed from, existing tracks in one build: what
+/// a mod's script sends after its player's signal (Auto Signals spaces
+/// signals along the track from it; docs/MODS.md). Every edge named is
+/// rebuilt in place, with its other objects kept, in one proposal: every
+/// game builds all of it or none. Schema 26.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlaceSignals {
+    /// The new signals' construction, the same for all of them (e.g.
+    /// `infrastructure/signal/signal_path_c.con`).
+    pub model: ResName,
+    /// Whether the new signals are one-way.
+    pub one_way: bool,
+    /// The new signals' construction parameters; empty for the
+    /// construction's defaults.
+    pub params: BoundedVec<Param, MAX_OBJECT_PARAMS>,
+    /// The tracks rebuilt, each once.
+    pub edges: BoundedVec<SignalEdge, MAX_SIGNAL_EDGES>,
+}
+
+/// One track a [`PlaceSignals`] rebuilds: its ends in the originator's own
+/// order, `a` its node 0. A game whose edge runs from `b` to `a` reads each
+/// place as `1 - at` and flips `left`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignalEdge {
+    pub edge: EdgeEnds,
+    pub add: BoundedVec<NewSignal, MAX_EDGE_SIGNALS>,
+    pub remove: BoundedVec<OldSignal, MAX_EDGE_SIGNALS>,
+}
+
+/// A signal added: where along its edge from `a` (the game's
+/// `EdgeObject.param`), and the engine's side flag there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewSignal {
+    pub at: Fraction,
+    pub left: bool,
+}
+
+/// A signal removed: the one signal of this construction on the edge
+/// within a quarter of a metre of `at`; none, or more than one, refuses
+/// the whole build.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OldSignal {
+    pub at: Fraction,
+    pub model: ResName,
+}
+
+impl PlaceSignals {
+    /// At least one signal added or removed; every place on its edge
+    /// (0 to 1); no edge named twice, whichever way round its ends are.
+    pub fn validate(&self) -> Result<(), ActionError> {
+        if self
+            .edges
+            .iter()
+            .all(|e| e.add.is_empty() && e.remove.is_empty())
+        {
+            return Err(ActionError::Signals("no signal added or removed"));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for edge in self.edges.iter() {
+            let places = edge.add.iter().map(|s| s.at);
+            if places
+                .chain(edge.remove.iter().map(|s| s.at))
+                .any(|at| !(0..=1_000_000).contains(&at.0))
+            {
+                return Err(ActionError::Signals("a place off its edge"));
+            }
+            let (a, b) = (edge.edge.a, edge.edge.b);
+            let key = if (a.x, a.y, a.z) <= (b.x, b.y, b.z) {
+                (a, b)
+            } else {
+                (b, a)
+            };
+            if !seen.insert(key) {
+                return Err(ActionError::Signals("an edge named twice"));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// What an edge object placed with the stop and signal tool is (TF3's
@@ -1201,6 +1297,10 @@ pub enum Action {
     CalendarSpeed {
         millis_per_day: u32,
     },
+    /// Signals added to and removed from existing tracks in one build
+    /// (`PlaceSignals`). Appended under schema version 26: the variants
+    /// before it keep their bytes.
+    PlaceSignals(PlaceSignals),
 }
 
 #[derive(Debug, Error)]
@@ -1226,6 +1326,10 @@ pub enum ActionError {
         "selling a vehicle when it reaches its depot (the game crashes there; sell it instead)"
     )]
     SellOnArrival,
+    /// A [`PlaceSignals`] that builds nothing, names an edge twice or a
+    /// place off its edge.
+    #[error("invalid signals: {0}")]
+    Signals(&'static str),
 }
 
 impl Action {
@@ -1257,6 +1361,7 @@ impl Action {
             Action::Perk(_) => "Perk",
             Action::Preserve(_) => "Preserve",
             Action::CalendarSpeed { .. } => "CalendarSpeed",
+            Action::PlaceSignals(_) => "PlaceSignals",
         }
     }
 
@@ -1284,6 +1389,7 @@ impl Action {
                 Some(line) => &line.junctions,
                 None => return Ok(()),
             },
+            Self::PlaceSignals(signals) => return signals.validate(),
             _ => return Ok(()),
         };
         for (i, change) in changes.iter().enumerate() {
@@ -1447,7 +1553,7 @@ mod tests {
         assert_eq!(
             payload.as_bytes(),
             [
-                25, // schema version
+                26, // schema version
                 5,  // Action::SellVehicle
                 2, 3, 0xac, 0x02, // two ids, varints
             ]
@@ -1490,7 +1596,7 @@ mod tests {
         assert_eq!(
             track.to_payload().unwrap().as_bytes(),
             [
-                25, // schema version
+                26, // schema version
                 1,  // Action::BuildTrack
                 1, b't', 1, 1, b's', 1, // track, style Some("s"), catenary
                 2, // two vertices
@@ -1525,7 +1631,7 @@ mod tests {
         assert_eq!(
             replace.to_payload().unwrap().as_bytes(),
             [
-                25, // schema version
+                26, // schema version
                 14, // Action::ReplaceVehicle
                 3,  // vehicle-3
                 1, 1, b'm', 1, 0, 2, 0, 0, // one part: model, reversed, no loads, colour
@@ -1543,7 +1649,7 @@ mod tests {
         assert_eq!(
             prospect.to_payload().unwrap().as_bytes(),
             [
-                25, // schema version
+                26, // schema version
                 15, // Action::Prospect
                 3,  // town-3
                 1, b'c', // cargo
@@ -1558,7 +1664,7 @@ mod tests {
         assert_eq!(
             recolor.to_payload().unwrap().as_bytes(),
             [
-                25, // schema version
+                26, // schema version
                 11, // Action::CompanyOp
                 4,  // CompanyOp::Recolor, appended under schema version 8
                 2,  // company-2
@@ -1569,7 +1675,7 @@ mod tests {
         assert_eq!(
             rank.to_payload().unwrap().as_bytes(),
             [
-                25, // schema version
+                26, // schema version
                 17, // Action::ApplyRank, appended under schema version 9
                 6,  // the rank
             ]
@@ -1581,7 +1687,7 @@ mod tests {
         assert_eq!(
             accept.to_payload().unwrap().as_bytes(),
             [
-                25, // schema version
+                26, // schema version
                 19, // Action::Subsidy, appended under schema version 13
                 0,  // SubsidyOp::Accept
                 0x80, 0x90, 0xaf, 0x99, 0x09, // the uid, zigzag varint
@@ -1618,7 +1724,7 @@ mod tests {
         ];
         for (op, bytes) in cases {
             let payload = Action::CompanyOp(op).to_payload().unwrap();
-            assert_eq!(payload.as_bytes()[..2], [25, 11]);
+            assert_eq!(payload.as_bytes()[..2], [26, 11]);
             assert_eq!(&payload.as_bytes()[2..], bytes);
         }
         // Appended under schema version 24: the perk tools take the next tag.
@@ -1626,7 +1732,7 @@ mod tests {
             industry: IndustryId(5),
             permit: None,
         });
-        assert_eq!(green.to_payload().unwrap().as_bytes(), [25, 21, 0, 5, 0]);
+        assert_eq!(green.to_payload().unwrap().as_bytes(), [26, 21, 0, 5, 0]);
         // Appended under schema version 24: Historic Preservation takes the
         // next tag.
         let preserve = Action::Preserve(Preservation {
@@ -1639,7 +1745,31 @@ mod tests {
         });
         assert_eq!(
             preserve.to_payload().unwrap().as_bytes(),
-            [25, 22, 1, b'b', 2, 0, 0, 0, 1]
+            [26, 22, 1, b'b', 2, 0, 0, 0, 1]
+        );
+        // Appended under schema version 26: signals on existing tracks take
+        // the next tag.
+        let signals = Action::PlaceSignals(PlaceSignals {
+            model: Text::new("s").unwrap(),
+            one_way: true,
+            params: BoundedVec::empty(),
+            edges: BoundedVec::new(vec![SignalEdge {
+                edge: EdgeEnds {
+                    a: pos(0, 0, 0),
+                    b: pos(1, 0, 0),
+                },
+                add: BoundedVec::new(vec![NewSignal {
+                    at: Fraction(5),
+                    left: true,
+                }])
+                .unwrap(),
+                remove: BoundedVec::empty(),
+            }])
+            .unwrap(),
+        });
+        assert_eq!(
+            signals.to_payload().unwrap().as_bytes(),
+            [26, 24, 1, b's', 1, 0, 1, 0, 0, 0, 2, 0, 0, 1, 10, 1, 0]
         );
         let hold = Action::VehicleOp(VehicleOp {
             vehicle: VehicleId(7),
@@ -1648,7 +1778,7 @@ mod tests {
         assert_eq!(
             hold.to_payload().unwrap().as_bytes(),
             [
-                25, // schema version
+                26, // schema version
                 13, // Action::VehicleOp
                 7,  // vehicle-7
                 4,  // VehicleChange::ManualDeparture, appended under schema version 10

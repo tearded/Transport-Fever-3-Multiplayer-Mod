@@ -13,10 +13,11 @@ use tpf3mp_proto::{
         CompanyOp, ConsistPart, ConstructionBuild, ConstructionRef, CreateLine, Decoration,
         EdgeEnds, EdgeKind, EdgeObjectKind, EdgeRef, EditLine, Fraction, LineChange, LineData,
         LineId, LineStop, Link, Load, LoadMode, LoanOp, LoanTerms, MAX_EDGES, MAX_VERTICES,
-        Network, NodeRef, Param, ParamValue, PlaceStop, Polyline, Pos, Pos2, Prospect,
-        ReplaceVehicle, ReplacedPart, Resolve, RoadBuild, StationId, StopRules, Structure,
-        SubsidyOp, SubsidyRef, Tangent, Terminal, Terraform, TerrainCell, Tint, TownId, TrackBuild,
-        Tram, Transform, UnitDir, VehicleChange, VehicleId, VehicleOp, Vertex,
+        Network, NewSignal, NodeRef, OldSignal, Param, ParamValue, PlaceSignals, PlaceStop,
+        Polyline, Pos, Pos2, Prospect, ReplaceVehicle, ReplacedPart, Resolve, RoadBuild,
+        SignalEdge, StationId, StopRules, Structure, SubsidyOp, SubsidyRef, Tangent, Terminal,
+        Terraform, TerrainCell, Tint, TownId, TrackBuild, Tram, Transform, UnitDir, VehicleChange,
+        VehicleId, VehicleOp, Vertex,
     },
     lua,
 };
@@ -378,6 +379,7 @@ fn samples() -> Vec<Action> {
             object: EdgeObjectKind::Stop,
             one_way: false,
             name: Some(text("High Street")),
+            params: BoundedVec::empty(),
         }),
         Action::PlaceStop(PlaceStop {
             edge: EdgeRef {
@@ -396,6 +398,16 @@ fn samples() -> Vec<Action> {
             object: EdgeObjectKind::Signal,
             one_way: true,
             name: None,
+            params: list(vec![
+                Param {
+                    key: text("auto_signals_distance"),
+                    value: ParamValue::Int(4),
+                },
+                Param {
+                    key: text("oneWay"),
+                    value: ParamValue::Int(1),
+                },
+            ]),
         }),
         Action::Terraform(
             Terraform::new(
@@ -554,6 +566,38 @@ fn samples() -> Vec<Action> {
         Action::CalendarSpeed {
             millis_per_day: 2000,
         },
+        Action::PlaceSignals(PlaceSignals {
+            model: text("infrastructure/signal/signal_path_c.con"),
+            one_way: false,
+            params: BoundedVec::empty(),
+            edges: list(vec![
+                SignalEdge {
+                    edge: ends(pos(10, 0, 0), pos(90_000, 0, 0)),
+                    add: list(vec![NewSignal {
+                        at: Fraction(250_000),
+                        left: true,
+                    }]),
+                    remove: list(vec![OldSignal {
+                        at: Fraction(750_000),
+                        model: text("infrastructure/signal/signal_path_a.con"),
+                    }]),
+                },
+                SignalEdge {
+                    edge: ends(pos(90_000, 0, 0), pos(180_000, 0, 0)),
+                    add: list(vec![
+                        NewSignal {
+                            at: Fraction(0),
+                            left: false,
+                        },
+                        NewSignal {
+                            at: Fraction(1_000_000),
+                            left: false,
+                        },
+                    ]),
+                    remove: BoundedVec::empty(),
+                },
+            ]),
+        }),
     ]
 }
 
@@ -720,13 +764,13 @@ fn check(bytes: &[u8]) {
 #[test]
 fn every_variant_round_trips() {
     let samples = samples();
-    // Every top-level variant is sampled: postcard tags them 0..=23.
+    // Every top-level variant is sampled: postcard tags them 0..=24.
     let mut tags: Vec<u8> = samples
         .iter()
         .map(|action| postcard::to_stdvec(action).unwrap()[0])
         .collect();
     tags.dedup();
-    assert_eq!(tags, (0..=23).collect::<Vec<u8>>());
+    assert_eq!(tags, (0..=24).collect::<Vec<u8>>());
 
     for action in samples {
         let bytes = postcard::to_stdvec(&action).unwrap();
@@ -783,6 +827,68 @@ fn the_mod_s_tables_are_in_the_game_s_units() {
         stop.get("direction").unwrap().get("x"),
         Some(&lua::LuaValue::Number(1.0))
     );
+}
+
+/// Signals spaced along a track (Auto Signals) are places along each edge,
+/// fractions as the game's `EdgeObject.param`, and a build that adds
+/// nothing, names an edge twice (either way round) or a place off its edge
+/// is refused on the wire and from the mod.
+#[test]
+fn signals_on_existing_tracks_are_fractions_and_each_edge_once() {
+    let signals = samples()
+        .into_iter()
+        .find_map(|action| match action {
+            Action::PlaceSignals(signals) => Some(signals),
+            _ => None,
+        })
+        .unwrap();
+    let table = lua::action_to_lua(&Action::PlaceSignals(signals.clone())).unwrap();
+    let lua::LuaValue::Table(edges) = table.get("PlaceSignals").unwrap().get("edges").unwrap()
+    else {
+        panic!("edges are a sequence");
+    };
+    let lua::LuaValue::Table(add) = edges[0].1.get("add").unwrap() else {
+        panic!("add is a sequence");
+    };
+    assert_eq!(
+        add[0].1.get("at"),
+        Some(&lua::LuaValue::Number(0.25)),
+        "a place along the edge is the game's param"
+    );
+
+    let refused = |signals: PlaceSignals, why: &str| {
+        let action = Action::PlaceSignals(signals);
+        match action.validate() {
+            Err(ActionError::Signals(said)) => assert_eq!(said, why),
+            other => panic!("{why}: {other:?}"),
+        }
+        let wire = postcard::to_stdvec(&(ACTION_SCHEMA_VERSION, &action)).unwrap();
+        assert!(Action::from_payload(&Payload::new(wire).unwrap()).is_err());
+        assert!(lua::action_from_lua(&lua::action_to_lua(&action).unwrap()).is_err());
+    };
+    let mut twice = signals.clone();
+    let reversed = SignalEdge {
+        edge: ends(twice.edges[0].edge.b, twice.edges[0].edge.a),
+        ..twice.edges[1].clone()
+    };
+    twice.edges = list(vec![twice.edges[0].clone(), reversed]);
+    refused(twice, "an edge named twice");
+    let mut off = signals.clone();
+    off.edges = list(vec![SignalEdge {
+        add: list(vec![NewSignal {
+            at: Fraction(1_000_001),
+            left: true,
+        }]),
+        ..off.edges[1].clone()
+    }]);
+    refused(off, "a place off its edge");
+    let mut none = signals;
+    none.edges = list(vec![SignalEdge {
+        add: BoundedVec::empty(),
+        remove: BoundedVec::empty(),
+        ..none.edges[0].clone()
+    }]);
+    refused(none, "no signal added or removed");
 }
 
 /// A replacement as the mod writes it: the vehicle by canonical id, each

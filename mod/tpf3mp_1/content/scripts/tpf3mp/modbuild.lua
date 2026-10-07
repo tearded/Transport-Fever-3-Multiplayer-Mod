@@ -27,8 +27,12 @@
 --   click its command will count (`keep`); the mod's game script then
 --   runs its guiUpdate as the tool's click would. Another player's build
 --   leaves it to that player's game, which sends its own;
--- - a build with constructions, removals, stops or signals is not carried
---   yet, and is stopped with why.
+-- - a build that rebuilds existing tracks in place with signals added or
+--   removed (Auto Signals, after its player's signal) goes as the signals
+--   it places (`signals`: tpf3mp/engine.lua placeSignals, a PlaceSignals
+--   action);
+-- - any other build with constructions, removals, stops or signals is not
+--   carried yet, and is stopped with why.
 --
 -- Two players whose builds apply within one window may both hand a mod's
 -- follow-up: the room then orders both, and every game applies both alike
@@ -51,7 +55,7 @@ modbuild.NOTE = "tpf3mp.lastbuild"
 -- The actions that build, after which a mod may follow up.
 modbuild.BUILDS = {
 	BuildRoad = true, BuildTrack = true, Bulldoze = true, BuildConstruction = true,
-	PlaceStop = true, EditJunctions = true,
+	PlaceStop = true, EditJunctions = true, PlaceSignals = true,
 }
 
 -- The api.cmd tables already wrapped.
@@ -146,6 +150,18 @@ function modbuild.shape(simple)
 	}
 end
 
+-- Whether a script's SimpleProposal rebuilds existing edges with edge
+-- objects added or removed: the shape of signals placed along a track
+-- (Auto Signals), which its own capture reads (install()'s `signals`).
+function modbuild.isSignals(simple)
+	local street = get(simple, "streetProposal")
+	if street == nil then return false end
+	local removes = list(get(street, "edgesToRemove"))
+	local adds, drops = list(get(street, "edgeObjectsToAdd")), list(get(street, "edgeObjectsToRemove"))
+	if removes == nil or adds == nil or drops == nil then return false end
+	return #removes > 0 and (#adds > 0 or #drops > 0)
+end
+
 -- The network of a shaped build: its first edge's (SegmentAndEntity.type:
 -- 0 street, 1 track).
 function modbuild.network(shaped)
@@ -166,6 +182,14 @@ function modbuild.judge(proposal, env, from)
 		end
 		return { why = "a script's build with no build of this player's just before it" }
 	end
+	local suffix = from and (" from " .. from) or ""
+	if env.signals and modbuild.isSignals(proposal) then
+		local ok, action, whyNot = pcall(env.signals, proposal)
+		if not ok then action, whyNot = nil, tostring(action) end
+		if action == false then return { why = "a script's build of nothing" } end
+		if not action then return { why = tostring(whyNot) } end
+		return { action = action, shape = "a script's signals" .. suffix }
+	end
 	local shaped, why = modbuild.shape(proposal)
 	if shaped == false then return { why = "a script's build of nothing" } end
 	if not shaped then return { why = why } end
@@ -175,7 +199,7 @@ function modbuild.judge(proposal, env, from)
 	if not ok then action, whyNot = nil, tostring(action) end
 	if action == false then return { why = "a script's build of nothing" } end
 	if not action then return { why = tostring(whyNot) } end
-	return { action = action, shape = "a script's follow-up build" .. (from and (" from " .. from) or "") }
+	return { action = action, shape = "a script's follow-up build" .. suffix }
 end
 
 -- Wraps cmd.makeWorldBuildProposalCmd. `env`:
@@ -187,6 +211,9 @@ end
 --   keep(count, seen) -> keeps judge()'s answer for the click `count`;
 --   capture(shaped, network) -> the action, false, or nil and why
 --                        (tpf3mp/engine.lua captureBuild);
+--   signals(proposal) -> optional: the action of signals placed along
+--                        tracks (modbuild.isSignals), false, or nil and why
+--                        (tpf3mp/engine.lua placeSignals);
 --   callers()         -> optional: the mods on the stack (guard.callers);
 --   log(line)         -> a line for the hook's log.
 -- Returns true, or nil and why.

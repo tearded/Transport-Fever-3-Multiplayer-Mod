@@ -2945,10 +2945,34 @@ construction's window its edits:
   refused (two stops on one side is a fatal assert in the game's lane
   creation on TPF2). Refused: a stop dropped where one stood (the game
   moves its lines to the new one, which a replay cannot say), more than
-  two new objects, or two on one side, signals and waypoints, a stop whose
-  engine side (`STOP_LEFT`, `STOP_RIGHT`) is not what its `left` says, and
-  a stop whose construction no GUI state noted.
-  INFERRED, not yet seen in the game: that the tool's proposal lists
+  two new objects, or two on one side, more than one signal or waypoint at
+  once, a stop whose engine side (`STOP_LEFT`, `STOP_RIGHT`) is not what
+  its `left` says, and a stop whose construction no GUI state noted.
+  A signal or waypoint carries the settings the tool builds it with
+  (`PlaceStop::params`, schema 26): `construction_react_util.getActionParams`
+  gives the tool `EdgeObjectBuilder.params` (the construction's own keys,
+  values as the tool's controls hold them: `oneWay`, and a mod's, Auto
+  Signals' `auto_signals_distance`, `_replace`, `_direction`), and
+  `capture.watchStopTool` notes them with the tool's construction
+  (`stop-tool-params`: `1`, the construction, how many, each
+  `key=<i|f|b>value`, tab-separated, keys sorted). A note is at most 512
+  bytes and a longer one is cut short, so one that would not fit, settings
+  that are not plain numbers or booleans, a note another construction's or
+  one whose count does not match refuse the signal (`a signal whose
+  settings the room cannot read: ...`), never build it with the
+  construction's defaults. Every game sets them on the signal it builds
+  (`SimpleStreetProposal.EdgeObject.params`: not in the game's API
+  reference, but a member on build 40408, and kept on the signal it
+  builds, seen 2026-10-06 in a single-player game: Auto Signals then
+  spaced signals from it). `year`, which the game's own tool adds, is not
+  among them: no base signal construction reads it.
+  Seen on build 40408 (2026-10-06): on a track with a signal on it
+  already, the signal tool's `edgeObjectsToAdd` lists the new signal
+  alone, not the kept ones; the capture pairs the records with every
+  object of the edge where there is one for each, else with the new ones
+  where there is one for each of those, and refuses any other count (`a
+  stop build whose objects it cannot pair`).
+  INFERRED, not yet seen in the game: that the stop tool's proposal lists
   `objects` in the order of `edgeObjectsToAdd`, that a kept stop keeps its
   entity there, that `STOP_LEFT` goes with `left`, that a script proposal
   names a new object `-1` in the edge's objects (TPF2's convention), that
@@ -2958,8 +2982,7 @@ construction's window its edits:
 A refusal shows its reason in the tool, and the log has each new reason
 with the proposal's shape (`the room cannot carry this ... build`); every
 build handed to the room is logged with its shape too. The upgrade, bus
-lane and tram track tools and the signal tools stay refused until their
-builds are captured. Where the profile lacks the
+lane and tram track tools stay refused until their builds are captured. Where the profile lacks the
 two targets, `clicks()` is nil and every tool stays refused.
 
 Seen on build 40408, through the deployed server with two games on one PC:
@@ -3007,10 +3030,36 @@ follow-ups`. In the room's game:
   click its command counts, which `guiUpdate` hands the room as a tool's
   (`handed the player's build to the room [a script's follow-up build from
   <mod>]`);
+- a follow-up that rebuilds existing tracks in place with signals added
+  or removed, and nothing else (Auto Signals after its player's signal,
+  `modbuild.isSignals`), is read by `engine.placeSignals` instead: each
+  added segment pairs with the one removed edge between the same nodes,
+  its tangents, type and template unchanged; each object it keeps is the
+  removed edge's own, each it drops is in `edgeObjectsToRemove` and a
+  signal, and each new one a signal whose record is the
+  `edgeObjectsToAdd` entry its entity names (-400000000, then down,
+  counted across all the edges) on its own edge; all new signals of one
+  construction, one-way and settings. It becomes one `PlaceSignals`
+  (`[a script's signals]`): each track by its ends (node 0 first), each
+  new signal's place along it and side, each removed one's place and
+  construction. Any other shape refuses it with why. Every game finds
+  every track first, by one node within 0.5 m of each end in three
+  dimensions and one track between them, and each removed signal as the
+  one of its construction within 0.25 m of its place, all one for one;
+  anything missing or found twice refuses the whole build. It rebuilds all
+  the tracks in one proposal, a place read as `1 - place` and the side
+  flipped where its track runs the other way, the lane configurations at
+  their ends naming the rebuilt tracks at once (`junctions.renamedAll`,
+  which keeps a junction's turns set by hand marked so), and gives the new
+  signals to the acting company. Behind `acceptance.lua`'s `signals`, on
+  since a two-player game on 2026-10-06 ([MODS.md](MODS.md)). The mod then hears the room's build in
+  every game, finds the first signal among the removed tracks' objects and
+  its new signals with no spacing set, and builds nothing more;
 - any other is stopped with why: `a script's follow-up of another player's
   build: that player's game hands it to the room`, `a script's build with
   no build of this player's just before it`, or what it holds that is not
-  carried from a script yet (constructions, removals, stops and signals).
+  carried from a script yet (constructions, removals, stops, and signals
+  in any other shape).
 
 Seen on build 40408 (2026-10-02, two games on one PC, Parallel Tracks):
 the mod's `guiUpdate` runs in the state the wrapper is on, its

@@ -921,6 +921,10 @@ end
 capture.STOP_NOTE = "stop-tool"
 -- Whether the signal the tool places is one-way: "1" or "0".
 capture.ONE_WAY_NOTE = "stop-tool-one-way"
+-- The settings the tool builds the stop or signal with (its
+-- EdgeObjectBuilder.params), with its construction, as capture.paramsNote
+-- writes them.
+capture.PARAMS_NOTE = "stop-tool-params"
 -- The tool the construction menu last started: its action and resource.
 capture.TOOL_NOTE = "tool"
 
@@ -946,6 +950,9 @@ function capture.watchStopTool(util, link)
 			local builder = result.constructionActionParams.edgeObjectBuilder
 			local name = builder and builder.resName
 			if type(name) == "string" and name ~= "" then
+				local params
+				local read = pcall(function() params = builder.params end)
+				link:note(capture.PARAMS_NOTE, capture.paramsNote(name, read and params or nil, read))
 				link:note(capture.STOP_NOTE, name)
 				link:note(capture.ONE_WAY_NOTE, builder.oneWay == true and "1" or "0")
 			end
@@ -958,10 +965,71 @@ function capture.watchStopTool(util, link)
 	return true
 end
 
+-- A note is at most 512 bytes (tpf3mp_native.note), and a longer one is cut
+-- short: the settings' note is written whole or not at all.
+capture.MAX_NOTE = 500
+-- What separates the fields of the settings' note.
+local SEP = "\t"
+
+-- The note of a stop tool's settings: "1", its construction, how many
+-- settings, then each as key=<i|f|b><value>, tab-separated, keys sorted;
+-- or "!" and why, for settings it cannot carry (`read` false: they did not
+-- read).
+function capture.paramsNote(name, params, read)
+	if read == false then return "!the tool's settings did not read" end
+	local ok, flat = pcall(module("engine").flatParams, params)
+	if not ok then return "!" .. tostring(flat) end
+	local parts = { "1", name, tostring(#flat) }
+	for _, p in ipairs(flat) do
+		local v = p.value
+		local text
+		if v.Int ~= nil then text = "i" .. string.format("%d", v.Int)
+		elseif v.Fixed ~= nil then text = "f" .. string.format("%.17g", v.Fixed)
+		else text = "b" .. (v.Bool and "1" or "0") end
+		parts[#parts + 1] = p.key .. "=" .. text
+	end
+	local note = table.concat(parts, SEP)
+	if #note > capture.MAX_NOTE or name:find(SEP, 1, true) then return "!more settings than a note holds" end
+	return note
+end
+
+-- The settings a paramsNote wrote for the construction `name`, as the
+-- schema's list; nil and why where it is missing, cut short, another
+-- construction's or one the tool could not carry.
+function capture.readParamsNote(note, name)
+	if type(note) ~= "string" or note == "" then return nil, "the tool's settings were not noted" end
+	if note:sub(1, 1) == "!" then return nil, note:sub(2) end
+	local parts = {}
+	for part in (note .. SEP):gmatch("([^" .. SEP .. "]*)" .. SEP) do parts[#parts + 1] = part end
+	if parts[1] ~= "1" or parts[2] ~= name then return nil, "the tool's settings are another construction's" end
+	local count = tonumber(parts[3])
+	if count == nil or count ~= #parts - 3 then return nil, "the tool's settings were cut short" end
+	local out = {}
+	for i = 4, #parts do
+		local key, kind, text = parts[i]:match("^([%a_][%w_]*)=([ifb])(.*)$")
+		local value
+		if kind == "i" and text:match("^%-?%d+$") then value = { Int = tonumber(text) }
+		elseif kind == "f" and tonumber(text) ~= nil then value = { Fixed = tonumber(text) }
+		elseif kind == "b" and (text == "1" or text == "0") then value = { Bool = text == "1" } end
+		if key == nil or value == nil then return nil, "the tool's settings did not read" end
+		if #out > 0 and out[#out].key >= key then return nil, "the tool's settings did not read" end
+		out[#out + 1] = { key = key, value = value }
+	end
+	return out
+end
+
+-- Signals a script places along tracks after its player's signal (Auto
+-- Signals; tpf3mp/modbuild.lua): a PlaceSignals action.
+function capture.signals(simple)
+	return module("engine").placeSignals(simple)
+end
+
 function capture.stop(proposal, link)
 	local noted = link and link.note and link:note(capture.STOP_NOTE) or nil
 	local oneWay = link and link.note and link:note(capture.ONE_WAY_NOTE) == "1"
-	return module("engine").placeStop(proposal, noted, oneWay)
+	local params, why
+	if noted then params, why = capture.readParamsNote(link:note(capture.PARAMS_NOTE), noted) end
+	return module("engine").placeStop(proposal, noted, oneWay, params, why)
 end
 
 -- The bulldozer's removal (tpf3mp_proto action::Bulldoze), read off its

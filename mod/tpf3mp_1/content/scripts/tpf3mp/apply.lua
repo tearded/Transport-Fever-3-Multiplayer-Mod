@@ -1346,18 +1346,12 @@ local function stopEdge(ref)
 	return e
 end
 
--- A proposal that removes edge `e` and adds it again with `objects`.
-local function rebuildWith(e, network, objects)
-	local proposal = api.type.SimpleProposal.new()
-	local s = api.type.SegmentAndEntity.new()
-	s.entity = -1
-	s.comp = api.engine.getComponent(e.id, api.type.ComponentType.BASE_EDGE)
-	s.type = network == "Track" and 1 or 0
-	s.comp.objects = objects
-	-- The edge keeps its owner: its PlayerOwned is a component of its own,
-	-- which the edge's BASE_EDGE does not carry, and without it the rebuilt
-	-- edge would be no one's (a company's road everyone's).
-	local owner = require_companies().ownerOf(api, e.id)
+-- The edge `id` rebuilt as `s` keeps its owner: its PlayerOwned is a
+-- component of its own, which the edge's BASE_EDGE does not carry, and
+-- without it the rebuilt edge would be no one's (a company's road
+-- everyone's).
+local function keepOwner(s, id)
+	local owner = require_companies().ownerOf(api, id)
 	if owner ~= nil then
 		local ok = pcall(function() s.playerOwned.player = owner end)
 		if not ok then
@@ -1366,6 +1360,17 @@ local function rebuildWith(e, network, objects)
 			s.playerOwned = owned
 		end
 	end
+end
+
+-- A proposal that removes edge `e` and adds it again with `objects`.
+local function rebuildWith(e, network, objects)
+	local proposal = api.type.SimpleProposal.new()
+	local s = api.type.SegmentAndEntity.new()
+	s.entity = -1
+	s.comp = api.engine.getComponent(e.id, api.type.ComponentType.BASE_EDGE)
+	s.type = network == "Track" and 1 or 0
+	s.comp.objects = objects
+	keepOwner(s, e.id)
 	proposal.streetProposal.edgesToAdd = { s }
 	proposal.streetProposal.edgesToRemove = { e.id }
 	-- The lane configurations at its ends name the edge, so they go and come
@@ -1547,6 +1552,12 @@ function HANDLERS.PlaceStop(stop)
 		-- (docs/BUILDING.md: an empty name leaves both off); its group is
 		-- named after its town once built (settleStop).
 		eo.name = native or PROVISIONAL_STOP_NAME
+		-- The settings the originator's tool built it with (a mod's on a
+		-- signal among them), in every game alike; none, the construction's
+		-- defaults (SimpleStreetProposal.EdgeObject.params: not in the
+		-- game's API reference, but a member on build 40408, and the signal
+		-- it builds keeps them, 2026-10-06).
+		if stop.params and #stop.params > 0 then eo.params = params(stop.params) end
 		added[k] = eo
 	end
 	local proposal = rebuildWith(e, network, objects)
@@ -1588,6 +1599,177 @@ function removeEdgeObject(ref, context)
 	proposal.streetProposal.edgeObjectsToRemove = { best }
 	log("removing " .. tostring(ref.model) .. " " .. tostring(best) .. " from " .. network .. " edge " .. e.id)
 	return buildProposal(proposal, context)
+end
+
+-- How near each end of a track a PlaceSignals names is its node, in three
+-- dimensions: the node's own position, rounded to the millimetre.
+local SIGNAL_END_TOLERANCE = 0.5
+-- How near where a removed signal stood, along its track, the signal of its
+-- construction there is.
+local SIGNAL_TOLERANCE = 0.25
+
+-- The track between the nodes at `a` and `b` (an action's ends), as it
+-- stands: its id, component and whether it runs from `a` to `b`. One track
+-- node within SIGNAL_END_TOLERANCE of each end, in three dimensions (a
+-- track may pass over another), and one track between them; two of either
+-- refuse it, never chosen between by this game's own entities (D8).
+local function signalTrack(nodes, a, b)
+	local function only(p)
+		local found
+		for _, n in ipairs(nodes) do
+			local dx, dy, dz = n.pos[1] - p.x, n.pos[2] - p.y, (n.pos[3] or 0) - (p.z or 0)
+			if dx * dx + dy * dy + dz * dz <= SIGNAL_END_TOLERANCE * SIGNAL_END_TOLERANCE then
+				if found ~= nil then error("two track nodes where a signal's track ends", 0) end
+				found = n
+			end
+		end
+		if found == nil then error("no track node where a signal's track ends", 0) end
+		return found
+	end
+	local na, nb = only(a), only(b)
+	if na.id == nb.id then error("a signal's track from a node to itself", 0) end
+	local ids = api.engine.system.streetSystem.getNodeTrackSegments(na.id)
+	local found
+	for i = 1, (ids and #ids or 0) do
+		local c = api.engine.getComponent(ids[i], api.type.ComponentType.BASE_EDGE)
+		if c and ((c.node0 == na.id and c.node1 == nb.id) or (c.node0 == nb.id and c.node1 == na.id)) then
+			if found ~= nil then error("two tracks between a signal's track's ends", 0) end
+			local forward = c.node0 == na.id
+			found = { id = ids[i], comp = c, forward = forward,
+				p0 = forward and na.pos or nb.pos, p1 = forward and nb.pos or na.pos,
+				t0 = arr(c.tangent0), t1 = arr(c.tangent1) }
+		end
+	end
+	if found == nil then error("no track between a signal's track's ends", 0) end
+	return found
+end
+
+-- A track's length along its curve, in metres (its Hermite curve in 32
+-- steps: near enough for SIGNAL_TOLERANCE on the tracks a game draws).
+local function trackLength(t)
+	local length, last = 0, t.p0
+	for i = 1, 32 do
+		local p = geom.hermitePos(t.p0, t.t0, t.p1, t.t1, i / 32)
+		local dx, dy, dz = p[1] - last[1], p[2] - last[2], (p[3] or 0) - (last[3] or 0)
+		length = length + math.sqrt(dx * dx + dy * dy + dz * dz)
+		last = p
+	end
+	return length
+end
+
+-- The signals a PlaceSignals placed are the acting company's, the same in
+-- every game, as a stop's are (settleStop): each track found again by its
+-- ends, and each object on it that it did not have before given to the
+-- company where it is anyone else's.
+local function settleSignals(tracks, sig, me)
+	local nodes = readNodes("Track")
+	local companies = require_companies()
+	local given = 0
+	for i, entry in ipairs(sig.edges) do
+		local had = {}
+		for _, o in ipairs(tracks[i].comp.objects or {}) do had[o[1]] = true end
+		local ok, t = pcall(signalTrack, nodes, entry.edge.a, entry.edge.b)
+		if not ok then
+			log("the new signals: a track cannot be found again to settle their owner: " .. tostring(t))
+		else
+			for _, o in ipairs(t.comp.objects or {}) do
+				if not had[o[1]] and companies.ownerOf(api, o[1]) ~= me then
+					local sent = pcall(function() send(api.cmd.makeEntitySetPlayerCmd(o[1], me)) end)
+					if sent then given = given + 1 else log("the new signal " .. tostring(o[1]) .. ": its owner was not set") end
+				end
+			end
+		end
+	end
+	if given > 0 then log("the new signals made the acting company's (" .. tostring(me) .. "): " .. given) end
+end
+
+-- Signals added to and removed from existing tracks (action::PlaceSignals:
+-- what Auto Signals builds after its player's signal), in one proposal:
+-- every track named is rebuilt between its nodes with its other objects
+-- kept under their own entities, as a stop is placed. Every track and every
+-- removed signal is found first, in the world as it stands, one for one;
+-- anything missing or ambiguous refuses the whole build, in every game
+-- alike. A place along a track is from its `a` end: where this game's track
+-- runs from `b`, it is 1 - place there, and the side flips.
+function HANDLERS.PlaceSignals(sig)
+	local C = api.type.ComponentType
+	local SIGNAL = enum("EdgeObjectType").SIGNAL
+	local nodes = readNodes("Track")
+	local tracks, seen = {}, {}
+	for i, entry in ipairs(sig.edges) do
+		local t = signalTrack(nodes, entry.edge.a, entry.edge.b)
+		if seen[t.id] then error("a signal build that names a track twice", 0) end
+		seen[t.id] = true
+		tracks[i] = t
+	end
+	local me = company()
+	local segs, removed, added, gone, renames, ends = {}, {}, {}, {}, {}, {}
+	for i, entry in ipairs(sig.edges) do
+		local t = tracks[i]
+		local function here(at) if t.forward then return at end return 1 - at end
+		local taken = {}
+		local length
+		for _, old in ipairs(entry.remove or {}) do
+			length = length or trackLength(t)
+			local want, best = here(old.at), nil
+			for _, o in ipairs(t.comp.objects or {}) do
+				local c = o[2] == SIGNAL and not taken[o[1]] and api.engine.getComponent(o[1], C.EDGE_OBJECT)
+				if c and c.edgeObjectConstruction == old.model and math.abs(c.param - want) * length <= SIGNAL_TOLERANCE then
+					if best ~= nil then error("two signals where one is removed", 0) end
+					best = o[1]
+				end
+			end
+			if best == nil then error("no " .. tostring(old.model) .. " where a signal is removed", 0) end
+			mine(best, "signal")
+			taken[best] = true
+			gone[#gone + 1] = best
+		end
+		local objects = {}
+		for _, o in ipairs(t.comp.objects or {}) do
+			if not taken[o[1]] then objects[#objects + 1] = { o[1], o[2] } end
+		end
+		for _, new in ipairs(entry.add or {}) do
+			local k = #added + 1
+			objects[#objects + 1] = { NEW_EDGE_OBJECT - (k - 1), SIGNAL }
+			local eo = api.type.SimpleStreetProposal.EdgeObject.new()
+			eo.edgeEntity = -i
+			eo.param = here(new.at)
+			eo.left = (new.left == true) == t.forward
+			eo.oneWay = sig.one_way == true
+			eo.model = sig.model
+			eo.playerEntity = me
+			-- Named, as a stop the room places is, so the engine gives it
+			-- its owner (docs/BUILDING.md).
+			eo.name = PROVISIONAL_STOP_NAME
+			if sig.params and #sig.params > 0 then eo.params = params(sig.params) end
+			added[k] = eo
+		end
+		local s = api.type.SegmentAndEntity.new()
+		s.entity = -i
+		s.comp = api.engine.getComponent(t.id, C.BASE_EDGE)
+		s.type = 1
+		s.comp.objects = objects
+		keepOwner(s, t.id)
+		segs[i] = s
+		removed[i] = t.id
+		renames[t.id] = { id = -i, comp = s.comp }
+		ends[#ends + 1] = t.comp.node0
+		ends[#ends + 1] = t.comp.node1
+	end
+	local proposal = api.type.SimpleProposal.new()
+	proposal.streetProposal.edgesToAdd = segs
+	proposal.streetProposal.edgesToRemove = removed
+	proposal.streetProposal.edgeObjectsToAdd = added
+	if #gone > 0 then proposal.streetProposal.edgeObjectsToRemove = gone end
+	-- The lane configurations at the tracks' ends name them: they go and
+	-- come back naming the rebuilt tracks, all in one (junctions.renamedAll).
+	junctions.renamedAll(proposal, ends, renames)
+	log(string.format("placing %d and removing %d signals on %d tracks", #added, #gone, #segs))
+	local context = api.type.Context.new()
+	context.player = me
+	local built = buildProposal(proposal, context)
+	settleSignals(tracks, sig, me)
+	return built
 end
 
 -- ------------------------------------------------------ vehicles and lines

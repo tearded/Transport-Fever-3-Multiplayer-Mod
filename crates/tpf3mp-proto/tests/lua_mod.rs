@@ -7632,12 +7632,12 @@ fn bridge_signals_follow_the_cursor_ray_instead_of_the_ground_beyond_it() {
             camera = {getEye = function() return {x=50,y=-100,z=150} end}
         }
         local engine = ug_require('tpf3mp_1::/scripts/tpf3mp/engine.lua')
-        local action = assert(engine.placeStop(P, 'signal.con', true)).PlaceStop
+        local action = assert(engine.placeStop(P, 'signal.con', true, {})).PlaceStop
         assert(math.abs(action.at.y) < 0.001, 'bridge signal moved towards the ground hit: ' .. action.at.y)
         assert(math.abs(action.at.z - 50) < 0.001)
         assert(action.object == 'Signal' and action.one_way)
         P.proposal.edgeObjectsToAdd[1].param = 0.25
-        local explicit = assert(engine.placeStop(P, 'signal.con', false)).PlaceStop
+        local explicit = assert(engine.placeStop(P, 'signal.con', false, {})).PlaceStop
         assert(explicit.at.y < -20, 'explicit proposal position must win over the camera')
     "#).exec().unwrap();
 }
@@ -7825,14 +7825,63 @@ fn a_stop_the_room_cannot_carry_says_why() {
     let signal = stop_proposal("", "", "")
         .replace("category = 0", "category = 2")
         .replace("{ -400000000, 0 }", "{ -400000000, 2 }");
-    let carried: String = lua
+    // Without the settings the tool builds it with: refused, never built
+    // with the construction's defaults (a mod's spacing on it would be lost).
+    let unread: String = lua
         .load(format!(
-            "local a = ug_require('tpf3mp_1::/scripts/tpf3mp/engine.lua').placeStop({signal}, nil, true) \
-             return a.PlaceStop.object .. ' ' .. tostring(a.PlaceStop.one_way) .. ' ' .. tostring(schema_check(a))"
+            "local _, why = ug_require('tpf3mp_1::/scripts/tpf3mp/engine.lua').placeStop({signal}, nil, true) \
+             return why"
         ))
         .eval()
         .unwrap_or_else(|error| panic!("{error}"));
-    assert_eq!(carried, "Signal true true");
+    assert_eq!(unread, "a signal whose settings the room cannot read");
+    let carried: String = lua
+        .load(format!(
+            "local a = ug_require('tpf3mp_1::/scripts/tpf3mp/engine.lua').placeStop({signal}, nil, true, \
+                 {{ {{ key = 'auto_signals_distance', value = {{ Int = 4 }} }} }}) \
+             return a.PlaceStop.object .. ' ' .. tostring(a.PlaceStop.one_way) .. ' ' \
+                 .. a.PlaceStop.params[1].key .. '=' .. a.PlaceStop.params[1].value.Int .. ' ' \
+                 .. tostring(schema_check(a))"
+        ))
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(carried, "Signal true auto_signals_distance=4 true");
+    // On a track with a signal on it already, the signal tool lists the new
+    // signal alone in edgeObjectsToAdd (build 40408, 2026-10-06): paired
+    // with the one new object, carried, the other kept. Records that match
+    // neither every object nor the new ones are refused.
+    let beside_signal = signal
+        .replace("objects = {  }", "objects = { { 555, 2 } }")
+        .replace("objects = {  {", "objects = { { 555, 2 }, {");
+    assert!(
+        beside_signal.contains("{ 555, 2 }, { -400000000, 2 }"),
+        "{beside_signal}"
+    );
+    let paired: String = lua
+        .load(format!(
+            "local a, why = ug_require('tpf3mp_1::/scripts/tpf3mp/engine.lua').placeStop({beside_signal}, nil, true, {{}}) \
+             if a == nil then return why end \
+             return a.PlaceStop.object .. ' ' .. tostring(a.PlaceStop.left) .. ' ' .. tostring(schema_check(a))"
+        ))
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(paired, "Signal true true");
+    let unpaired = beside_signal.replace(
+        "edgeObjectsToAdd = {  {",
+        "edgeObjectsToAdd = { { category = 2 }, { category = 2 }, {",
+    );
+    assert!(
+        unpaired.contains("{ category = 2 }, { category = 2 }"),
+        "{unpaired}"
+    );
+    let refused: String = lua
+        .load(format!(
+            "local _, why = ug_require('tpf3mp_1::/scripts/tpf3mp/engine.lua').placeStop({unpaired}, nil, true, {{}}) \
+             return why"
+        ))
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(refused, "a stop build whose objects it cannot pair");
     let side = stop_proposal("", "", "").replace("left = true", "left = false");
     assert_eq!(capture(side), "a stop whose side the room cannot say");
     // With a stop on the other side, kept: carried.
@@ -14163,4 +14212,442 @@ fn the_finance_window_shows_a_founded_companys_own_loans() {
         .eval()
         .unwrap();
     assert_eq!(board, "0 0");
+}
+
+/// Tracks over FAKE_NETWORK and FAKE_STOPS, for signals: track 200 runs east
+/// from node 20 (0, 200) to node 21 (100, 200), track 201 west from node 22
+/// (200, 200) to node 21. On 200 stand the player's signal 300 (Auto
+/// Signals' spacing set, a quarter of the way) and signal 301 (three
+/// quarters of the way). Node 21 has a lane configuration.
+const FAKE_TRACKS: &str = r#"
+api.type.enum.EdgeObjectType = { STOP_LEFT = 0, STOP_RIGHT = 1, SIGNAL = 2 }
+NODES[20] = { x = 0, y = 200, z = 0 }
+NODES[21] = { x = 100, y = 200, z = 0 }
+NODES[22] = { x = 200, y = 200, z = 0 }
+EDGES[200] = { node0 = 20, node1 = 21, tangent0 = { x = 100, y = 0, z = 0 }, tangent1 = { x = 100, y = 0, z = 0 },
+               type = 0, typeIndex = -1, objects = { { 300, 2 }, { 301, 2 } }, laneConfigs = { 'track' } }
+EDGES[201] = { node0 = 22, node1 = 21, tangent0 = { x = -100, y = 0, z = 0 }, tangent1 = { x = -100, y = 0, z = 0 },
+               type = 0, typeIndex = -1, objects = {}, laneConfigs = { 'track' } }
+TRACKS = { [20] = { 200 }, [21] = { 200, 201 }, [22] = { 201 } }
+-- Node 21's turn from track 200 into 201, which the player set by hand.
+CONFIGS[21] = api.type.BaseNodeConfig.new()
+CONFIGS[21].laneConnections = { { segment0 = 200, lane0 = 0, segment1 = 201, lane1 = 0, withRoad = false, withTram = false } }
+CONFIGS[21].userModifiedLaneConnections = true
+OBJECTS[300] = { param = 0.25, edgeObjectConstruction = '::/infrastructure/signal/signal_path_c.con',
+                 params = { auto_signals_distance = 3 } }
+OBJECTS[301] = { param = 0.75, edgeObjectConstruction = '::/infrastructure/signal/signal_path_a.con' }
+local streets = api.engine.system.streetSystem
+streets.getNode2TrackEdgeMap = function()
+    local m = {}
+    for node, edges in pairs(TRACKS) do m[node] = edges end
+    return m
+end
+streets.getNodeTrackSegments = function(node) return TRACKS[node] or {} end
+"#;
+
+/// What Auto Signals sends after signal 300 with 50 m spacing, replacing
+/// (auto_signals.script.lua, submit): both tracks rebuilt in place, a new
+/// signal on 200 where 301 stood, which it removes, and two on 201, which
+/// runs the other way (so on its other side); the new signals named by
+/// their place in edgeObjectsToAdd, across both tracks.
+const SIGNALS_BUILD: &str = "{ constructionsToAdd = {}, constructionsToRemove = {}, streetProposal = { \
+    nodesToAdd = {}, nodesToRemove = {}, edgesToRemove = { 200, 201 }, \
+    edgesToAdd = { \
+      { entity = -1, type = 1, comp = { node0 = 20, node1 = 21, type = 0, typeIndex = -1, \
+          tangent0 = { x = 100, y = 0, z = 0 }, tangent1 = { x = 100, y = 0, z = 0 }, \
+          objects = { { 300, 2 }, { -400000000, 2 } } } }, \
+      { entity = -2, type = 1, comp = { node0 = 22, node1 = 21, type = 0, typeIndex = -1, \
+          tangent0 = { x = -100, y = 0, z = 0 }, tangent1 = { x = -100, y = 0, z = 0 }, \
+          objects = { { -400000001, 2 }, { -400000002, 2 } } } } }, \
+    edgeObjectsToAdd = { \
+      { edgeEntity = -1, param = 0.75, left = true, oneWay = false, \
+        model = '::/infrastructure/signal/signal_path_c.con' }, \
+      { edgeEntity = -2, param = 0.75, left = false, oneWay = false, \
+        model = '::/infrastructure/signal/signal_path_c.con' }, \
+      { edgeEntity = -2, param = 0.25, left = false, oneWay = false, \
+        model = '::/infrastructure/signal/signal_path_c.con' } }, \
+    edgeObjectsToRemove = { 301 } } }";
+
+/// The signal tool's settings travel with its signal: the GUI notes them
+/// with the tool's construction, the capture carries them in PlaceStop,
+/// and every game builds the signal with them (Auto Signals reads its
+/// spacing off the built signal). A note another construction's, cut short
+/// or of settings the room cannot carry refuses the signal, never builds it
+/// with the defaults.
+#[test]
+fn a_signal_keeps_the_settings_the_tool_built_it_with_in_every_game() {
+    let (lua, _script) = engine();
+    lua.load(FAKE_NETWORK).exec().unwrap();
+    lua.load(FAKE_STOPS).exec().unwrap();
+    let signal = stop_proposal("", "", "")
+        .replace("category = 0", "category = 2")
+        .replace("{ -400000000, 0 }", "{ -400000000, 2 }")
+        .replace("modelId = 77", "modelId = 78");
+    lua.load(
+        "CAPTURE = ug_require('tpf3mp_1::/scripts/tpf3mp/capture.lua') \
+         local util = { getActionParams = function(definition) \
+             return { constructionActionParams = { edgeObjectBuilder = { resName = definition.res, \
+                 params = definition.params, oneWay = false } } } end } \
+         package.loaded['tpf3mp.stopToolWatched'] = nil \
+         assert(CAPTURE.watchStopTool(util, ug_require('tpf3mp_1::/scripts/tpf3mp/bridge.lua').attach(tpf3mp_native))) \
+         TOOL = util",
+    )
+    .exec()
+    .unwrap();
+    let ask = |definition: &str| -> String {
+        lua.load(format!(
+            "TOOL.getActionParams({definition}) \
+             HOOK.room = true HOOK.clicks = 0 SCRIPT.guiUpdate({{}}, nil, nil) \
+             local r = SCRIPT.guiHandleEvent({{}}, nil, nil, '', 'streetTerminalBuilder', \
+                 'builder.proposalCreate', {{ {signal} }}) \
+             if r == nil then return 'nil' end \
+             for text in pairs(r.errorMessages) do return text end"
+        ))
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}"))
+    };
+    let signal_c = "res = 'infrastructure/signal/signal_path_c.con'";
+    // A setting the room cannot carry (text), and more settings than a note
+    // holds: refused, saying why.
+    assert_eq!(
+        ask(&format!("{{ {signal_c}, params = {{ label = 'x' }} }}")),
+        "Not in multiplayer yet: a signal whose settings the room cannot read: setting label is a string"
+    );
+    let many: Vec<String> = (0..30)
+        .map(|i| format!("a_rather_long_setting_name_{i:02} = {i}"))
+        .collect();
+    assert_eq!(
+        ask(&format!(
+            "{{ {signal_c}, params = {{ {} }} }}",
+            many.join(", ")
+        )),
+        "Not in multiplayer yet: a signal whose settings the room cannot read: more settings than a note holds"
+    );
+    // The note of another construction than the tool's: refused.
+    lua.load("HOOK.notes['stop-tool-params'] = '1\\tinfrastructure/signal/signal_path_a.con\\t0'")
+        .exec()
+        .unwrap();
+    lua.load("HOOK.notes['stop-tool'] = 'infrastructure/signal/signal_path_c.con'")
+        .exec()
+        .unwrap();
+    let refused: String = lua
+        .load(format!(
+            "local _, why = CAPTURE.stop({signal}, ug_require('tpf3mp_1::/scripts/tpf3mp/bridge.lua').attach(tpf3mp_native)) \
+             return why"
+        ))
+        .eval()
+        .unwrap();
+    assert_eq!(
+        refused,
+        "a signal whose settings the room cannot read: the tool's settings are another construction's"
+    );
+    // Cut short (a note is at most 512 bytes, and longer ones are cut):
+    // refused.
+    let cut: String = lua
+        .load(
+            "local note = CAPTURE.paramsNote('c.con', { a = 1, b = 2 }) \
+             local _, why = CAPTURE.readParamsNote(note:sub(1, #note - 5), 'c.con') return why",
+        )
+        .eval()
+        .unwrap();
+    assert_eq!(cut, "the tool's settings were cut short");
+
+    // Auto Signals' settings on the base game's signal: carried, sorted.
+    assert_eq!(
+        ask(&format!(
+            "{{ {signal_c}, params = {{ oneWay = 2, auto_signals_replace = 1, auto_signals_distance = 4 }} }}"
+        )),
+        "nil",
+        "the signal tool builds through the room"
+    );
+    lua.load("HOOK.clicks = 1 SCRIPT.guiUpdate({}, nil, nil)")
+        .exec()
+        .unwrap();
+    let handed: String = lua
+        .load(
+            "local s = HOOK.commands[#HOOK.commands].PlaceStop local out = {} \
+             for _, p in ipairs(s.params) do out[#out + 1] = p.key .. '=' .. p.value.Int end \
+             return s.object .. ' ' .. s.model .. ' ' .. table.concat(out, ',') .. ' ' \
+                 .. tostring(schema_check(HOOK.commands[#HOOK.commands]))",
+        )
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}\n{}", hook_log(&lua)));
+    assert_eq!(
+        handed,
+        "Signal infrastructure/signal/signal_path_c.con \
+         auto_signals_distance=4,auto_signals_replace=1,oneWay=2 true"
+    );
+    // Every game builds it with them.
+    lua.load("HOOK.batch = { HOOK.commands[#HOOK.commands] } UPDATE({}, STATE, 0.2)")
+        .exec()
+        .unwrap();
+    let built: String = lua
+        .load(
+            "local o = SENT[1].proposal.streetProposal.edgeObjectsToAdd[1] \
+             return o.params.auto_signals_distance .. ' ' .. o.params.auto_signals_replace .. ' ' .. o.params.oneWay",
+        )
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}\n{}", hook_log(&lua)));
+    assert_eq!(built, "4 1 2");
+}
+
+/// Auto Signals after its player's signal (D27; docs/MODS.md): the script's
+/// build, both tracks rebuilt with signals added and one replaced, goes to
+/// the room from the player's game as a PlaceSignals, once its acceptance
+/// switch is on; every game builds it in one proposal, in a game whose
+/// track 201 runs the other way at the other places and side, the junction
+/// between the two tracks naming both rebuilt tracks, the new signals the
+/// acting company's.
+#[test]
+fn auto_signals_spacing_goes_to_the_room_and_every_game_builds_it() {
+    let (lua, _script) = engine();
+    lua.load(FAKE_NETWORK).exec().unwrap();
+    lua.load(FAKE_STOPS).exec().unwrap();
+    lua.load(FAKE_TRACKS).exec().unwrap();
+    let stop = "{ PlaceStop = { edge = { network = 'Track', ends = { a = { x = 0, y = 200, z = 0 }, \
+        b = { x = 100, y = 200, z = 0 } } }, at = { x = 25, y = 200, z = 0 }, left = true, \
+        direction = { x = 1, y = 0, z = 0 }, model = 'infrastructure/signal/signal_path_c.con', \
+        object = 'Signal' } }";
+    lua.load(format!(
+        "HOOK.room = true HOOK.clicks = 0 HOOK.status = {{ me_id = 'me' }} \
+         SCRIPT.guiUpdate({{}}, nil, nil) \
+         function BUILD(proposal) \
+             api.cmd.makeWorldBuildProposalCmd(proposal, {{}}, false, true) \
+             HOOK.clicks = HOOK.clicks + 1 \
+             SCRIPT.guiUpdate({{}}, nil, nil) \
+         end \
+         HOOK.batch = {{ {stop} }} HOOK.origins = {{ 'me' }} UPDATE({{}}, STATE, 0.2) \
+         SENT = {{}} \
+         SCRIPT.guiUpdate({{}}, nil, nil) \
+         local acceptance = ug_require('tpf3mp_1::/scripts/tpf3mp/acceptance.lua') \
+         ON = acceptance.signals \
+         acceptance.signals = false \
+         BUILD({SIGNALS_BUILD}) \
+         acceptance.signals = true \
+         BUILD({SIGNALS_BUILD})"
+    ))
+    .exec()
+    .unwrap_or_else(|error| panic!("{error}\n{}", hook_log(&lua)));
+    let logged: Vec<String> = lua.load("return HOOK.logged").eval().unwrap();
+    assert!(
+        logged
+            .iter()
+            .any(|l| l.contains("signals awaits two-player game acceptance")),
+        "with its switch off, nothing goes: {logged:?}"
+    );
+    assert!(
+        lua.load("return ON").eval::<bool>().unwrap(),
+        "on since the two-player game of 2026-10-06"
+    );
+    let handed: String = lua
+        .load(
+            "local s = HOOK.commands[#HOOK.commands].PlaceSignals local out = {} \
+             local function n(v) return string.format('%.2f', v) end \
+             for _, e in ipairs(s.edges) do \
+                 local adds, removes = {}, {} \
+                 for _, a in ipairs(e.add) do adds[#adds + 1] = n(a.at) .. (a.left and 'L' or 'R') end \
+                 for _, r in ipairs(e.remove) do removes[#removes + 1] = n(r.at) .. ' ' .. r.model end \
+                 out[#out + 1] = n(e.edge.a.x) .. '>' .. n(e.edge.b.x) .. ' +' .. table.concat(adds, ',') \
+                     .. ' -' .. table.concat(removes, ',') \
+             end \
+             return s.model .. ' ' .. tostring(s.one_way) .. ' ' .. #s.params .. ' | ' \
+                 .. table.concat(out, ' | ') .. ' | ' .. tostring(schema_check(HOOK.commands[#HOOK.commands]))",
+        )
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}\n{}", hook_log(&lua)));
+    assert_eq!(
+        handed,
+        "::/infrastructure/signal/signal_path_c.con false 0 \
+         | 0.00>100.00 +0.75L -0.75 ::/infrastructure/signal/signal_path_a.con \
+         | 200.00>100.00 +0.75R,0.25R - | true"
+    );
+    assert!(
+        logged
+            .iter()
+            .any(|l| l == "handed the player's build to the room [a script's signals]"),
+        "{logged:?}"
+    );
+
+    // Another game, whose track 201 runs from node 21 to node 22.
+    lua.load(
+        "EDGES[201].node0, EDGES[201].node1 = 21, 22 \
+         EDGES[201].tangent0, EDGES[201].tangent1 = { x = 100, y = 0, z = 0 }, { x = 100, y = 0, z = 0 } \
+         SENT = {} \
+         HOOK.batch = { HOOK.commands[#HOOK.commands] } HOOK.origins = { 'other' } UPDATE({}, STATE, 0.2)",
+    )
+    .exec()
+    .unwrap_or_else(|error| panic!("{error}\n{}", hook_log(&lua)));
+    let placed: String = lua
+        .load(
+            "local c = SENT[1] local p = c.proposal.streetProposal local out = {} \
+             for _, e in ipairs(p.edgesToAdd) do \
+                 local o = {} for _, x in ipairs(e.comp.objects) do o[#o + 1] = x[1] .. ':' .. x[2] end \
+                 out[#out + 1] = e.entity .. '[' .. table.concat(o, ',') .. ']' \
+             end \
+             for _, eo in ipairs(p.edgeObjectsToAdd) do \
+                 out[#out + 1] = eo.edgeEntity .. '@' .. string.format('%.2f', eo.param) .. (eo.left and 'L' or 'R') \
+                     .. ' ' .. eo.model .. ' ' .. tostring(eo.playerEntity) \
+             end \
+             return table.concat(out, ' ') .. ' | -' .. table.concat(p.edgesToRemove, ',') \
+                 .. ' | -' .. table.concat(p.edgeObjectsToRemove, ',') \
+                 .. ' | ' .. table.concat(p.nodeConfigsToRemove, ',') \
+                 .. ' | ' .. tostring(c.context.player) .. ' ' .. tostring(c.playerInitiated)",
+        )
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}\n{}", hook_log(&lua)));
+    assert_eq!(
+        placed,
+        "-1[300:2,-400000000:2] -2[-400000001:2,-400000002:2] \
+         -1@0.75L ::/infrastructure/signal/signal_path_c.con 25 \
+         -2@0.25L ::/infrastructure/signal/signal_path_c.con 25 \
+         -2@0.75L ::/infrastructure/signal/signal_path_c.con 25 \
+         | -200,201 | -301 | 21 | 25 true"
+    );
+    // The junction between them names both rebuilt tracks, its turn still
+    // marked as set by hand.
+    let junction: String = lua
+        .load(
+            "local p = SENT[1].proposal.streetProposal \
+             for _, n in ipairs(p.nodeConfigsToAdd) do if n.entity == 21 then \
+                 local t = n.comp.laneConnections[1] \
+                 return t.segment0 .. '>' .. t.segment1 .. ' ' .. tostring(n.comp.userModifiedLaneConnections) \
+             end end \
+             return 'not configured'",
+        )
+        .eval()
+        .unwrap();
+    assert_eq!(junction, "-1>-2 true");
+}
+
+/// What the capture of a script's signals refuses, saying why: anything
+/// beyond tracks rebuilt in place with signals added or removed, and
+/// anything it cannot pair one for one. And what a game refuses to apply:
+/// a track or a removed signal it cannot find, or finds twice.
+#[test]
+fn a_signal_build_the_room_cannot_carry_says_why() {
+    let (lua, _script) = engine();
+    lua.load(FAKE_NETWORK).exec().unwrap();
+    lua.load(FAKE_STOPS).exec().unwrap();
+    lua.load(FAKE_TRACKS).exec().unwrap();
+    let why = |change: &str| -> String {
+        lua.load(format!(
+            "local p = {SIGNALS_BUILD} local s = p.streetProposal {change} \
+             local a, why = ug_require('tpf3mp_1::/scripts/tpf3mp/engine.lua').placeSignals(p) \
+             if a == nil then return why end \
+             if a == false then return 'false' end \
+             return tostring(schema_check(a))"
+        ))
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}"))
+    };
+    assert_eq!(why(""), "true");
+    let cases = [
+        (
+            "s.edgesToAdd[2].comp.tangent0 = { x = -90, y = 0, z = 0 }",
+            "a signal build that changes its track",
+        ),
+        (
+            "s.edgesToAdd[2].comp.node1 = 20",
+            "a signal build that moves an edge",
+        ),
+        (
+            "s.nodesToAdd = { { entity = -3 } }",
+            "a signal build that changes nodes or their junctions",
+        ),
+        (
+            "s.edgeObjectsToRemove = {}",
+            "a signal build that drops an object without removing it",
+        ),
+        (
+            "s.edgesToAdd[1].comp.objects = { { 300, 2 }, { 301, 2 }, { -400000000, 2 } }",
+            "a signal build that keeps an object it removes",
+        ),
+        (
+            "s.edgesToAdd[2].comp.objects[1] = { 301, 2 }",
+            "a signal build that moves an object from another edge",
+        ),
+        (
+            "s.edgeObjectsToAdd[2].edgeEntity = -1",
+            "a new signal recorded on another edge",
+        ),
+        (
+            "s.edgesToAdd[2].comp.objects = { { -400000001, 2 } }",
+            "a new signal on no edge",
+        ),
+        (
+            "s.edgesToAdd[2].comp.objects[1] = { -400000001, 0 }",
+            "a script's build of a new stop",
+        ),
+        (
+            "s.edgeObjectsToAdd[3].model = '::/infrastructure/signal/signal_path_a.con'",
+            "signals of more than one kind at once",
+        ),
+        ("s.edgesToAdd[1].type = 0", "a signal build on a street"),
+        (
+            "s.edgeObjectsToAdd[1].param = 1.5",
+            "a new signal with no place on its edge",
+        ),
+        (
+            "s.edgesToRemove = { 200 }",
+            "a signal build that does not rebuild its edges one for one",
+        ),
+        (
+            "s.edgeObjectsToRemove = { 301, 999 }",
+            "a signal build that removes an object of no edge it rebuilds",
+        ),
+    ];
+    for (change, expected) in cases {
+        assert_eq!(why(change), expected, "{change}");
+    }
+
+    // Applying: a second node where a track ends (a track over another
+    // within half a metre) refuses it, and so does a removed signal that is
+    // not there, or is there twice.
+    let action: String = lua
+        .load(format!(
+            "local a = ug_require('tpf3mp_1::/scripts/tpf3mp/engine.lua').placeSignals({SIGNALS_BUILD}) \
+             ACTION = a return 'ok'"
+        ))
+        .eval()
+        .unwrap();
+    assert_eq!(action, "ok");
+    let apply = |setup: &str| -> String {
+        lua.load(format!(
+            "{setup} ug_require('tpf3mp_1::/scripts/tpf3mp/acceptance.lua').signals = true \
+             SENT = {{}} HOOK.batch = {{ ACTION }} HOOK.origins = {{ 'other' }} UPDATE({{}}, STATE, 0.2) \
+             return #SENT == 0 and 'refused' or 'built'"
+        ))
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}\n{}", hook_log(&lua)))
+    };
+    assert_eq!(
+        apply("NODES[23] = { x = 100, y = 200, z = 0.3 } TRACKS[23] = { 201 }"),
+        "refused"
+    );
+    assert!(
+        hook_log(&lua).contains("two track nodes where a signal's track ends"),
+        "{}",
+        hook_log(&lua)
+    );
+    assert_eq!(
+        apply("NODES[23] = nil TRACKS[23] = nil OBJECTS[301] = nil"),
+        "refused"
+    );
+    assert!(
+        hook_log(&lua)
+            .contains("no ::/infrastructure/signal/signal_path_a.con where a signal is removed")
+    );
+    assert_eq!(
+        apply(
+            "OBJECTS[301] = { param = 0.75, edgeObjectConstruction = '::/infrastructure/signal/signal_path_a.con' } \
+             OBJECTS[302] = { param = 0.751, edgeObjectConstruction = '::/infrastructure/signal/signal_path_a.con' } \
+             EDGES[200].objects = { { 300, 2 }, { 301, 2 }, { 302, 2 } }"
+        ),
+        "refused"
+    );
+    assert!(hook_log(&lua).contains("two signals where one is removed"));
+    assert_eq!(
+        apply("OBJECTS[302] = nil EDGES[200].objects = { { 300, 2 }, { 301, 2 } }"),
+        "built"
+    );
 }

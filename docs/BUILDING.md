@@ -511,7 +511,12 @@ edge named by its ends within 0.5 m, the stop's place by the point of the
 edge's centreline where it stands, and the stop's construction, which the
 GUI notes from the construction menu (TF3's proposal does not name it). A
 two-sided stop goes as one `PlaceStop` built on both sides. A stop that
-replaces another, signals and waypoints stay refused.
+replaces another stays refused. Signals and waypoints go the same way, with
+the settings the signal tool builds them with (its
+`EdgeObjectBuilder.params`, which every game sets on the signal it builds:
+a mod's settings, Auto Signals' spacing among them). Signals a mod's script
+then places along the track (Auto Signals) go as one `PlaceSignals`
+(HOOKS.md, "Scripts' follow-up builds").
 
 ## Terrain and the asset brush
 
@@ -576,8 +581,9 @@ replaces another, signals and waypoints stay refused.
 ## The action schema
 
 What an intent's payload carries: `tpf3mp_proto::action`, version
-`ACTION_SCHEMA_VERSION` (**25**; combines station access, company perks
-and preservation, plus named stops and gated asset removal). This
+`ACTION_SCHEMA_VERSION` (**26**; combines station access, company perks
+and preservation, plus named stops and gated asset removal; 26 adds a
+signal's settings to `PlaceStop` and `PlaceSignals`). This
 integration combines the existing
 junction schema with the selected vehicle, depot, demolition, precedence
 and gated action additions described in [COVERAGE.md](COVERAGE.md).
@@ -632,7 +638,7 @@ appended.
 | `CreateLine` | name, colour, the line as the game keeps it: stops (station group, terminal, other terminals, load mode, waiting times, loading rules per cargo, the waypoints after it), transport modes, settings. A waypoint is on a lane of a street's, track's or construction's transport network (the edge by its ends, node 0 first, which must run the same way in every game; the construction by file and place), the lane's index and the place along it; or, for ships and aircraft, a position in the open; with the line manager's tag |
 | `EditLine` | a line and one change: rename, recolour, the whole line anew, or delete |
 | `AssignLine` | vehicles, the line or none, the first stop or none for the game's choice ("Next Reachable Stop") |
-| `PlaceStop` | a stop, waypoint or signal (`object`): the edge (network and ends), the position along it, the engine's `left` flag, the originator's unit direction there, its construction, whether a stop is two-sided and whether a signal is one-way |
+| `PlaceStop` | a stop, waypoint or signal (`object`): the edge (network and ends), the position along it, the engine's `left` flag, the originator's unit direction there, its construction, whether a stop is two-sided and whether a signal is one-way, and a signal's or waypoint's settings (`params`, the tool's, schema 26) |
 | `Terraform` | the grid: corner, cell size, columns, and each cell's target and previous height; on TF3 the corner is the first cell's index in the terrain's own grid times the cell size (4 m), and a stroke larger than 4,096 cells goes as several, a band of whole rows each. Gated off (`acceptance.lua`, `terraform`) |
 | `CompanyOp` | create, join, rename or delete a company; its head's password, players and stations (`ShareStations` the default, `StationAccess` one other company over it) |
 | `Loan` | take a loan (the offer taken and the offer the game drew to follow it) or pay one back, each on its terms as TF3's loan script keeps them, the interest in millionths |
@@ -643,6 +649,7 @@ appended.
 | `ApplyRank` | a company rank to take, as the company window sends the game's growth script (`applyLevel`); the acting player's company takes it ([HOOKS.md](HOOKS.md), "Company ranks") |
 | `Perk` | a company perk from the construction menu: Industry Greenification (the industry by its canonical id, `IndustryId`, which every game binds by its construction, and the permit), or a marketing campaign (the town, the campaign's duration and line cost factor, the permit, and the price the tool charged). Gated off (`acceptance.lua`, `perks`) ([HOOKS.md](HOOKS.md), "Company perks") |
 | `Preserve` | a town building's Historic Preservation checkbox: the construction it stands in, by file and position, its index in that construction's town buildings, and whether it is preserved. Gated off (`acceptance.lua`, `preservation`) |
+| `PlaceSignals` | signals a mod's script places along existing tracks after its player's signal (Auto Signals): each track by its ends (node 0 first), each new signal's place along it from that end and side, each removed signal's place and construction; the new signals' construction, one-way and settings once. Every game rebuilds all the tracks in one proposal, or none. Behind `acceptance.lua`'s `signals` |
 
 **Polylines.** A road or track build is a polyline: the tool's proposal by
 positions, the originator's decisions included:

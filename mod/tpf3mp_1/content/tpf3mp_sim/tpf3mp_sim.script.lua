@@ -257,6 +257,7 @@ function data()
 				capture = function(shaped, network)
 					return capture[network == "Track" and "track" or "street"](shaped)
 				end,
+				signals = function(proposal) return capture.signals(proposal) end,
 				callers = (okGuard and type(guardModule) == "table") and guardModule.callers or nil,
 				log = function(line) l:log(line) end,
 			})

@@ -356,7 +356,9 @@ Dev B:
   which the game's company script never runs (it looks at the save's
   player alone).
 - [ ] Roadside stops and signals, the side included, never rebuilding an
-  edge a line runs on.
+  edge a line runs on. *Open for the owner:* `PlaceStop` and `PlaceSignals`
+  place a signal by rebuilding its edge in place (the game's only way for
+  a script), lines on it included.
 - [ ] The room's required mods from Mod Hub IDs; a missing mod is
   installed from Mod Hub, never received from another player. *Added (D28,
   proposed):* built on `feat/lobby-mods`: the owner picks the room's save,
@@ -374,7 +376,13 @@ Dev B:
   Tracks, Parallel Roads):* the follow-up of a player's build goes to the
   room from that player's game alone; every other game's is stopped
   (`tpf3mp/modbuild.lua`). Built for new streets and tracks; signals and
-  removals stay stopped (Auto Signals, [MODS.md](MODS.md)).
+  removals stay stopped (Auto Signals, [MODS.md](MODS.md)). *Added
+  (proposed, for the owner):* signals a script places along existing
+  tracks (Auto Signals) go as one `PlaceSignals`, the signal's own
+  settings in `PlaceStop`, behind `acceptance.lua`'s `signals`, on after
+  a two-player game (2026-10-06, [MODS.md](MODS.md)); no regression
+  scenario yet. Its tracks are rebuilt in place, lines on them too,
+  as every placed signal's is: see the item below.
 - [ ] *Added (D25, proposed):* personal mods ([MODS.md](MODS.md)). Built:
   the scan (`tpf3mp-modscan`), the content check on shared mods only, the
   room's world loaded with the room's mods and the player's own, and the

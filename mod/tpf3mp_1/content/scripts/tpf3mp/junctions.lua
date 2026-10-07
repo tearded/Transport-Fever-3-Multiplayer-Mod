@@ -307,13 +307,16 @@ function junctions.without(changes, nodes, edges)
 	return kept, left
 end
 
--- The configurations at `nodes` again, each reference to edge `old` naming
--- `new` (whose component is `comp`): for an edge a proposal rebuilds in place
--- between the same nodes (a stop placed or removed). The other edges keep
--- their entities, so nothing is searched for by position. The turns,
--- crosswalks and light phases keep their order; one that no longer fits its
--- edges' lanes raises, and the build fails.
-function junctions.renamed(proposal, nodes, old, new, comp)
+-- The configurations at `nodes` again, each reference to an edge in
+-- `renames` (old entity -> { id = the new one, comp = its component })
+-- naming the new edge: for edges a proposal rebuilds in place between the
+-- same nodes (a stop placed or removed, signals placed along a track), all
+-- in one, so a junction between two rebuilt edges names both. The other
+-- edges keep their entities, so nothing is searched for by position. The
+-- turns, crosswalks and light phases keep their order, and the mark that
+-- the player changed the turns by hand stays; one that no longer fits its
+-- edges' lanes, or a mark that cannot be kept, raises, and the build fails.
+function junctions.renamedAll(proposal, nodes, renames)
 	local adds, removes, seen = {}, {}, {}
 	local function same(id) return id end
 	for _, node in ipairs(nodes) do
@@ -322,13 +325,19 @@ function junctions.renamed(proposal, nodes, old, new, comp)
 		if c then
 			local config = captureConfig(c, { edge = same })
 			local function edge(id)
-				if id == old then return new, comp end
+				local r = renames[id]
+				if r then return r.id, r.comp end
 				local other = component(id, "BASE_EDGE")
 				if not other then error("a junction edge no longer exists", 0) end
 				return id, other
 			end
 			local n = api.type.BaseNodeLaneConnectionAndEntity.new()
 			n.entity, n.comp = node, makeConfig(config, edge, node)
+			local byHand
+			pcall(function() byHand = c.userModifiedLaneConnections end)
+			if byHand == true and not pcall(function() n.comp.userModifiedLaneConnections = true end) then
+				error("a junction's turns set by hand cannot be kept", 0)
+			end
 			adds[#adds+1] = n
 			removes[#removes+1] = node
 		end
@@ -337,6 +346,12 @@ function junctions.renamed(proposal, nodes, old, new, comp)
 		proposal.streetProposal.nodeConfigsToAdd = adds
 		proposal.streetProposal.nodeConfigsToRemove = removes
 	end
+end
+
+-- As renamedAll, for one edge `old` rebuilt as `new` (whose component is
+-- `comp`).
+function junctions.renamed(proposal, nodes, old, new, comp)
+	return junctions.renamedAll(proposal, nodes, { [old] = { id = new, comp = comp } })
 end
 
 -- Add configs to a SimpleProposal. Match in three dimensions and reject
