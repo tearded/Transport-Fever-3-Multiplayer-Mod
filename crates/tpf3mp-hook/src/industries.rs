@@ -6,6 +6,10 @@
 //! specific to the compiled 40408 native bundle (docs/HOOKS.md,
 //! "Automatic industry spawn probe").
 
+// The probe runs on Windows only; elsewhere its parts go unused (#121's own
+// CI fails on that; allowed here for the combined build).
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use tpf3mp_hookcore::profile::{self, Profile, ResolvedProfile};
 
 pub const TRACE_ENV: &str = "TPF3MP_HOOK_TRACE_INDUSTRIES";

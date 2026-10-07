@@ -29,6 +29,12 @@ both:
   `netread`.
 - #116 with `dev`'s renderer recovery test: the test's `LauncherConfig`
   gets #116's new `servers` field, empty (a launcher on its own server).
+- #108 with `dev`: both add the same `Rewrite` stub to the non-x86-64
+  detour module; one copy is kept. `dev`'s preview profile test lists the
+  release-only optional targets; #108's two save targets are added to it.
+- #121 fails clippy off Windows on its own branch (its probe's parts go
+  unused there). The combined build allows dead code in `industries.rs`
+  off Windows so the Linux and macOS tests run.
 
 The package version is 1.2.8, but #122 raises the action schema to 26 and
 #116 the bridge version to 26: every player in a room needs this build.

@@ -33,6 +33,9 @@ const RELEASE_ONLY_OPTIONAL_TARGETS: &[&str] = &[
     "simperf: UpdateParcelCollision call",
     "fast-component-index: Engine::GetComponentDataIndex",
     "emission::EmissionGridSystem::Update",
+    // Faster saves (#108), merged into the combined build.
+    "save: PushCompressor level load",
+    "save: PushCompressor buffer size",
 ];
 
 fn coverage(profile: &Profile) -> BTreeMap<String, bool> {
@@ -70,7 +73,7 @@ fn preview_pins_its_exact_identity_and_preserves_release_target_coverage() {
     assert_eq!(
         release_only,
         RELEASE_ONLY_OPTIONAL_TARGETS.iter().copied().collect(),
-        "only the seven new optional 40408 performance targets may be Release-only"
+        "only the new optional 40408 performance targets may be Release-only"
     );
     for (name, required) in &preview_coverage {
         assert_eq!(release_coverage.get(name), Some(required), "{name}");
