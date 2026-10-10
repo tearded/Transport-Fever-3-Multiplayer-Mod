@@ -56,6 +56,7 @@ pub mod lua;
 pub mod menu;
 pub mod modules;
 pub mod native_mods;
+pub mod netread;
 pub mod network;
 pub mod order;
 /// Tests' harness: the game's own functions, relocated from the

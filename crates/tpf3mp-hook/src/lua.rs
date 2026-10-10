@@ -820,6 +820,8 @@ pub unsafe fn register(api: &LuaApi, l: State) {
                 (b"hash", native_hash),
                 (b"laneRows", native_lane_rows),
                 (b"junctionConfig", native_junction_config),
+                (b"part", native_part),
+                (b"partTexts", native_part_texts),
                 (b"seed", native_seed),
                 (b"lanes", native_lanes),
                 (b"clicks", native_clicks),
@@ -2114,6 +2116,319 @@ unsafe extern "C-unwind" fn native_junction_config(l: State) -> c_int {
     1
 }
 
+/// Whether the update running is the last of a batch that ends at a
+/// checkpoint and its lanes are not handed over yet: the only time the
+/// mod's game script reads them, in its `postUpdate`.
+fn lanes_due() -> bool {
+    let batch = &shared().batch;
+    batch.lanes_wanted && batch.begun == batch.updates && batch.lanes.is_none()
+}
+
+/// Whether the engine may be read natively now: a rolling world check's
+/// read is due in this update (`checkpoint()` asked for it and `scanned()`
+/// has not answered it yet), and this is the thread running the game's
+/// step, inside it (`crate::install::on_step_thread`), where the mod's game
+/// script's `postUpdate` reads. Any other thread (the GUI's, where other
+/// mods and the console run, or the game's pool) may run while the step
+/// changes the engine.
+fn native_read_allowed() -> Result<(), String> {
+    {
+        let batch = &shared().batch;
+        if batch.scan_requested == 0 || batch.scan_requested != batch.scan_done + 1 {
+            return Err("no world check is due in this update".to_owned());
+        }
+    }
+    if !crate::install::on_step_thread() {
+        return Err("only the game's step's own thread reads natively".to_owned());
+    }
+    Ok(())
+}
+
+/// A part's kind of objects ([`crate::netread::Kinds::from_name`]).
+///
+/// # Safety
+///
+/// As [`string_arg`].
+unsafe fn kinds_arg(api: &LuaApi, l: State, index: c_int) -> Result<crate::netread::Kinds, String> {
+    // SAFETY: the caller's.
+    let name = unsafe { string_arg(api, l, index, 32) }.ok_or("a part's kind is missing")?;
+    crate::netread::Kinds::from_name(&name).ok_or_else(|| format!("{name} is no part's kind"))
+}
+
+/// A whole number argument in `0..=max`.
+///
+/// # Safety
+///
+/// As [`number_arg`].
+unsafe fn whole_arg(api: &LuaApi, l: State, index: c_int, max: u32) -> Result<u32, String> {
+    // SAFETY: the caller's.
+    let n = unsafe { number_arg(api, l, index) }.ok_or("a part's number is missing")?;
+    if n.fract() != 0.0 || n < 0.0 || n > f64::from(max) {
+        return Err(format!("{n} is no part number"));
+    }
+    Ok(n as u32)
+}
+
+/// `part(n, k, kind)`: in a game script's `postUpdate` whose world check is
+/// due, part `k` of `n` of the static lanes read natively, its `kind` of
+/// objects (`edges`, `junctions`, `constructions` or `all`;
+/// [`crate::netread::read_part`]):
+/// `nil` when [`crate::netread::ENV`] leaves it off; else `{ mode =, ms =,
+/// timing =, lights = { type, ... }, deferred = { node, ... } }`, the part
+/// kept for `partTexts` in place of any kept before, or `{ mode =, ms =,
+/// why = }` when it did not read. `part()`, without arguments, only says
+/// whether parts are read: `nil`, or `{ mode =, parts =, stride = }`, and
+/// reads and replaces nothing.
+unsafe extern "C-unwind" fn native_part(l: State) -> c_int {
+    let Some(api) = API.get() else {
+        return 0;
+    };
+    let mode = crate::netread::mode();
+    // SAFETY: a C function's stack has LUA_MINSTACK free slots; each push
+    // below is covered by the checkstack before it.
+    unsafe {
+        if mode == crate::netread::Mode::Off || (api.checkstack)(l, 8) == 0 {
+            (api.pushnil)(l);
+            return 1;
+        }
+    }
+    let (parts, stride) = crate::netread::plan();
+    // SAFETY: as above.
+    unsafe {
+        if (api.gettop)(l) == 0 {
+            (api.createtable)(l, 0, 3);
+            let table = (api.gettop)(l);
+            push_str(api, l, b"mode");
+            push_str(api, l, mode.name().as_bytes());
+            (api.rawset)(l, table);
+            push_str(api, l, b"parts");
+            (api.pushnumber)(l, f64::from(parts));
+            (api.rawset)(l, table);
+            push_str(api, l, b"stride");
+            (api.pushnumber)(l, f64::from(stride));
+            (api.rawset)(l, table);
+            return 1;
+        }
+    }
+    let started = std::time::Instant::now();
+    // SAFETY: Lua calls this with its own state; its arguments are on it.
+    let wanted = unsafe {
+        whole_arg(api, l, 1, crate::netread::MAX_PARTS).and_then(|n| {
+            Ok((
+                n,
+                whole_arg(api, l, 2, n.saturating_sub(1))?,
+                kinds_arg(api, l, 3)?,
+            ))
+        })
+    };
+    // Only where the mod reads its world check: any other state (another
+    // mod's, the GUI's) would read the engine while the step changes it.
+    let read = wanted.and_then(|(n, k, kinds)| {
+        native_read_allowed()?;
+        std::panic::catch_unwind(|| crate::netread::part_now(n, k, kinds))
+            .unwrap_or_else(|_| Err("the native read panicked".to_owned()))
+    });
+    let ms = started.elapsed().as_secs_f64() * 1000.0;
+    // SAFETY: as above.
+    unsafe {
+        (api.createtable)(l, 0, 7);
+        let table = (api.gettop)(l);
+        push_str(api, l, b"mode");
+        push_str(api, l, mode.name().as_bytes());
+        (api.rawset)(l, table);
+        push_str(api, l, b"parts");
+        (api.pushnumber)(l, f64::from(parts));
+        (api.rawset)(l, table);
+        push_str(api, l, b"stride");
+        (api.pushnumber)(l, f64::from(stride));
+        (api.rawset)(l, table);
+        push_str(api, l, b"ms");
+        (api.pushnumber)(l, ms);
+        (api.rawset)(l, table);
+        match &read {
+            Ok(part) => {
+                push_str(api, l, b"timing");
+                push_str(api, l, part.timing.as_bytes());
+                (api.rawset)(l, table);
+                let mut lights: Vec<i32> = part.junctions.iter().map(|j| j.light).collect();
+                lights.sort_unstable();
+                lights.dedup();
+                push_str(api, l, b"lights");
+                push_numbers(api, l, lights.into_iter().map(f64::from));
+                (api.rawset)(l, table);
+                push_str(api, l, b"deferred");
+                push_numbers(api, l, part.deferred.iter().map(|n| *n as f64));
+                (api.rawset)(l, table);
+            }
+            Err(why) => {
+                push_str(api, l, b"why");
+                push_str(api, l, why.as_bytes());
+                (api.rawset)(l, table);
+            }
+        }
+    }
+    // A part that did not read leaves none: partTexts never answers for an
+    // older one.
+    crate::netread::keep_part(read.ok());
+    1
+}
+
+/// `partTexts(n, k, kind, preferences, lights, deferred, rows)`: in the
+/// same update, after `part(n, k, kind)`: the two static lanes' texts
+/// (`nil` for a lane the kind does not read) of the part it
+/// read ([`crate::netread::part_texts`]; none of another part or update),
+/// the junctions' names from the two
+/// tables (`{ [value] = name }`, `{ [type] = name }`, as the game's Lua
+/// names them) and `deferred` the Lua's rows of the junctions the part left
+/// to it: `network, constructions` (`count:hash` each), with `rows` true
+/// also their sorted rows, two lists; or `nil, nil` and why.
+unsafe extern "C-unwind" fn native_part_texts(l: State) -> c_int {
+    let Some(api) = API.get() else {
+        return 0;
+    };
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        let mut nodes = 0;
+        // SAFETY: Lua calls this with its own state; its arguments are on it.
+        let (n, k, kinds, preferences, lights, deferred, rows) = unsafe {
+            if (api.gettop)(l) < 6 {
+                return Err("no part, names or rows given".to_owned());
+            }
+            let n = whole_arg(api, l, 1, crate::netread::MAX_PARTS)?;
+            (
+                n,
+                whole_arg(api, l, 2, n.saturating_sub(1))?,
+                kinds_arg(api, l, 3)?,
+                read(api, l, 4, 0, &mut nodes)?,
+                read(api, l, 5, 0, &mut nodes)?,
+                read(api, l, 6, 0, &mut nodes)?,
+                (api.gettop)(l) >= 7 && (api.type_of)(l, 7) == 1 && (api.toboolean)(l, 7) != 0,
+            )
+        };
+        crate::netread::part_texts(
+            (n, k, kinds),
+            crate::seeds::current_step(),
+            &names(&preferences)?,
+            &names(&lights)?,
+            &rows_of(&deferred)?,
+            rows,
+        )
+    }))
+    .unwrap_or_else(|_| Err("the native part's texts panicked".to_owned()));
+    // SAFETY: a C function's stack has LUA_MINSTACK free slots; the rows'
+    // two lists need three more.
+    unsafe {
+        match result {
+            Ok(texts) => {
+                for text in [&texts.network, &texts.constructions] {
+                    match text {
+                        Some(text) => push_str(api, l, text.as_bytes()),
+                        None => (api.pushnil)(l),
+                    }
+                }
+                if let Some((network, constructions)) = texts.rows {
+                    if (api.checkstack)(l, 6) == 0 {
+                        (api.settop)(l, 0);
+                        (api.pushnil)(l);
+                        (api.pushnil)(l);
+                        push_str(api, l, b"no room on the stack for the rows");
+                        return 3;
+                    }
+                    push_strings(api, l, network.iter().map(String::as_bytes));
+                    push_strings(api, l, constructions.iter().map(String::as_bytes));
+                    return 4;
+                }
+                2
+            }
+            Err(why) => {
+                // Neither lane's text: why comes third, never in a text's place.
+                (api.pushnil)(l);
+                (api.pushnil)(l);
+                push_str(api, l, why.as_bytes());
+                3
+            }
+        }
+    }
+}
+
+/// A list of strings, `{ s1, s2, ... }`, in its order.
+fn rows_of(value: &LuaValue) -> Result<Vec<String>, String> {
+    let LuaValue::Table(pairs) = value else {
+        return Err("the rows are not a table".into());
+    };
+    let mut rows: Vec<(i64, String)> = Vec::with_capacity(pairs.len());
+    for (key, row) in pairs {
+        let key = match key {
+            LuaValue::Number(n) if n.fract() == 0.0 && *n >= 1.0 => *n as i64,
+            LuaValue::Integer(n) if *n >= 1 => *n,
+            _ => return Err("the rows are not a list".into()),
+        };
+        let LuaValue::String(bytes) = row else {
+            return Err("a row is no string".into());
+        };
+        let row = String::from_utf8(bytes.clone()).map_err(|_| "a row is not UTF-8")?;
+        rows.push((key, row));
+    }
+    rows.sort_by_key(|(key, _)| *key);
+    Ok(rows.into_iter().map(|(_, row)| row).collect())
+}
+
+/// A table of names by whole number, `{ [n] = name }`.
+fn names(value: &LuaValue) -> Result<std::collections::HashMap<i32, String>, String> {
+    let LuaValue::Table(pairs) = value else {
+        return Err("the names are not a table".into());
+    };
+    let mut out = std::collections::HashMap::new();
+    for (key, name) in pairs {
+        let key = match key {
+            LuaValue::Number(n) if n.fract() == 0.0 && n.abs() < 2_147_483_648.0 => *n as i32,
+            LuaValue::Integer(n) => i32::try_from(*n).map_err(|_| "a name's number")?,
+            _ => return Err("a name's key is no whole number".into()),
+        };
+        let LuaValue::String(bytes) = name else {
+            return Err("a name is no string".into());
+        };
+        let name = String::from_utf8(bytes.clone()).map_err(|_| "a name is not UTF-8")?;
+        out.insert(key, name);
+    }
+    Ok(out)
+}
+
+/// Pushes a list of strings, `{ s1, s2, ... }`.
+///
+/// # Safety
+///
+/// As [`register`], with three free slots.
+unsafe fn push_strings<'a>(api: &LuaApi, l: State, items: impl ExactSizeIterator<Item = &'a [u8]>) {
+    // SAFETY: the caller's.
+    unsafe {
+        (api.createtable)(l, c_int::try_from(items.len()).unwrap_or(0), 0);
+        let list = (api.gettop)(l);
+        for (i, item) in items.enumerate() {
+            (api.pushnumber)(l, (i + 1) as f64);
+            push_str(api, l, item);
+            (api.rawset)(l, list);
+        }
+    }
+}
+
+/// Pushes a list of numbers, `{ n1, n2, ... }`.
+///
+/// # Safety
+///
+/// As [`register`], with three free slots.
+unsafe fn push_numbers(api: &LuaApi, l: State, items: impl ExactSizeIterator<Item = f64>) {
+    // SAFETY: the caller's.
+    unsafe {
+        (api.createtable)(l, c_int::try_from(items.len()).unwrap_or(0), 0);
+        let list = (api.gettop)(l);
+        for (i, item) in items.enumerate() {
+            (api.pushnumber)(l, (i + 1) as f64);
+            (api.pushnumber)(l, item);
+            (api.rawset)(l, list);
+        }
+    }
+}
+
 /// `checkpoint()`: whether the update running is the last of a batch that
 /// ends at a checkpoint step, and its lanes are not read yet.
 unsafe extern "C-unwind" fn native_checkpoint(l: State) -> c_int {
@@ -2248,11 +2563,7 @@ unsafe extern "C-unwind" fn native_lanes(l: State) -> c_int {
     };
     let _timer = crate::perf::time(crate::perf::Piece::Lanes);
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-        let due = {
-            let batch = &shared().batch;
-            batch.lanes_wanted && batch.begun == batch.updates && batch.lanes.is_none()
-        };
-        if !due {
+        if !lanes_due() {
             return Err("no checkpoint is due in this update".to_owned());
         }
         let mut nodes = 0;
@@ -3385,6 +3696,96 @@ my_timetables";
         begin_batch(&[], 1, false, None).unwrap();
         lua.run("tpf3mp_native.take() tpf3mp_native.checkpoint() tpf3mp_native.scanned(true) tpf3mp_native.scanned(true)").unwrap();
         assert!(end_batch().unwrap_err().contains("skipped or repeated"));
+        crate::seeds::command_step(previous);
+    }
+
+    /// Only a world check's due read lets anything read the engine
+    /// natively, and only on the game's step's own thread (none runs in
+    /// these tests); once `scanned()` answered it, nothing reads.
+    #[test]
+    fn nothing_reads_natively_off_the_steps_thread() {
+        let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+        reset();
+        let script = Lua::new();
+        script.register();
+        let previous = crate::seeds::command_step(Some(7));
+        assert!(
+            native_read_allowed()
+                .unwrap_err()
+                .contains("no world check")
+        );
+        begin_batch(&[], 1, false, None).unwrap();
+        script
+            .run("tpf3mp_native.take() tpf3mp_native.checkpoint()")
+            .unwrap();
+        let refused = native_read_allowed().unwrap_err();
+        assert!(refused.contains("step's own thread"), "{refused}");
+        script.run("tpf3mp_native.scanned(true)").unwrap();
+        assert!(
+            native_read_allowed()
+                .unwrap_err()
+                .contains("no world check")
+        );
+        end_batch().unwrap();
+        crate::seeds::command_step(previous);
+    }
+
+    /// `partTexts` answers only for the part asked for, read in the same
+    /// update, and only once; anything else is `nil` and why, and leaves
+    /// no part to answer for later.
+    #[test]
+    fn part_texts_answer_only_for_the_part_read_in_this_update() {
+        let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+        reset();
+        let script = Lua::new();
+        script.register();
+        let previous = crate::seeds::command_step(Some(9));
+        let part = |k, step| crate::netread::Part {
+            n: 5,
+            k,
+            kinds: crate::netread::Kinds::ALL,
+            step,
+            edges: vec!["1,2,3>4,5,6:t|lanes:".into()],
+            junctions: Vec::new(),
+            deferred: Vec::new(),
+            constructions: Vec::new(),
+            timing: String::new(),
+        };
+        let texts = "return tpf3mp_native.partTexts(5, 2, 'all', {}, {}, {})";
+        crate::netread::keep_part(Some(part(2, Some(9))));
+        let answered = script.run(texts).unwrap();
+        assert!(answered.starts_with("1:"), "{answered}");
+        // Once only; and a refusal is no text: nil, nil and why.
+        assert!(
+            script
+                .run(
+                    "local a, b, why = tpf3mp_native.partTexts(5, 2, 'all', {}, {}, {})                      return tostring(a) .. '|' .. tostring(b) .. '|' .. why"
+                )
+                .unwrap()
+                .starts_with("nil|nil|no part was read")
+        );
+        // Another part, another update: refused, and gone.
+        crate::netread::keep_part(Some(part(3, Some(9))));
+        assert!(script.run(texts).unwrap().contains("not 2/5"));
+        assert!(script.run(texts).unwrap().contains("no part was read"));
+        crate::netread::keep_part(Some(part(2, Some(8))));
+        assert!(script.run(texts).unwrap().contains("of step Some(9)"));
+        // Another kind of objects: refused too.
+        crate::netread::keep_part(Some(part(2, Some(9))));
+        assert!(
+            script
+                .run("return tpf3mp_native.partTexts(5, 2, 'edges', {}, {}, {})")
+                .unwrap()
+                .contains("not 2/5")
+        );
+        // Rows left to the Lua must match those the part left to it.
+        crate::netread::keep_part(Some(part(2, Some(9))));
+        assert!(
+            script
+                .run("return tpf3mp_native.partTexts(5, 2, 'all', {}, {}, { 'x' })")
+                .unwrap()
+                .contains("junctions left")
+        );
         crate::seeds::command_step(previous);
     }
 
