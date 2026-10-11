@@ -38,9 +38,12 @@ function New-Setup([string]$Name) {
     $game = Join-Path $library 'steamapps\common\Transport Fever 3'
     Write-File (Join-Path $game 'TransportFever3.exe') 'exe'
     $escaped = $library.Replace('\', '\\')
-    # Steam still lists a library on a drive that is gone, before the game's.
+    # Steam still lists a library on a drive that is gone and one on a
+    # network share that cannot be reached (.invalid never resolves),
+    # before the game's.
     $gone = [string](@([char[]]'ZYXWVUTSRQPONMLKJIHGFE' | Where-Object { -not (Get-PSDrive -Name $_ -ErrorAction SilentlyContinue) })[0]) + ':\\SteamLibrary'
-    Write-File (Join-Path $steam 'steamapps\libraryfolders.vdf') "`"libraryfolders`"`n{`n`t`"0`"`n`t{`n`t`t`"path`"`t`t`"$gone`"`n`t}`n`t`"1`"`n`t{`n`t`t`"path`"`t`t`"$escaped`"`n`t}`n}`n"
+    $offline = '\\\\tpf3mp-offline.invalid\\SteamLibrary'
+    Write-File (Join-Path $steam 'steamapps\libraryfolders.vdf') "`"libraryfolders`"`n{`n`t`"0`"`n`t{`n`t`t`"path`"`t`t`"$gone`"`n`t}`n`t`"1`"`n`t{`n`t`t`"path`"`t`t`"$offline`"`n`t}`n`t`"2`"`n`t{`n`t`t`"path`"`t`t`"$escaped`"`n`t}`n}`n"
     Write-File (Join-Path $library 'steamapps\appmanifest_3493540.acf') "`"AppState`"`n{`n`t`"appid`"`t`t`"3493540`"`n`t`"installdir`"`t`t`"Transport Fever 3`"`n}`n"
     $mods = Join-Path $steam 'userdata\12345\3493540\local\staging_area'
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $mods) | Out-Null
@@ -201,6 +204,13 @@ Test 'refuses a record that names anything but the mod' {
         Assert-Code (Invoke-Installer $s @()) 1
         Check ((Read-File "$($s.Mods)\tpf3mp_1\mod.lua") -eq '-- mod') "the mod untouched with $bad"
     }
+}
+
+Test "installs into a mods folder given when Steam's folder is on a share that cannot be reached" {
+    $s = New-Setup 'offline steam'
+    $s.Steam = '\\tpf3mp-offline.invalid\Steam'
+    Assert-Code (Invoke-Installer $s @($s.Mods)) 0
+    Check ((Read-File "$($s.Mods)\tpf3mp_1\res\x.lua") -eq '-- x') 'the mod installed'
 }
 
 Test 'says when Steam has no mods folder for the game yet' {

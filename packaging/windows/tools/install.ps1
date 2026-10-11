@@ -169,12 +169,20 @@ function Get-SteamRoots {
     }
     $seen = @{}
     foreach ($candidate in $candidates) {
-        if (-not (Test-Path -LiteralPath $candidate -PathType Container)) { continue }
+        if (-not (Test-LibraryPath $candidate Container)) { continue }
         $full = [IO.Path]::GetFullPath($candidate).TrimEnd('\')
         if ($seen.ContainsKey($full.ToLowerInvariant())) { continue }
         $seen[$full.ToLowerInvariant()] = $true
         $full
     }
+}
+
+# Whether a file or folder of Steam or one of its libraries is there. On a
+# network share that cannot be reached, Test-Path throws ("The network path
+# was not found") instead of saying no.
+function Test-LibraryPath([string]$Path, [string]$Type) {
+    try { return [bool](Test-Path -LiteralPath $Path -PathType $Type) }
+    catch { return $false }
 }
 
 # The game's folder, from Steam's list of libraries and the game's manifest
@@ -189,16 +197,17 @@ function Find-Game {
             }
         }
         foreach ($library in $libraries) {
-            # A library on a drive that is gone (an unplugged disk) cannot
-            # be running the game, and Join-Path throws on a missing drive.
-            if (-not (Test-Path -LiteralPath $library -PathType Container)) { continue }
+            # A library on a drive that is gone (an unplugged disk) or a
+            # network share that is offline cannot be running the game.
+            # Join-Path throws on a missing drive.
+            if (-not (Test-LibraryPath $library Container)) { continue }
             $manifest = Join-Path $library "steamapps\appmanifest_$SteamApp.acf"
-            if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { continue }
+            if (-not (Test-LibraryPath $manifest Leaf)) { continue }
             foreach ($line in Get-Content -LiteralPath $manifest) {
                 # One plain folder name under steamapps\common, nothing more.
                 if ($line -match '^\s*"installdir"\s+"([^"\\/:*?<>|]+)"\s*$' -and $Matches[1] -notmatch '^\.+$') {
                     $dir = Join-Path $library ('steamapps\common\' + $Matches[1])
-                    if (Test-Path -LiteralPath $dir -PathType Container) { return $dir }
+                    if (Test-LibraryPath $dir Container) { return $dir }
                 }
             }
         }
