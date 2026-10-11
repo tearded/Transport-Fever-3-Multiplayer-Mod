@@ -2844,11 +2844,13 @@ construction's window its edits:
     modifiers' rebuild is (`capture.inPlace`, `capture.modify`) and travels
     as a `BuildRoad` or `BuildTrack`, its edges' bridge or tunnel type
     included; a stop or signal on those edges must be kept in place, as
-    for the modifiers. It is refused, saying it awaits two-player game
-    acceptance, until `acceptance.lua`'s `bridges` is on: it travels as an
-    ordinary build, so the gate is at the capture. INFERRED: the window's
-    proposal has the shape the API declares (`Proposal`, `StreetProposal`),
-    not yet seen in the game. Any other build a window sends stays refused
+    for the modifiers. With `acceptance.lua`'s `bridges` off it is
+    refused, saying it awaits two-player game acceptance: it travels as an
+    ordinary build, so the gate is at the capture. `bridges` is on since a
+    two-player game on build 40420 (2026-10-11) carried track and road
+    bridges, a road tunnel and a road bridge with a stop this way
+    ([record](../investigation/TPF3_BRIDGE_TUNNEL_WINDOW_2026-10-11.md)).
+    Any other build a window sends stays refused
     ("building from this window");
   - a bulldozer proposal that removes a construction of the player's and
     adds one (a module removed, if the module bulldozer reaches game

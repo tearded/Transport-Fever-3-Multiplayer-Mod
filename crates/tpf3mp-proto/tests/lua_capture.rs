@@ -739,8 +739,8 @@ fn an_upgrade_is_said_in_one_line_and_another_build_is_not_an_upgrade() {
 
 /// The bridge and tunnel window's type change (`bridge_and_tunnel.tl`,
 /// `createBridgeOrTunnelProposal`), as the window sends it: the track
-/// 30-31 rebuilt in place between the same nodes as a stone bridge
-/// (INFERRED from the API's proposal shape, not yet seen in the game).
+/// 30-31 rebuilt in place between the same nodes as a stone bridge (the
+/// shape the window sent in a two-player game on build 40420, 2026-10-11).
 const BRIDGE_WINDOW_PROPOSAL: &str = "{
     addedNodes = {},
     addedSegments = {
@@ -771,6 +771,12 @@ fn window_build(street: &str, gate: bool) -> Result<LuaValue, String> {
 fn a_bridge_window_rebuild_travels_as_the_track_it_rebuilds() {
     let why = window_build(BRIDGE_WINDOW_PROPOSAL, false).unwrap_err();
     assert!(why.contains("awaits two-player game acceptance"), "{why}");
+    // On by default since the two-player game of 2026-10-11.
+    let default = capture_with(
+        BRIDGE_WINDOW_PROPOSAL,
+        "require('tpf3mp.capture').windowBuild(nil, { toAdd = {}, toRemove = {}, proposal = street })",
+    );
+    assert!(default.is_ok(), "{default:?}");
 
     let action = decode(window_build(BRIDGE_WINDOW_PROPOSAL, true).unwrap());
     let Action::BuildTrack(track) = action else {

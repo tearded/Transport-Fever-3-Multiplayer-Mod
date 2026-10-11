@@ -41,8 +41,9 @@ recolouring
 ([the validation record](../investigation/TPF3_RENAME_2026-10-07.md)) and
 subsidies, with their settlement between companies
 ([the validation record](../investigation/TPF3_SUBSIDIES_2026-10-07.md)),
-passed two-player acceptance on 2026-10-07 and are enabled. Bridge/tunnel window rebuilds remain gated at
-capture behind `bridges`. Industry Greenification and marketing campaigns
+passed two-player acceptance on 2026-10-07 and are enabled. Bridge/tunnel window rebuilds, gated at
+capture behind `bridges`, passed it on 2026-10-11 and are enabled
+([the validation record](../investigation/TPF3_BRIDGE_TUNNEL_WINDOW_2026-10-11.md)). Industry Greenification and marketing campaigns
 remain gated at both submission and replay behind `perks`. Historic Preservation is likewise gated behind `preservation`. Mechanics fixtures explicitly enable a channel
 only in their own Lua state. Enable a channel only after ordinary two-player
 acceptance demonstrates matching outcomes, ownership and money. The gate
