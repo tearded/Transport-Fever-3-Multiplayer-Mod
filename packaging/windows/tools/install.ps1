@@ -45,6 +45,8 @@ $SteamApp = '3493540'
 $ModName = 'tpf3mp_1'
 $Package = Split-Path -Parent $PSScriptRoot
 $Steps = New-Object System.Collections.Generic.List[hashtable]
+# Set when a move failed and could not be put back by itself.
+$Incomplete = $false
 
 function Say([string]$Text) { Write-Host $Text }
 
@@ -67,17 +69,71 @@ function Get-Field($Object, [string]$Name) {
     return $property.Value
 }
 
-# Moves a file or folder to $Target, across drives too. It removes the
-# original only once the copy is complete.
+# Renames a file or folder on its drive in one step. A folder with a file
+# open in it (an editor, a console standing in it) is refused whole, where
+# Move-Item moves what it can file by file and stops partway.
+function Rename-Whole([string]$Path, [string]$Target) {
+    try {
+        if (Test-Path -LiteralPath $Path -PathType Container) { [IO.Directory]::Move($Path, $Target) }
+        else { [IO.File]::Move($Path, $Target) }
+    }
+    catch {
+        $reason = $_.Exception
+        if ($reason.InnerException) { $reason = $reason.InnerException }
+        throw "Could not move $Path ($($reason.Message)) If a program or a console has it or a file in it open, close it, then try again."
+    }
+}
+
+# Removes a file or folder, trying again for a few seconds: an antivirus
+# scanning what was just copied holds its files open for a moment.
+function Remove-Retrying([string]$Path) {
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force
+            return
+        }
+        catch {
+            if ($attempt -ge 6 -or -not (Test-Path -LiteralPath $Path)) { throw }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
+
+# Moves a file or folder to $Target, across volumes too. A rename does not
+# cross volumes (another drive, or a junction to one, such as a moved
+# AppData), so there it is first renamed beside itself, which refuses a
+# folder in use before anything changes, then copied, and removed only
+# once the copy is complete.
 function Move-Path([string]$Path, [string]$Target) {
     if (Test-Path -LiteralPath $Target) { throw "$Target is already there" }
     try {
-        Move-Item -LiteralPath $Path -Destination $Target
+        Rename-Whole $Path $Target
+        return
     }
     catch {
         if (-not (Test-Path -LiteralPath $Path)) { throw }
-        Copy-Item -LiteralPath $Path -Destination $Target -Recurse
-        Remove-Item -LiteralPath $Path -Recurse -Force
+    }
+    $aside = Join-Path (Split-Path -Parent $Path) ('.' + (Split-Path -Leaf $Path) + '-moving-' + [guid]::NewGuid().ToString('N'))
+    Rename-Whole $Path $aside
+    try { Copy-Item -LiteralPath $aside -Destination $Target -Recurse }
+    catch {
+        $failed = $_
+        try { if (Test-Path -LiteralPath $Target) { Remove-Retrying $Target } }
+        catch {
+            $script:Incomplete = $true
+            Write-Host "Could not remove the partial copy in ${Target}: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        try { Rename-Whole $aside $Path }
+        catch {
+            $script:Incomplete = $true
+            Write-Host "Could not put back ${Path}: it is in $aside." -ForegroundColor Yellow
+        }
+        throw $failed
+    }
+    try { Remove-Retrying $aside }
+    catch {
+        $script:Incomplete = $true
+        Write-Host "Moved $Path to $Target, but could not remove what is left in ${aside}: delete it. ($($_.Exception.Message))" -ForegroundColor Yellow
     }
 }
 
@@ -223,11 +279,17 @@ function Install-Mod([string]$Mods, [string]$Backups) {
             $kept = Move-Into $target $Backups
             On-Failure 'MoveBack' $kept $target
         }
-        Move-Item -LiteralPath $staging -Destination $target
+        Rename-Whole $staging $target
         On-Failure 'Remove' $target
     }
     finally {
-        if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+        if (Test-Path -LiteralPath $staging) {
+            try { Remove-Retrying $staging }
+            catch {
+                $script:Incomplete = $true
+                Write-Host "Could not remove the unfinished copy in ${staging}: delete it. ($($_.Exception.Message))" -ForegroundColor Yellow
+            }
+        }
     }
     return $target
 }
@@ -247,6 +309,9 @@ function Install([string]$RecordPath, [string]$Backups) {
     if (-not $mods) {
         throw "Steam has no folder for your Transport Fever 3 mods yet: start the game once, then install again. Or drop the mods folder onto INSTALL_TPF3MP.cmd."
     }
+    # A full path: renames go through .NET, which resolves a relative one
+    # against another folder than PowerShell's current one.
+    $mods = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($mods)
     Say "Mods folder: $mods"
     $mod = Install-Mod $mods $Backups
     Write-Record $RecordPath $version $mod
@@ -301,6 +366,9 @@ catch {
             Write-Host "Could not put back $($step.Path): $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
+    # A move, before the failure or while putting back, left something
+    # behind that it named.
+    if ($Incomplete) { $undone = $false }
     Write-Host ''
     if ($undone) {
         Write-Host "Nothing was changed: $failure" -ForegroundColor Red
