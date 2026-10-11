@@ -301,7 +301,121 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
+/// The world checks' native reader's data (`netread.rs`): each pool's
+/// `CompVec<T>` vtable (its first slot that class's own `vf0`), and the
+/// engine's code that reads what the reader reads, the same bytes as on
+/// 40408 at their new places (the investigation's functions, matched by
+/// identical bodies): the component sizes, the pools, dense vectors and
+/// pages, the entity table, the component bits and a construction's place.
+fn assert_netread_data(image: &[u8], pe: &PeHeaders) {
+    use candidate_native::netread as layout;
+    let base = pe.image_base;
+    for (name, vtable, vf0) in [
+        ("BaseEdge", layout::BASE_EDGE_POOL_VTABLE, 0x22a580),
+        ("BaseNode", layout::BASE_NODE_POOL_VTABLE, 0x22a750),
+        (
+            "BaseNodeConfig",
+            layout::BASE_NODE_CONFIG_POOL_VTABLE,
+            0x22a7f0,
+        ),
+        ("Construction", layout::CONSTRUCTION_POOL_VTABLE, 0x22acf0),
+    ] {
+        assert_eq!(
+            rva_u64(image, pe, vtable as u64),
+            base + vf0,
+            "CompVec<{name}> vtable"
+        );
+    }
+    let code: [(u64, &[u8], &str); 11] = [
+        (
+            0x9553b,
+            &[0x48, 0x69, 0xc0, 0x18, 0x01, 0x00, 0x00],
+            "imul rax, 0x118 (BaseEdge size)",
+        ),
+        (
+            0x2813cc,
+            &[0x48, 0x6b, 0xc0, 0x78],
+            "imul rax, 0x78 (BaseNodeConfig size)",
+        ),
+        (
+            0x28089b,
+            &[0x48, 0x69, 0xc0, 0x88, 0x02, 0x00, 0x00],
+            "imul rax, 0x288 (Construction size)",
+        ),
+        (
+            0x280738,
+            &[0x48, 0x8b, 0x4b, 0x78],
+            "mov rcx, [rbx+0x78] (the pools)",
+        ),
+        (
+            0x280740,
+            &[0x3d, 0x00, 0x00, 0x00, 0x40],
+            "cmp eax, 0x40000000 (paged from)",
+        ),
+        (
+            0x28075c,
+            &[0x49, 0x8b, 0x91, 0x80, 0x00, 0x00, 0x00],
+            "mov rdx, [r9+0x80] (pages)",
+        ),
+        (
+            0x28078d,
+            &[0x49, 0x8b, 0x41, 0x68],
+            "mov rax, [r9+0x68] (dense)",
+        ),
+        (
+            0xa4b8c,
+            &[0x48, 0x8b, 0x81, 0x90, 0x00, 0x00, 0x00],
+            "mov rax, [rcx+0x90] (entity table)",
+        ),
+        (
+            0x2bbb201,
+            &[0x48, 0x8b, 0x86, 0xc0, 0x00, 0x00, 0x00],
+            "mov rax, [rsi+0xc0] (component bits)",
+        ),
+        (
+            0x54444a,
+            &[0xc4, 0xc1, 0x7a, 0x10, 0xad, 0x88, 0x00, 0x00, 0x00],
+            "vmovss xmm5, [r13+0x88] (transf x)",
+        ),
+        (
+            0x544465,
+            &[0xc4, 0x41, 0x7a, 0x10, 0xa5, 0x8c, 0x00, 0x00, 0x00],
+            "vmovss xmm12, [r13+0x8c] (transf y)",
+        ),
+    ];
+    for (rva, bytes, what) in code {
+        assert_eq!(
+            rva_bytes(image, pe, rva, bytes.len()),
+            bytes,
+            "{what} at {rva:#x}"
+        );
+    }
+    assert_eq!(
+        (
+            layout::POOLS,
+            layout::ENTITIES,
+            layout::BITS,
+            layout::POOL_DENSE,
+            layout::POOL_PAGES
+        ),
+        (0x78, 0x90, 0xc0, 0x68, 0x80)
+    );
+    assert_eq!(
+        (
+            layout::BASE_EDGE_SIZE,
+            layout::BASE_NODE_CONFIG_SIZE,
+            layout::CONSTRUCTION_SIZE
+        ),
+        (0x118, 0x78, 0x288)
+    );
+    assert_eq!(
+        (layout::CONSTRUCTION_X, layout::CONSTRUCTION_Y),
+        (0x88, 0x8c)
+    );
+}
+
 fn assert_native_data(image: &[u8], pe: &PeHeaders, text: &[u8], text_rva: u64) {
+    assert_netread_data(image, pe);
     for site in &candidate_native::guiplayer::SITES {
         let address = target_rva(site.name);
         let start = usize::try_from(address - text_rva).unwrap();
