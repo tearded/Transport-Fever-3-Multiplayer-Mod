@@ -3128,7 +3128,9 @@ construction's window its edits:
   (`PlaceStop::params`, schema 26): `construction_react_util.getActionParams`
   gives the tool `EdgeObjectBuilder.params` (the construction's own keys,
   values as the tool's controls hold them: `oneWay`, and a mod's, Auto
-  Signals' `auto_signals_distance`, `_replace`, `_direction`), and
+  Signals' `auto_signals_distance`, `_replace`, `_direction`, Signal
+  Distance's `signal_distance.local`: a key may hold a dot, and is one
+  key, never a path as a construction's parameters' are), and
   `capture.watchStopTool` notes them with the tool's construction
   (`stop-tool-params`: `1`, the construction, how many, each
   `key=<i|f|b>value`, tab-separated, keys sorted). A note is at most 512

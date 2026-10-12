@@ -1030,7 +1030,7 @@ function capture.readParamsNote(note, name)
 	if count == nil or count ~= #parts - 3 then return nil, "the tool's settings were cut short" end
 	local out = {}
 	for i = 4, #parts do
-		local key, kind, text = parts[i]:match("^([%a_][%w_]*)=([ifb])(.*)$")
+		local key, kind, text = parts[i]:match("^([%a_][%w_%.]*)=([ifb])(.*)$")
 		local value
 		if kind == "i" and text:match("^%-?%d+$") then value = { Int = tonumber(text) }
 		elseif kind == "f" and tonumber(text) ~= nil then value = { Fixed = tonumber(text) }

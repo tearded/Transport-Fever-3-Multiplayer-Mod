@@ -76,6 +76,15 @@ local function params(list)
 	return out
 end
 
+-- A stop's or signal's parameters, from engine.flatParams' list: flat keys,
+-- each taken whole. A mod's key may hold a dot (Signal Distance's
+-- "signal_distance.local"), which is no path here.
+local function objectParams(list)
+	local out = {}
+	for _, param in ipairs(list) do out[param.key] = paramValue(param.value) end
+	return out
+end
+
 -- Whether a handler runs dry (apply.proposalOf): it makes the proposal its
 -- action would build and stops there, sending nothing and saying nothing.
 local dry = false
@@ -1797,7 +1806,7 @@ function HANDLERS.PlaceStop(stop)
 		-- defaults (SimpleStreetProposal.EdgeObject.params: not in the
 		-- game's API reference, but a member on build 40408, and the signal
 		-- it builds keeps them, 2026-10-06).
-		if stop.params and #stop.params > 0 then eo.params = params(stop.params) end
+		if stop.params and #stop.params > 0 then eo.params = objectParams(stop.params) end
 		added[k] = eo
 	end
 	local proposal = rebuildWith(e, network, objects)
@@ -1981,7 +1990,7 @@ function HANDLERS.PlaceSignals(sig)
 			-- Named, as a stop the room places is, so the engine gives it
 			-- its owner (docs/BUILDING.md).
 			eo.name = PROVISIONAL_STOP_NAME
-			if sig.params and #sig.params > 0 then eo.params = params(sig.params) end
+			if sig.params and #sig.params > 0 then eo.params = objectParams(sig.params) end
 			added[k] = eo
 		end
 		local s = api.type.SegmentAndEntity.new()

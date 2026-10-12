@@ -15072,9 +15072,15 @@ fn a_signal_keeps_the_settings_the_tool_built_it_with_in_every_game() {
     assert_eq!(cut, "the tool's settings were cut short");
 
     // Auto Signals' settings on the base game's signal: carried, sorted.
+    // With them Signal Distance's, a key with a dot in it
+    // (signal_distance_1, mod.script.lua: "signal_distance.local", its
+    // slider's index), refused in a room until 2026-10-11 ("a setting named
+    // signal_distance.local"): carried and built as that one key, never as
+    // a path.
     assert_eq!(
         ask(&format!(
-            "{{ {signal_c}, params = {{ oneWay = 2, auto_signals_replace = 1, auto_signals_distance = 4 }} }}"
+            "{{ {signal_c}, params = {{ oneWay = 2, auto_signals_replace = 1, auto_signals_distance = 4, \
+             ['signal_distance.local'] = 18 }} }}"
         )),
         "nil",
         "the signal tool builds through the room"
@@ -15094,7 +15100,7 @@ fn a_signal_keeps_the_settings_the_tool_built_it_with_in_every_game() {
     assert_eq!(
         handed,
         "Signal infrastructure/signal/signal_path_c.con \
-         auto_signals_distance=4,auto_signals_replace=1,oneWay=2 true"
+         auto_signals_distance=4,auto_signals_replace=1,oneWay=2,signal_distance.local=18 true"
     );
     // Every game builds it with them.
     lua.load("HOOK.batch = { HOOK.commands[#HOOK.commands] } UPDATE({}, STATE, 0.2)")
@@ -15103,11 +15109,12 @@ fn a_signal_keeps_the_settings_the_tool_built_it_with_in_every_game() {
     let built: String = lua
         .load(
             "local o = SENT[1].proposal.streetProposal.edgeObjectsToAdd[1] \
-             return o.params.auto_signals_distance .. ' ' .. o.params.auto_signals_replace .. ' ' .. o.params.oneWay",
+             return o.params.auto_signals_distance .. ' ' .. o.params.auto_signals_replace .. ' ' .. o.params.oneWay \
+                 .. ' ' .. tostring(o.params['signal_distance.local']) .. ' ' .. tostring(o.params.signal_distance)",
         )
         .eval()
         .unwrap_or_else(|error| panic!("{error}\n{}", hook_log(&lua)));
-    assert_eq!(built, "4 1 2");
+    assert_eq!(built, "4 1 2 18 nil");
 }
 
 /// Auto Signals after its player's signal (D27; docs/MODS.md): the script's

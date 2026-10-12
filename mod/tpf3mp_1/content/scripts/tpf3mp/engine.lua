@@ -1217,7 +1217,9 @@ end
 -- `EdgeObjectBuilder.params` and `EdgeObject.params` hold them) as the
 -- schema's flat list (action::Param), sorted by key; or raises. Only plain
 -- keys with numbers or booleans, as the signal tools set them: anything else
--- is a setting the room cannot carry, never one dropped.
+-- is a setting the room cannot carry, never one dropped. A key may hold a
+-- dot, as a mod's do (Signal Distance's "signal_distance.local"): it is one
+-- key, never a path (apply.lua, objectParams).
 engine.MAX_OBJECT_PARAMS = 32
 function engine.flatParams(t)
 	if t == nil then return {} end
@@ -1230,7 +1232,7 @@ function engine.flatParams(t)
 	end)
 	if not ok then error("settings it cannot read: " .. tostring(why), 0) end
 	for _, k in ipairs(keys) do
-		if type(k) ~= "string" or not k:match("^[%a_][%w_]*$") or #k > 128 then
+		if type(k) ~= "string" or not k:match("^[%a_][%w_%.]*$") or #k > 128 then
 			error("a setting named " .. tostring(k), 0)
 		end
 	end
