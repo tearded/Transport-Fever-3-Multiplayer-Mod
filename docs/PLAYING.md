@@ -480,8 +480,11 @@ protected folder such as Program Files.
   game's subsidy cards show every taken subsidy as accepted, another
   company's too. A "Transport Workers" subsidy still completes by anyone's
   commuters.
-- **Line waypoints, bridge/tunnel window type changes, Industry
-  Greenification marketing campaigns and Historic Preservation.**
+- **Bridge and tunnel types.** Click a bridge or tunnel and pick another
+  type, or none, in its window as usual: it is rebuilt in every player's
+  game. A stop on it stays where it was.
+- **Line waypoints, Industry Greenification marketing campaigns and
+  Historic Preservation.**
   These new channels are refused pending a two-player game acceptance run.
   Their mechanics are implemented but are not enabled for play yet; see
   [COVERAGE.md](COVERAGE.md).

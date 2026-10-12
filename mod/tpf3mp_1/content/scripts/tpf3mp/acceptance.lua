@@ -3,14 +3,16 @@
 -- same settings. Fixtures may enable a channel explicitly to test its mechanics.
 -- Height brushes passed local two-game acceptance on build 40408, 2026-10-02.
 -- See investigation/STATION_TERRAIN_2026-10-02.md for evidence and limits.
--- Bridge/tunnel window rebuilds use ordinary road/track actions and are
--- gated at capture.windowBuild until their own two-game acceptance.
+-- Bridge/tunnel window rebuilds use ordinary road/track actions, gated at
+-- capture.windowBuild; they passed local two-game acceptance on build
+-- 40420, 2026-10-11 (track and road bridges, a road tunnel, a road bridge
+-- with a stop on it): investigation/TPF3_BRIDGE_TUNNEL_WINDOW_2026-10-11.md.
 -- Signals a script places along tracks (PlaceSignals: Auto Signals) passed
 -- local two-game acceptance on build 40408, 2026-10-06 (runs
 -- run-1006-225251 and run-1006-230635; docs/MODS.md).
 -- Subsidies passed local two-game acceptance on build 40408, 2026-10-07:
 -- investigation/TPF3_SUBSIDIES_2026-10-07.md.
-local acceptance = { subsidies = true, rename = true, waypoints = false, terraform = true, bridges = false, perks = false, preservation = false, signals = true }
+local acceptance = { subsidies = true, rename = true, waypoints = false, terraform = true, bridges = true, perks = false, preservation = false, signals = true }
 
 function acceptance.check(action)
     local feature

@@ -1112,9 +1112,10 @@ end
 -- of one it replaces): the bridge and tunnel window's type
 -- (gui/entity_window/bridge_and_tunnel.tl, api.engine.util.proposal
 -- .createBridgeOrTunnelProposal, build 40408) makes one. It is carried as
--- the road and track modifiers' rebuild is (capture.modify), once
--- acceptance.lua's `bridges` is on: until a two-player game shows the
--- window's proposal reads as the modifiers' does, it is refused, saying so.
+-- the road and track modifiers' rebuild is (capture.modify) while
+-- acceptance.lua's `bridges` is on (since a two-player game on build 40420,
+-- 2026-10-11, showed the window's proposal reads as the modifiers' does);
+-- with it off, it is refused, saying so.
 function capture.inPlace(proposal)
 	local p = get(proposal, "proposal")
 	if p == nil or (length(get(proposal, "toAdd")) or 0) > 0 or (length(get(proposal, "toRemove")) or 0) > 0 then
