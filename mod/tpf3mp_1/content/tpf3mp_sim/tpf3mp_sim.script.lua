@@ -95,6 +95,29 @@ function data()
 	-- The headquarters lines last logged in this state, by company id: a
 	-- line is logged again only when it changed (tpf3mp/companies.lua).
 	local toldHeadquarters = {}
+	-- What applying the room's actions cost since the last checkpoint, for
+	-- the log there (docs/HOOKS.md, "What the lanes cost"): the actions
+	-- themselves, every registry.sync around them, and reading and writing
+	-- the script's state. The wall clock only: nothing read from it reaches
+	-- the world.
+	local function clock()
+		-- A state without os (or its clock) times nothing; it still applies.
+		local readClock = type(os) == "table" and os.clock
+		if type(readClock) ~= "function" then return nil end
+		local ok, t = pcall(readClock)
+		if ok and type(t) == "number" then return t end
+		return nil
+	end
+	local function newCost()
+		return { runs = 0, actions = 0, apply = 0, applyMax = 0, syncs = 0, sync = 0, syncMax = 0, state = 0 }
+	end
+	local cost = newCost()
+	local function since(t0, total, max)
+		local t1 = clock()
+		if not t0 or not t1 then return total, max end
+		local d = t1 - t0
+		return total + d, (max and d > max) and d or max
+	end
 	-- Events subscribed to from this state.
 	local subscribed = false
 	-- Says what a prospection did (below).
@@ -534,9 +557,15 @@ function data()
 				end
 			end
 			if work.actions or work.begin or work.monthly or work.sample or work.loanInit or work.loanRefresh then
+				cost.runs = cost.runs + 1
+				local s0 = clock()
 				local saved = state:get()
+				cost.state = since(s0, cost.state)
 				if type(saved) ~= "table" then saved = {} end
+				local r0 = clock()
 				local reg, _, failed = registry.sync(saved.registry)
+				cost.syncs = cost.syncs + 1
+				cost.sync, cost.syncMax = since(r0, cost.sync, cost.syncMax)
 				-- The room's companies: begun at its first update, as the
 				-- registry, the same in every game (tpf3mp/companies.lua).
 				local roster = companies.ensure(saved.companies, api)
@@ -572,6 +601,8 @@ function data()
 					-- The seal of the password sent with it (a company's),
 					-- which the room made; never the password.
 					local seal = work.seals and work.seals[i] or nil
+					cost.actions = cost.actions + 1
+					local a0 = clock()
 					local ok, why, made = apply.run(action, {
 						registry = reg,
 						roster = roster,
@@ -581,6 +612,7 @@ function data()
 						progression = prog,
 						seal = type(seal) == "table" and seal or nil,
 					})
+					cost.apply, cost.applyMax = since(a0, cost.apply, cost.applyMax)
 					local name = next(action)
 					-- What it changed keeps its id on whatever entity it is
 					-- now, bound before the sync would retire it.
@@ -599,7 +631,10 @@ function data()
 					-- registry found it.
 					local kind = ok and apply.CREATES[name] or nil
 					local fresh
+					local y0 = clock()
 					reg, fresh = registry.sync(reg, (kind and made) and { [kind] = { made } } or nil)
+					cost.syncs = cost.syncs + 1
+					cost.sync, cost.syncMax = since(y0, cost.sync, cost.syncMax)
 					local entity = (kind or keeps) and made or nil
 					for _, f in ipairs((kind and not entity) and fresh or {}) do
 						if f[1] == kind then entity = f[3] break end
@@ -666,7 +701,9 @@ function data()
 				saved.registry = reg
 				saved.companies = roster
 				saved.progression = prog
+				local w0 = clock()
 				state:set(saved)
+				cost.state = since(w0, cost.state)
 			end
 			-- Another company's subsidies, settled once a game day while one
 			-- is open: the money the subsidy script booked to the room's
@@ -707,6 +744,13 @@ function data()
 					-- full reader; real room updates always supply scanStep.
 					read, failed = lanes.read(api)
 					l:log(lanes.costLine())
+				end
+				if cost.runs > 0 then
+					l:log(string.format("actions since the last checkpoint: %d in %d updates, applied in %.1f ms"
+						.. " (longest %.1f), registry.sync %.1f ms over %d calls (longest %.1f), state %.1f ms",
+						cost.actions, cost.runs, cost.apply * 1000, (cost.applyMax or 0) * 1000, cost.sync * 1000,
+						cost.syncs, (cost.syncMax or 0) * 1000, cost.state * 1000))
+					cost = newCost()
 				end
 				if #failed > 0 and not told then
 					told = true
