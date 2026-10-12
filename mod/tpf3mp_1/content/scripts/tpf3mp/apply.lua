@@ -2189,7 +2189,7 @@ function HANDLERS.BuyVehicle(buy)
 		local facts = {}
 		pcall(function()
 			local account = api.engine.getComponent(company(), api.type.ComponentType.ACCOUNT)
-			facts[#facts + 1] = "the company has " .. string.format("%d", account.balance)
+			facts[#facts + 1] = "the company has " .. string.format("%.0f", account.balance)
 		end)
 		for i, p in ipairs(buy.consist) do
 			pcall(function()
@@ -2547,7 +2547,7 @@ function HANDLERS.Subsidy(op, ctx)
 		local ok, why = companiesModule.acceptSubsidy(roster, mine.id, op.Accept, state,
 			event("onAccept", op.Accept), send, api)
 		if not ok then return false, why end
-		log("subsidy " .. string.format("%d", op.Accept.uid) .. " (" .. tostring(op.Accept.kind) .. ") taken by "
+		log("subsidy " .. string.format("%.0f", op.Accept.uid) .. " (" .. tostring(op.Accept.kind) .. ") taken by "
 			.. tostring(mine.name))
 		return true
 	elseif op.Decline then

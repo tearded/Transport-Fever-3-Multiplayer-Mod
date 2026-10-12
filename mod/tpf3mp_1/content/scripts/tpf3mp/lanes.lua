@@ -522,7 +522,7 @@ local function companyBalances(api)
 			local account = type(c.entity) == "number" and component(api, c.entity, "ACCOUNT")
 			local balance = account and account.balance
 			out[#out + 1] = tostring(c.id) .. "=" .. tostring(c.entity) .. ":"
-				.. (type(balance) == "number" and string.format("%d", balance) or "?")
+				.. (type(balance) == "number" and string.format("%.0f", balance) or "?")
 		end
 	end
 	return table.concat(out, ",")
@@ -532,7 +532,7 @@ readers[lanes.ECONOMY] = function(api, emit, ids)
 	local player = api.engine.util.getPlayer()
 	local account = component(api, player, "ACCOUNT")
 	local balance = account and account.balance
-	local text = tostring(player) .. ":" .. (balance ~= nil and string.format("%d", balance) or "?")
+	local text = tostring(player) .. ":" .. (balance ~= nil and string.format("%.0f", balance) or "?")
 	local okC, balances = pcall(companyBalances, api)
 	if okC and balances then text = text .. " companies " .. balances end
 	local offers = scriptState(api, SUBSIDY_SCRIPT)

@@ -1007,7 +1007,7 @@ function capture.paramsNote(name, params, read)
 	for _, p in ipairs(flat) do
 		local v = p.value
 		local text
-		if v.Int ~= nil then text = "i" .. string.format("%d", v.Int)
+		if v.Int ~= nil then text = "i" .. string.format("%.0f", v.Int)
 		elseif v.Fixed ~= nil then text = "f" .. string.format("%.17g", v.Fixed)
 		else text = "b" .. (v.Bool and "1" or "0") end
 		parts[#parts + 1] = p.key .. "=" .. text

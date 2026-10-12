@@ -13817,6 +13817,81 @@ fn the_economy_lane_carries_the_companies_and_the_subsidy_offers() {
     );
 }
 
+/// The game's Lua 5.2 formats `%d` through a 32-bit C `long` on Windows
+/// and raises past 2^31 (docs/BIGMAPS.md); the tests' Lua does not.
+const GAME_FORMAT: &str = r#"
+local format = string.format
+string.format = function(f, ...)
+    local args, i = { ... }, 0
+    for _, conv in f:gmatch('%%([-+ #0-9.]*)([%a%%])') do
+        if conv ~= '%' then
+            i = i + 1
+            local n = tonumber(args[i])
+            if (conv == 'd' or conv == 'i') and n and (n >= 2^31 or n < -2^31) then
+                error("bad argument #" .. (i + 1) .. " to 'format' (not a number in proper range)")
+            end
+        end
+    end
+    return format(f, ...)
+end
+"#;
+
+/// Offer numbers are drawn past 2^31 in a real game, and balances grow
+/// past it: the economy lane still reads them, as the game's own Lua
+/// formats numbers, instead of failing the rolling world check, which held
+/// the world and refused every action (a playtest on 2026-10-12).
+#[test]
+fn the_economy_lane_reads_offer_numbers_and_balances_past_2_31() {
+    let (lua, _) = engine();
+    lua.load(FAKE_WORLD).exec().unwrap();
+    lua.load(GAME_FORMAT).exec().unwrap();
+    lua.load(
+        r#"
+        local CT = api.type.ComponentType
+        CT.GAME_SCRIPT = 77
+        WORLD[CT.ACCOUNT][25] = { balance = 3000000000 }
+        WORLD[CT.ACCOUNT][901] = { balance = -2500000000 }
+        SUB = { lastSpawnTime = 1200, spawnIntervalModifier = 1,
+                proposedSubventions = { { uid = 2999999999, id = 'deliver_passengers.res', spawnTime = 1200,
+                    data = { upfront = { { type = 'Money', params = { amount = 4000 } } },
+                             expireDurationProposed = 18000 } } },
+                activeSubventions = {}, completedSubventions = {}, failedSubventions = {} }
+        MODSTATE = { companies = { list = { { id = 0, entity = 25 }, { id = 1, entity = 901 } } } }
+        api.engine.system.gameScriptSystem = { getEntityForGameScript = function(name)
+            if name == '::/game_mechanics/subventions/subventions.gs' then return 500 end
+            if name == 'tpf3mp_1::/tpf3mp_sim/tpf3mp_sim.gs' then return 501 end
+            return -1 end }
+        local get = api.engine.getComponent
+        api.engine.getComponent = function(e, kind)
+            if kind == 77 and e == 500 then return { state = SUB } end
+            if kind == 77 and e == 501 then return { state = MODSTATE } end
+            return get(e, kind)
+        end
+        "#,
+    )
+    .exec()
+    .unwrap();
+    let lanes = read_lanes(&lua);
+    assert!(
+        lanes[4]
+            .1
+            .starts_with("25:3000000000 companies 0=25:3000000000,1=901:-2500000000 subsidies 1:"),
+        "{}",
+        lanes[4].1
+    );
+    let dump: Vec<String> = lua
+        .load("return ug_require('tpf3mp_1::/scripts/tpf3mp/lanes.lua').dump(api, 4, nil)")
+        .eval()
+        .unwrap();
+    assert!(
+        dump.iter().any(|l| l.contains(
+            "offered 2999999999 deliver_passengers.res spawn=1200 accepted=- completed=- upfront=4000 \
+             complete=0 failure=0 deliver=- delivered=- lapses=18000 taker=-"
+        )),
+        "{dump:#?}"
+    );
+}
+
 /// The mod's game script says the subsidy script's offers in the log at a
 /// checkpoint whenever they changed, each with its number, kind and terms:
 /// two games' logs show where their offers part.
