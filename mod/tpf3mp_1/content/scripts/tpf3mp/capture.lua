@@ -734,6 +734,13 @@ end
 -- (build 40408: a rail station on open ground proposes its platform track,
 -- 24 edges through 25 new nodes); the construction builds those itself, and
 -- built beside it they block it ("Construction Not Possible").
+--
+-- The junction settings the tool proposed on those own tracks go with them
+-- (2026-10-07: a rail station snapped to a track end was refused in every
+-- game, "the junction no longer exists"): their nodes are in no game's
+-- build, and the construction gives its own junctions the game's own
+-- settings, alike in every game. So a setting at a node left out, or whose
+-- turns name an edge left out, is left out too (junctions.without).
 local function joinedOnly(part)
 	local parent = {}
 	local function find(x)
@@ -763,9 +770,22 @@ local function joinedOnly(part)
 			used[e.node0], used[e.node1] = true, true
 		end
 	end
-	local nodes = {}
+	local nodes, at = {}, {}
 	for _, n in ipairs(part.nodes) do
 		if used[n.id] then nodes[#nodes + 1] = n end
+		at[n.id] = { x = n.pos[1], y = n.pos[2], z = n.pos[3] }
+	end
+	local ownNodes, ownEdges = {}, {}
+	for _, e in ipairs(part.edges) do
+		if not joined[find(e.node0)] and at[e.node0] and at[e.node1] then
+			ownEdges[#ownEdges + 1] = { network = e.network, ends = { a = at[e.node0], b = at[e.node1] } }
+			for _, n in ipairs({ e.node0, e.node1 }) do
+				ownNodes[#ownNodes + 1] = { network = e.network, at = at[n] }
+			end
+		end
+	end
+	if #ownEdges > 0 and #(part.junctions or {}) > 0 then
+		part.junctions = module("junctions").without(part.junctions, ownNodes, ownEdges)
 	end
 	part.edges, part.nodes = edges, nodes
 end
@@ -799,6 +819,10 @@ function capture.connection(proposal, con)
 	local action, why = module("roads").capture(part, engine.world())
 	if not action then return nil, why end
 	local build = action.BuildRoad or action.BuildTrack
+	-- The settings every game leaves to the construction (apply.ownJunctions)
+	-- stay here: a large station's own switches are more than an action holds.
+	local kept = module("apply").ownJunctions(build.polyline)
+	build.polyline.junctions = kept
 	return build.polyline
 end
 

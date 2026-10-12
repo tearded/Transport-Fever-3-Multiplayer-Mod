@@ -321,6 +321,24 @@ junctions the game's own settings, the same in every game. Configurations
 at existing nodes that name only the rebuilt street still travel as the
 tool made them.
 
+The originator already leaves out the construction's own tracks and
+streets that reach nothing existing (`joinedOnly` in `capture.lua`); the
+configurations on them go too (2026-10-07: a rail station snapped to a
+track end was refused in every game, "the junction no longer exists",
+because the tool had configured the switches of its other platform
+tracks, whose nodes no game's build has). A configuration whose node is
+one of those left-out nodes, or whose turns or crosswalks name one of
+those edges, does not travel. The station builds those tracks and their
+switches itself.
+
+The configurations on the construction's own tracks that are joined to
+something existing, which every game leaves to the construction as above
+(`apply.ownJunctions`), the originator leaves out as well
+(`capture.connection`): a large rail station joined to track ends came
+to 144 configurations, mostly its own switches, over the 64 an action
+holds, and the hook refused the build ("at most 64 items", 2026-10-10).
+What every game builds is the same either way.
+
 `lua_mod.rs` reproduces the recorded depot topology: before the fix its
 first build contains four duplicate nodes and edges; afterwards it contains
 none, and the stand-in engine accepts the refresh. A longer station
@@ -330,6 +348,58 @@ real-game replay. The PC crashed after the original test session; the
 remaining acceptance check is a fresh two-game placement onto existing
 track, followed by buying and assigning a train and verifying its route
 in both games. The change does not repair already broken placements.
+
+On 2026-10-10 that placement was played in two games of the local rig
+(Steam build 40420). A stock modular rail station and an underpass mod
+(`grimes_unterfuehrung`, its own tracks in four, six and eight rows)
+were snapped onto the ends of existing tracks, some of them loose pieces:
+each was built and refreshed alike in both games. The train run is still
+to be checked.
+
+One placement was not: the underpass's eight tracks onto eight track ends
+beside a station. Built alone, the construction was refused in every game
+("Construction Not Possible", with no colliding entity named), though the
+tool had placed it. A dry `makeProposalData` in the game showed why: with
+four of the eight track ends standing where its own tracks end, the
+construction alone cannot be built; without them it can. Only the tool
+welds a construction's track ends onto existing nodes.
+
+So when the game refuses the construction alone, and the action's
+connection is only the construction's own track, joined to the world at
+existing track nodes (no split, no removal, no street node), every game
+joins it as the tool did (`rejoinConstruction` in `apply.lua`):
+
+1. it takes away the track pieces at those nodes (found at their own
+   level: a node of a track right above or below is another place), the
+   nodes, a far end the pieces leave with no edge, and the junction
+   settings at the far ends that stay, and builds the construction, in
+   one proposal;
+2. it lays the pieces again at once, through the track build's own path:
+   each between the same places with its tangents, template, lanes (an
+   electrified piece stays electrified), decorations, lock and owner, now
+   ending on the construction's own new track node where its old end was,
+   named by its entity (the one track node within a few centimetres,
+   height included, that did not exist before), not looked up again by
+   position, which would take a node of a track right above it; a far
+   end that went comes back as a node of its own. They are laid for free,
+   as the game's refresh of a construction is: they were the player's
+   already, and the tool only joined onto them;
+3. the construction is refreshed as before.
+
+A piece with a stop or signal on it, a bridge or tunnel, another
+company's piece (D21), or a junction at a far end set by hand (its turns,
+its lights, their phases or a double slip), and the build stays refused
+with the game's own reason; the far ends' settings are otherwise the
+game's own, and go with the pieces. Where the construction has no track
+end at such a place, the piece comes back unjoined and hook.log says so.
+Once step 1 is built, the construction stands in every game alike; if
+step 2 still cannot be laid, hook.log names the places, and the pieces
+are gone in every game alike. The values of the pieces are read before
+step 1: the first real-game try read them from the removed edges'
+components afterwards and step 2 failed in both games ("no Track node at
+vertex 1"), which the stand-in engine, whose components are copies, did
+not show. The eight-track placement then built, joined and refreshed alike
+in both games.
 
 ### Module edits and upgrades
 
