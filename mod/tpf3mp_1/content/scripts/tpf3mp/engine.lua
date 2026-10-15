@@ -199,6 +199,11 @@ local function segment(seg)
 		node0 = c.node0, node1 = c.node1,
 		network = networkOf(seg),
 		tangent0 = vec3(c.tangent0), tangent1 = vec3(c.tangent1),
+		-- Where the edge itself ends, which need not be its node: the track
+		-- tool starts a track laid onto a street's end on its tram lane
+		-- (roads.lua, BUILDING.md "Edge ends").
+		position0 = vec3(get(c, "position0")),
+		position1 = vec3(get(c, "position1")),
 		structure = "Ground",
 		template = resName(c.roadTemplate, "roadTemplate"),
 		style = styleName(c.roadStyle),

@@ -6647,6 +6647,61 @@ fn a_track_the_room_ordered_has_its_templates_track_distance() {
     assert_eq!(distances, ["5", "nil"], "{}", log(&lua));
 }
 
+/// A track laid onto a street's end starts where the track tool put it: on
+/// the street's tram lane, 2 m beside the end node, where alone the game
+/// joins the tram lane to the track (build 40420, schema 27). Built from the
+/// node's centre instead, the track ended in a buffer stop in every game of
+/// the room (2026-10-15). A link that names no end of its own ends on its
+/// vertex.
+#[test]
+fn a_track_onto_a_street_end_starts_on_the_tram_lane() {
+    let (lua, _script) = engine();
+    lua.load(FAKE_NETWORK).exec().unwrap();
+    lua.load(
+        r#"
+        local get = api.res.streetTemplateRep.get
+        local find = api.res.streetTemplateRep.find
+        api.res.streetTemplateRep.find = function(name)
+            if name == '::/track/standard.street_template' then return 6 end
+            return find(name)
+        end
+        api.res.streetTemplateRep.get = function(id)
+            if id == 6 then
+                return { laneConfigs = { 'track lanes' }, streetStyle = '::/style/track.street_style' }
+            end
+            return get(id)
+        end
+        local apply = ug_require('tpf3mp_1::/scripts/tpf3mp/apply.lua')
+        local function onto(start)
+            local link = { from = 0, to = 1, tangent0 = { x = -50, y = -8, z = 0 },
+                tangent1 = { x = -50, y = -8, z = 0 }, structure = 'Ground', position0 = start }
+            local p = apply.proposalOf({ BuildTrack = { track = '::/track/standard.street_template',
+                catenary = false, polyline = { vertices = {
+                    { pos = { x = 0, y = 0, z = 0 }, resolve = { Node = 'Street' } },
+                    { pos = { x = -50, y = -10, z = 0 }, resolve = 'New' } },
+                links = { link }, removals = {} } } }, {})
+            local s = p.streetProposal.edgesToAdd[1].comp
+            return string.format("%d>%d %.3f,%.3f,%.3f %.3f,%.3f,%.3f", s.node0, s.node1,
+                s.position0.x, s.position0.y, s.position0.z, s.position1.x, s.position1.y, s.position1.z)
+        end
+        BESIDE = onto({ x = -0.315, y = -1.975, z = 0 })
+        CENTRE = onto(nil)
+        "#,
+    )
+    .exec()
+    .unwrap_or_else(|error| panic!("{error}
+{}", log(&lua)));
+    let (beside, centre): (String, String) = lua.load("return BESIDE, CENTRE").eval().unwrap();
+    assert_eq!(
+        beside, "7>-2 -0.315,-1.975,0.000 -50.000,-10.000,0.000",
+        "on the street's node 7, starting on its tram lane"
+    );
+    assert_eq!(
+        centre, "7>-2 0.000,0.000,0.000 -50.000,-10.000,0.000",
+        "no end of its own: on the node"
+    );
+}
+
 #[test]
 fn a_roads_preview_is_the_proposal_its_build_would_send() {
     let (lua, _script) = engine();

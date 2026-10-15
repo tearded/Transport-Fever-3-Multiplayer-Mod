@@ -1096,6 +1096,8 @@ mod tests {
                 .unwrap(),
                 BoundedVec::new(vec![Link {
                     precedence: None,
+                    position0: None,
+                    position1: None,
 
                     from: 0,
                     to: 1,

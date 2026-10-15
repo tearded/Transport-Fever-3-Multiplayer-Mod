@@ -1281,8 +1281,12 @@ function networkInto(proposal, network, templateName, style, polyline, dangling,
 	for k, link in ipairs(polyline.links) do
 		local own = link.kind and link.kind.network or network
 		if own == nil then error("link " .. k .. " names no kind", 0) end
-		links[k] = addEdge(kindOf(own), 0, 0, at[link.from + 1], at[link.to + 1],
-			arr(link.tangent0), arr(link.tangent1))
+		-- Each end where the tool put it: its vertex, or beside it (a track
+		-- laid onto a street's end starts on the street's tram lane, and the
+		-- game joins the two there only; schema 27).
+		local p0 = link.position0 and arr(link.position0) or at[link.from + 1]
+		local p1 = link.position1 and arr(link.position1) or at[link.to + 1]
+		links[k] = addEdge(kindOf(own), 0, 0, p0, p1, arr(link.tangent0), arr(link.tangent1))
 	end
 
 	for i, v in ipairs(polyline.vertices) do

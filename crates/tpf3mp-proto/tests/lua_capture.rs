@@ -111,6 +111,8 @@ fn tangent(x: i32, y: i32, z: i32) -> Tangent {
 fn link(from: u16, to: u16, t0: Tangent, t1: Tangent, structure: Structure) -> Link {
     Link {
         precedence: None,
+        position0: None,
+        position1: None,
 
         from,
         to,
@@ -707,6 +709,46 @@ fn a_track_modifier_carries_its_type_catenary_and_speed() {
     );
     assert_eq!(track.polyline.removals.len(), 1);
     assert_eq!(track.polyline.removals[0].network, Network::Track);
+}
+
+/// The track tool's proposal for a track laid onto the end of street 104 at
+/// node 7 (0, 0, 0), as build 40420 makes it: the new edge starts 2 m beside
+/// the node, on the street's tram lane, and ends at its new node.
+const TRACK_ONTO_STREET_END: &str = "{
+    addedNodes = { { entity = -1, comp = { position = v(-50, -10, 0) } } },
+    addedSegments = {
+        { entity = -2, type = 1, comp = { node0 = 7, node1 = -1,
+          position0 = v(-0.3146, -1.9752, 0), position1 = v(-50, -10, 0),
+          tangent0 = v(-50, -8, 0), tangent1 = v(-50, -8, 0),
+          type = 0, typeIndex = -1, roadTemplate = 'track/standard.track_template', roadStyle = '' } },
+    },
+    removedSegments = {},
+}";
+
+#[test]
+fn a_track_onto_a_street_end_starts_where_the_tool_put_it() {
+    let action = decode(
+        capture_with(
+            TRACK_ONTO_STREET_END,
+            "engine.captureBuild({ toAdd = {}, toRemove = {}, proposal = street }, 'Track')",
+        )
+        .unwrap(),
+    );
+    let Action::BuildTrack(track) = action else {
+        panic!("{action:?}")
+    };
+    assert_eq!(
+        track.polyline.vertices[0],
+        node(0, 0, 0, Network::Street),
+        "the street's end node"
+    );
+    let link = &track.polyline.links[0];
+    assert_eq!(
+        link.position0,
+        Some(pos(-315, -1975, 0)),
+        "the start on the tram lane, beside its node, rounded to millimetres"
+    );
+    assert_eq!(link.position1, None, "the end is its new node");
 }
 
 #[test]

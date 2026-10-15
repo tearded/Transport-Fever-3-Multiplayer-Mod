@@ -34,7 +34,7 @@ use crate::{
 /// Version of the action schema, the first thing in an action's payload.
 /// Players in one room run the same mod, so their versions match; a payload
 /// of any other version is refused, never guessed at.
-pub const ACTION_SCHEMA_VERSION: u32 = 26;
+pub const ACTION_SCHEMA_VERSION: u32 = 27;
 
 /// Most vertices, and most links, in one road or track build. A 23-segment
 /// track was the longest single TPF2 build measured.
@@ -50,6 +50,11 @@ pub const MAX_CONNECTIONS: usize = 256;
 pub const MAX_PHASES: usize = 64;
 /// Most edges one action removes or bulldozes.
 pub const MAX_EDGES: usize = 256;
+/// How far an edge's own end may lie from its vertex, in millimetres, on
+/// each axis ([`Link::position0`], schema 27). The track tool starts a track
+/// on a street's tram lane, 2 m beside the street's end node (build 40420);
+/// the widest street's outer lane is well within this.
+pub const MAX_END_OFFSET: i32 = 32_000;
 /// Most town buildings one bulldoze of streets removes with them.
 pub const MAX_BUILDINGS: usize = 64;
 /// Most assets removed by one action.
@@ -365,6 +370,16 @@ pub struct Link {
     /// set none.
     #[serde(default)]
     pub precedence: Option<Precedence>,
+    /// Where the edge itself ends at `from`, when that is not its vertex
+    /// (TF3's `BaseEdge.position0`); none where it is. The track tool
+    /// starts a track laid onto a street's end on the street's tram lane,
+    /// beside the node, and only there does the game join the tram lane to
+    /// the track (build 40420, schema 27).
+    #[serde(default)]
+    pub position0: Option<Pos>,
+    /// The same at `to` (`BaseEdge.position1`).
+    #[serde(default)]
+    pub position1: Option<Pos>,
 }
 
 /// A street's precedence at its two ends, the game's own values.
@@ -415,6 +430,8 @@ pub enum PolylineError {
     NoSuchVertex(usize),
     #[error("link {0} joins a vertex to itself")]
     Loop(usize),
+    #[error("link {0} ends too far from its vertex")]
+    EndTooFar(usize),
 }
 
 impl Polyline {
@@ -434,6 +451,17 @@ impl Polyline {
             }
             if link.from == link.to {
                 return Err(PolylineError::Loop(index));
+            }
+            let ends = [(link.from, link.position0), (link.to, link.position1)];
+            for (vertex, end) in ends {
+                let Some(end) = end else { continue };
+                let at = vertices[usize::from(vertex)].pos;
+                let far = |a: i32, b: i32| {
+                    (i64::from(a) - i64::from(b)).abs() > i64::from(MAX_END_OFFSET)
+                };
+                if far(end.x, at.x) || far(end.y, at.y) || far(end.z, at.z) {
+                    return Err(PolylineError::EndTooFar(index));
+                }
             }
         }
         Ok(Self {
@@ -1455,6 +1483,8 @@ mod tests {
     fn link(from: u16, to: u16) -> Link {
         Link {
             precedence: None,
+            position0: None,
+            position1: None,
 
             from,
             to,
@@ -1499,6 +1529,26 @@ mod tests {
             Err(PolylineError::Loop(1))
         );
         assert!(Polyline::new(vertices(2), links(vec![link(1, 0)]), BoundedVec::empty()).is_ok());
+    }
+
+    #[test]
+    fn a_link_ends_near_its_vertex() {
+        let links = |list| BoundedVec::new(list).unwrap();
+        // Vertex 1 is at (1000, 0, 0): an end 2 m beside it, on a street's
+        // tram lane, is the track tool's; one 40 m off is no edge's end.
+        let mut beside = link(0, 1);
+        beside.position1 = Some(pos(1000, -2000, 0));
+        assert!(Polyline::new(vertices(2), links(vec![beside]), BoundedVec::empty()).is_ok());
+        let mut far = link(0, 1);
+        far.position0 = Some(pos(0, 0, MAX_END_OFFSET + 1));
+        assert_eq!(
+            Polyline::new(
+                vertices(2),
+                links(vec![link(0, 1), far]),
+                BoundedVec::empty()
+            ),
+            Err(PolylineError::EndTooFar(1))
+        );
     }
 
     #[test]
@@ -1553,7 +1603,7 @@ mod tests {
         assert_eq!(
             payload.as_bytes(),
             [
-                26, // schema version
+                27, // schema version
                 5,  // Action::SellVehicle
                 2, 3, 0xac, 0x02, // two ids, varints
             ]
@@ -1596,7 +1646,7 @@ mod tests {
         assert_eq!(
             track.to_payload().unwrap().as_bytes(),
             [
-                26, // schema version
+                27, // schema version
                 1,  // Action::BuildTrack
                 1, b't', 1, 1, b's', 1, // track, style Some("s"), catenary
                 2, // two vertices
@@ -1606,6 +1656,7 @@ mod tests {
                 0, 1, 2, 0, 0, 2, 0, 0, 0, // 0 -> 1, tangents, Structure::Ground
                 0, // the build's own kind
                 0, 0, 0, 0, 0, // no decorations, lock, ownership, lanes or precedence
+                0, 0, // no end of its own at either vertex (schema 27)
                 1, 0, 2, 0, 0, 0, 2, 0, // a removal: Street, (1, 0, 0), (0, 1, 0)
                 1, 1, 0, 0, 2, // a removed node: Track, (0, 0, 1)
                 0, // no junction changes
@@ -1631,7 +1682,7 @@ mod tests {
         assert_eq!(
             replace.to_payload().unwrap().as_bytes(),
             [
-                26, // schema version
+                27, // schema version
                 14, // Action::ReplaceVehicle
                 3,  // vehicle-3
                 1, 1, b'm', 1, 0, 2, 0, 0, // one part: model, reversed, no loads, colour
@@ -1649,7 +1700,7 @@ mod tests {
         assert_eq!(
             prospect.to_payload().unwrap().as_bytes(),
             [
-                26, // schema version
+                27, // schema version
                 15, // Action::Prospect
                 3,  // town-3
                 1, b'c', // cargo
@@ -1664,7 +1715,7 @@ mod tests {
         assert_eq!(
             recolor.to_payload().unwrap().as_bytes(),
             [
-                26, // schema version
+                27, // schema version
                 11, // Action::CompanyOp
                 4,  // CompanyOp::Recolor, appended under schema version 8
                 2,  // company-2
@@ -1675,7 +1726,7 @@ mod tests {
         assert_eq!(
             rank.to_payload().unwrap().as_bytes(),
             [
-                26, // schema version
+                27, // schema version
                 17, // Action::ApplyRank, appended under schema version 9
                 6,  // the rank
             ]
@@ -1687,7 +1738,7 @@ mod tests {
         assert_eq!(
             accept.to_payload().unwrap().as_bytes(),
             [
-                26, // schema version
+                27, // schema version
                 19, // Action::Subsidy, appended under schema version 13
                 0,  // SubsidyOp::Accept
                 0x80, 0x90, 0xaf, 0x99, 0x09, // the uid, zigzag varint
@@ -1724,7 +1775,7 @@ mod tests {
         ];
         for (op, bytes) in cases {
             let payload = Action::CompanyOp(op).to_payload().unwrap();
-            assert_eq!(payload.as_bytes()[..2], [26, 11]);
+            assert_eq!(payload.as_bytes()[..2], [27, 11]);
             assert_eq!(&payload.as_bytes()[2..], bytes);
         }
         // Appended under schema version 24: the perk tools take the next tag.
@@ -1732,7 +1783,7 @@ mod tests {
             industry: IndustryId(5),
             permit: None,
         });
-        assert_eq!(green.to_payload().unwrap().as_bytes(), [26, 21, 0, 5, 0]);
+        assert_eq!(green.to_payload().unwrap().as_bytes(), [27, 21, 0, 5, 0]);
         // Appended under schema version 24: Historic Preservation takes the
         // next tag.
         let preserve = Action::Preserve(Preservation {
@@ -1745,7 +1796,7 @@ mod tests {
         });
         assert_eq!(
             preserve.to_payload().unwrap().as_bytes(),
-            [26, 22, 1, b'b', 2, 0, 0, 0, 1]
+            [27, 22, 1, b'b', 2, 0, 0, 0, 1]
         );
         // Appended under schema version 26: signals on existing tracks take
         // the next tag.
@@ -1769,7 +1820,7 @@ mod tests {
         });
         assert_eq!(
             signals.to_payload().unwrap().as_bytes(),
-            [26, 24, 1, b's', 1, 0, 1, 0, 0, 0, 2, 0, 0, 1, 10, 1, 0]
+            [27, 24, 1, b's', 1, 0, 1, 0, 0, 0, 2, 0, 0, 1, 10, 1, 0]
         );
         let hold = Action::VehicleOp(VehicleOp {
             vehicle: VehicleId(7),
@@ -1778,7 +1829,7 @@ mod tests {
         assert_eq!(
             hold.to_payload().unwrap().as_bytes(),
             [
-                26, // schema version
+                27, // schema version
                 13, // Action::VehicleOp
                 7,  // vehicle-7
                 4,  // VehicleChange::ManualDeparture, appended under schema version 10

@@ -1,6 +1,6 @@
 # Protocol
 
-Current integration: protocol **23**, bridge **29**, action schema **26**.
+Current integration: protocol **23**, bridge **29**, action schema **27**.
 This selective combination differs from both prior dev and PR #37; all
 participants and the relay must be upgraded together. Numbers in feature
 history below describe their original introduction.

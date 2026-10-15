@@ -2972,9 +2972,15 @@ construction's window its edits:
   distance between track centres (`StreetTemplate.trackDistance`, the
   edge's `distance`): without it the game laid no shared ballast bed or
   catenary with the tracks beside it, and the ground showed between them
-  (seen 2026-10-02, tracks laid side by side in a room). A build that
-  moves or removes an edge with a stop or signal on it, or that places
-  stops, signals or constructions, is refused.
+  (seen 2026-10-02, tracks laid side by side in a room). Each edge ends
+  where the tool ended it (`BaseEdge.position0`, `position1`), which need
+  not be its node: a track laid onto the free end of a street with tram
+  tracks starts on the street's tram lane, 2 m beside the node, and only
+  so does the game join them for trams (build 40420; docs/BUILDING.md,
+  "Edge ends"). Built from the node's centre, as before schema 27, the
+  track ended in a buffer stop in every game of the room (2026-10-15).
+  A build that moves or removes an edge with a stop or signal on it, or
+  that places stops, signals or constructions, is refused.
 - **The bulldozer** (`bulldozer`): its proposal removes one construction
   (with the construction's own entrance edge and node) or edges of one
   network (with the nodes they leave on their own). It becomes a

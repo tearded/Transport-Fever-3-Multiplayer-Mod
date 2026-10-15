@@ -87,6 +87,8 @@ mod tests {
                 owned: false,
                 lanes: BoundedVec::default(),
                 precedence: None,
+                position0: None,
+                position1: None,
             }])
             .unwrap(),
             BoundedVec::default(),
