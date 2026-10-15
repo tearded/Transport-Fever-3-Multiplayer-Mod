@@ -1486,4 +1486,8 @@ function engine.captureModify(proposal)
 end
 
 
+-- An edge's lanes and decorations, as an action carries them (apply.lua
+-- lays a track piece again with them).
+engine.lanesOf, engine.decorationsOf = lanesOf, decorationsOf
+
 return engine
