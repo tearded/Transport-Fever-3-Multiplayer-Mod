@@ -841,7 +841,29 @@ The schema caps an edit at 64 junctions, each with 256 connections,
 Standalone edits are behind `strict_junctions` in `junctions.lua`, **off
 by default** under PLAN.md Part 3. For the acceptance test, set it true
 in matching mod copies on both test games and use the new hook/profile.
-The capture and replay both refuse edits with it off. Tests cover native
+With it off, the capture and replay both let one edit through and refuse
+the rest (`junctions.requireNarrow`), each comparing the configuration
+put in with the one its own game has at the node, entity by entity: the
+junction window's double slip switch turned on or off, as the window was
+seen to send it on build 40420. Nothing else at the node may change:
+lane connections, crosswalks, light, phases (compared in whole
+milliseconds, as the wire carries them) and the custom-phase mark stay
+exactly as they are. The one side effect seen with the switch, the
+preference from Auto to No, may come with it, and only at a node no
+street joins, where a light has nothing to stop. A reset, a node with no
+configuration yet and an edit that leaves the switch as it is are
+refused. The crossing tool's tram lanes stay refused until the tool is
+seen in the game. The refusal names what it saw, after the
+`strict_junctions` reason, with the old and new light settings and the
+lanes' count. Road and track builds carry their junction settings as
+before, unchecked by this; the log's `handed the player's build` and
+`building` lines name each node's settings they carry (`+j<node>{lanes
+N tram M}`) and take out (`-j<node>`).
+
+Seen in two games on the local server on 2026-10-15 (Steam Windows
+40420): a double slip switch turned on at a track crossing in one game
+was carried as `EditJunctions` and applied in both, with matching
+checkpoints. Tests cover native
 memory decoding, portable round trips into replicas with different IDs,
 curved-edge preservation, refusal cases and checkpoint differences. This
 is adapter evidence, not a completed real-game playtest. Follow the

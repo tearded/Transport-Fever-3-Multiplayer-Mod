@@ -543,6 +543,18 @@ function engine.describe(proposal)
 			end
 			out[#out + 1] = "+o{" .. table.concat(fields, " ") .. "}"
 		end
+		-- Junction settings: each node's lanes and how many a tram's.
+		for _, n in ipairs(list(get(street, "nodeConfigsToAdd"))) do
+			local turns, trams = 0, 0
+			for _, t in ipairs(list(get(n.comp, "laneConnections"))) do
+				turns = turns + 1
+				if get(t, "withTram") == true then trams = trams + 1 end
+			end
+			out[#out + 1] = "+j" .. node(n.entity) .. "{lanes " .. turns .. " tram " .. trams .. "}"
+		end
+		for _, id in ipairs(list(get(street, "nodeConfigsToRemove"))) do
+			out[#out + 1] = "-j" .. node(id)
+		end
 		for _, c in ipairs(list(get(proposal, "toAdd"))) do
 			local con = get(c, "construction")
 			out[#out + 1] = "+c" .. tostring(get(c, "fileName")) .. "{frozen "

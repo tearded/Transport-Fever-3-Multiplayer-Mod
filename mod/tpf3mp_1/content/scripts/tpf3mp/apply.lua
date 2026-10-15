@@ -1471,6 +1471,18 @@ function networkInto(proposal, network, templateName, style, polyline, dangling,
 	end
 	shape[#shape + 1] = "-e" .. table.concat(edgesToRemove, ",") .. " -n" .. table.concat(nodesToRemove, ",")
 		.. " -c" .. table.concat(configsToRemove, ",")
+	-- The junction settings put in, each node's lanes and how many a tram's.
+	for _, n in ipairs(proposal.streetProposal.nodeConfigsToAdd or {}) do
+		local turns, trams = 0, 0
+		pcall(function()
+			local lanes = n.comp.laneConnections
+			for i = 1, #lanes do
+				turns = turns + 1
+				if lanes[i].withTram then trams = trams + 1 end
+			end
+		end)
+		shape[#shape + 1] = "+j" .. tostring(n.entity) .. "{lanes " .. turns .. " tram " .. trams .. "}"
+	end
 	log("building " .. table.concat(shape, " "))
 end
 
@@ -1490,9 +1502,8 @@ function HANDLERS.BuildRoad(road)
 end
 
 function HANDLERS.EditJunctions(edit)
-	junctions.requireEnabled()
 	local proposal = api.type.SimpleProposal.new()
-	junctions.into(proposal, edit.changes, {}, mine)
+	junctions.into(proposal, edit.changes, {}, mine, nil, junctions.requireNarrow)
 	local context = api.type.Context.new()
 	context.player = company()
 	return buildProposal(proposal, context)

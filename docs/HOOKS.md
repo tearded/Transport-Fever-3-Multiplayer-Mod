@@ -3403,7 +3403,8 @@ worked. That startup failure has not been diagnosed. A rejoined game's
 speed row showed 1x while the room was paused; pause then play resumed it.
 
 Full acceptance is still pending. Keep `junctions.strict_junctions` off in
-the normal mod. In matching disposable test mod copies, turn it on and:
+the normal mod; with it off only the junction window's double slip switch
+goes (BUILDING.md, "Junction edits"). In matching disposable test mod copies, turn it on and:
 
 1. Start two games through the launcher into one room and the same save.
    Use the actual tools to toggle crosswalks, lane turns and traffic lights;

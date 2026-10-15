@@ -607,7 +607,9 @@ protected folder such as Program Files.
   multiplayer yet: …" for what the game's windows do that the room does
   not carry yet. Junction tools (lane arrows, crosswalks and traffic-light
   settings) have an implementation behind `strict_junctions`, off until
-  the two-player acceptance check in HOOKS.md passes. With it off, these
+  the two-player acceptance check in HOOKS.md passes. One of their edits
+  already goes through the room: turning a double slip switch on or off
+  in the junction's window. With it off, the other edits of these
   tools, and a tool that would move a stop or signal onto another stretch of road, show "Not in
   multiplayer yet" and build nothing: the tool says why.
 

@@ -1773,6 +1773,184 @@ fn junction_replay_refuses_ambiguous_stale_private_and_mixed_edits() {
     "#).exec().unwrap();
 }
 
+/// The junction of `junction_world.lua` with no traffic lights (unless
+/// `KEEP_LIGHTS`) and the preference Auto, its four arms tracks with no
+/// street at the node (unless `STREET_NODE`), `strict_junctions` off, and
+/// `EDIT(f)`: the capture of the window's proposal of its configuration as
+/// `f` changes a copy of it. The stand-in's enum: AUTO=0, YES=1, NO=2.
+const NARROW_BASE: &str = r#"
+    local c = CONFIGS[1+OFFSET]
+    if not KEEP_LIGHTS then
+        c.trafficLightConfig = {trafficLightType=-1, states={}}
+        c.userModifiedTrafficLightStates = false
+    end
+    c.trafficLightPreference = 0
+    if not STREET_NODE then
+        local system = api.engine.system.streetSystem
+        system.getNode2TrackEdgeMap = function() return STREETS end
+        system.getNode2StreetEdgeMap = function() return {} end
+        system.getNodeTrackSegments = function(n) return STREETS[n] or {} end
+        system.getNodeStreetSegments = function() return {} end
+    end
+    J.strict_junctions = false
+    local function copy(v)
+        if type(v) ~= 'table' then return v end
+        local o = {}
+        for k, x in pairs(v) do o[k] = copy(x) end
+        return o
+    end
+    function EDIT(f)
+        local e = copy(CONFIGS[1+OFFSET])
+        f(e)
+        PROPOSAL.proposal.nodeConfigsToAdd = {{entity=1+OFFSET, comp=e}}
+        return C.junction(PROPOSAL)
+    end
+"#;
+
+fn narrow_game(offset: u32, keep_lights: bool, street_node: bool) -> Lua {
+    let lua = junction_game(offset);
+    lua.globals().set("KEEP_LIGHTS", keep_lights).unwrap();
+    lua.globals().set("STREET_NODE", street_node).unwrap();
+    lua.load(NARROW_BASE).exec().unwrap();
+    lua
+}
+
+/// Captures `edit` in one game and replays it in another with other ids,
+/// both set up by `setup`; returns whether `check` holds for the
+/// configuration the replica sent.
+fn narrow_round_trip(keep_lights: bool, setup: &str, edit: &str, check: &str) -> bool {
+    use tpf3mp_proto::lua::{action_from_lua, action_to_lua};
+    let source = narrow_game(0, keep_lights, false);
+    source.load(setup).exec().unwrap();
+    let captured: mlua::Value = source
+        .load(format!("return EDIT(function(c) {edit} end)"))
+        .eval()
+        .unwrap_or_else(|e| panic!("{edit}: {e}"));
+    let action = action_from_lua(&common::tree(&captured)).unwrap();
+    let replica = narrow_game(5000, keep_lights, false);
+    replica.load(setup).exec().unwrap();
+    replica
+        .globals()
+        .set(
+            "ACTION",
+            lua_value(&replica, &action_to_lua(&action).unwrap()),
+        )
+        .unwrap();
+    replica
+        .load(format!(
+            r#"
+        HOOK.batch = {{ACTION}} UPDATE({{}},STATE,0.2)
+        assert(#SENT==1, table.concat(HOOK.logged,'\n'))
+        local cfg = SENT[1].proposal.streetProposal.nodeConfigsToAdd[1].comp
+        return ({check}) == true
+    "#
+        ))
+        .eval()
+        .unwrap_or_else(|e| panic!("{edit}: {e}"))
+}
+
+#[test]
+fn the_junction_windows_double_slip_switch_goes_through_the_room_before_the_junction_acceptance() {
+    // As the window was seen to send it: the switch, and with it the
+    // preference from Auto to No at a node no street joins.
+    for (setup, edit, check) in [
+        ("", "c.doubleSlipSwitch=true", "cfg.doubleSlipSwitch"),
+        (
+            "",
+            "c.doubleSlipSwitch=true c.trafficLightPreference=2",
+            "cfg.doubleSlipSwitch and cfg.trafficLightPreference==2",
+        ),
+        (
+            "CONFIGS[1+OFFSET].doubleSlipSwitch=true",
+            "c.doubleSlipSwitch=false",
+            "not cfg.doubleSlipSwitch",
+        ),
+    ] {
+        assert!(narrow_round_trip(false, setup, edit, check), "{edit}");
+    }
+    // A phase kept as it is compares alike after the wire rounded it to
+    // milliseconds (12.3125 s: half a millisecond).
+    assert!(narrow_round_trip(
+        true,
+        "CONFIGS[1+OFFSET].trafficLightConfig.states[1].duration = 12.3125",
+        "c.doubleSlipSwitch=true",
+        "cfg.doubleSlipSwitch",
+    ));
+}
+
+#[test]
+fn every_other_junction_edit_stays_refused_before_the_junction_acceptance() {
+    use tpf3mp_proto::lua::{action_from_lua, action_to_lua};
+    let slip = "c.doubleSlipSwitch=true";
+    for (keep_lights, street_node, setup, edit, expected) in [
+        // Lanes stay exactly as they are, the switch's own included, and
+        // tram lanes wait for the crossing tool's own acceptance.
+        (false, false, "", format!("{slip} c.laneConnections[3]={{segment0=101,lane0=1,segment1=103,lane1=0,withRoad=false,withTram=false}}"), "lane connections"),
+        (false, false, "", format!("{slip} table.remove(c.laneConnections,2)"), "lane connections"),
+        (false, false, "", format!("{slip} c.laneConnections[2].withTram=false"), "lane connections"),
+        (false, false, "", "c.laneConnections[3]={segment0=102,lane0=1,segment1=103,lane1=0,withRoad=false,withTram=true}".to_string(), "no double slip switch change"),
+        (false, false, "", "c.laneConnections[2].withTram=false".to_string(), "no double slip switch change"),
+        // The preference: Auto to No alone, with the switch, where no
+        // street joins.
+        (false, false, "", "c.trafficLightPreference=2".to_string(), "no double slip switch change"),
+        (false, false, "", format!("{slip} c.trafficLightPreference=1"), "traffic lights"),
+        (false, false, "CONFIGS[1+OFFSET].trafficLightPreference=2", format!("{slip} c.trafficLightPreference=0"), "traffic lights"),
+        (false, true, "", format!("{slip} c.trafficLightPreference=2"), "traffic lights"),
+        // Everything else at the node.
+        (false, false, "", format!("{slip} c.crosswalks={{101}}"), "crosswalks"),
+        (false, false, "", format!("{slip} c.trafficLightConfig.trafficLightType=40"), "traffic lights"),
+        (false, false, "", format!("{slip} c.userModifiedTrafficLightStates=true"), "traffic lights"),
+        (true, false, "", format!("{slip} c.trafficLightConfig.states[1].duration=13"), "phases"),
+        (false, false, "", "c.doubleSlipSwitch=false".to_string(), "no double slip switch change"),
+    ] {
+        let lua = narrow_game(0, keep_lights, street_node);
+        lua.load(setup).exec().unwrap();
+        let (ok, why): (bool, String) = lua
+            .load(format!(
+                "local ok, why = pcall(EDIT, function(c) {edit} end) return ok, tostring(why)"
+            ))
+            .eval()
+            .unwrap();
+        assert!(
+            !ok && why.contains("strict_junctions") && why.contains(expected),
+            "{edit}: {why}"
+        );
+    }
+    // A reset.
+    let lua = narrow_game(0, false, false);
+    lua.load(
+        r#"
+        PROPOSAL.proposal.nodeConfigsToAdd = {}
+        local ok, why = pcall(C.junction, PROPOSAL)
+        assert(not ok and tostring(why):find('reset',1,true), tostring(why))
+    "#,
+    )
+    .exec()
+    .unwrap();
+    // Every game asks again at the replay: an edit captured where the gate
+    // was on changes nothing in a game where it is off.
+    let source = narrow_game(0, false, false);
+    let captured: mlua::Value = source
+        .load("J.strict_junctions=true return EDIT(function(c) c.doubleSlipSwitch=true c.crosswalks={101} end)")
+        .eval()
+        .unwrap();
+    let action = action_from_lua(&common::tree(&captured)).unwrap();
+    let replica = narrow_game(5000, false, false);
+    replica
+        .globals()
+        .set(
+            "ACTION",
+            lua_value(&replica, &action_to_lua(&action).unwrap()),
+        )
+        .unwrap();
+    let (ok, why): (bool, String) = replica
+        .load("local ok, why = A.run(ACTION) return ok == true, tostring(why)")
+        .eval()
+        .unwrap();
+    assert!(!ok && why.contains("crosswalks"), "{why}");
+    assert_eq!(replica.load("return #SENT").eval::<usize>().unwrap(), 0);
+}
+
 #[test]
 fn unverified_junction_tools_are_refused_on_capture_and_replay() {
     let lua = junction_game(0);
@@ -6411,9 +6589,10 @@ fn the_game_script_builds_a_road_as_the_players_tool_would() {
          +e-1/0:7>-5 ::/street/town_small.street_template \
          +e-2/0:-5>-6 ::/street/town_small.street_template \
          +e-3/0:8>-5 ::/street/country.street_template \
-         +e-4/0:-5>9 ::/street/country.street_template -e100 -n -c8,9",
+         +e-4/0:-5>9 ::/street/country.street_template -e100 -n -c8,9 \
+         +j8{lanes 0 tram 0} +j9{lanes 0 tram 0}",
         "applied, and what was sent in the log: the split street's ends lose their lane \
-         configurations with it"
+         configurations with it, and get them back"
     );
     let built: String = lua
         .load(
