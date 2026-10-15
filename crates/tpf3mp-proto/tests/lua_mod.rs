@@ -6207,6 +6207,103 @@ fn a_station_with_a_long_entrance_keeps_the_external_junction_only() {
     );
 }
 
+/// Each click handed over is bound to its ticket, and one that was not to
+/// nothing, so the street and track tools continue only from what the room
+/// builds for that very click (tpf3mp/toolchain.lua, crates/tpf3mp-hook/src/
+/// toolchain.rs).
+#[test]
+fn each_handed_over_click_tells_the_hook_its_ticket() {
+    let (lua, _script) = engine();
+    let bound: Vec<(i64, i64)> = lua
+        .load(format!(
+            "HOOK.room = true HOOK.clicks = 0
+             local bound = {{}}
+             tpf3mp_native.chainClick = function(click, ticket)
+                 bound[#bound + 1] = {{ click, ticket or -1 }}
+             end
+             tpf3mp_native.chainPoll = function() end
+             local function ask(proposal)
+                 SCRIPT.guiHandleEvent({{}}, nil, nil, '', 'constructionBuilder',
+                     'builder.proposalCreate', {{ proposal }})
+             end
+             SCRIPT.guiUpdate({{}}, nil, nil)
+             ask({CONSTRUCTION_PROPOSAL})
+             HOOK.clicks = 1 SCRIPT.guiUpdate({{}}, nil, nil)
+             local unnamed = {CONSTRUCTION_PROPOSAL} unnamed.toAdd[1].name = ''
+             ask(unnamed)
+             HOOK.clicks = 2 SCRIPT.guiUpdate({{}}, nil, nil)
+             return bound"
+        ))
+        .eval::<Vec<Vec<i64>>>()
+        .unwrap_or_else(|error| panic!("{error}\n{}", log(&lua)))
+        .into_iter()
+        .map(|b| (b[0], b[1]))
+        .collect();
+    assert_eq!(
+        bound,
+        [(0, 1), (1, -1)],
+        "click 0 with ticket 1; click 1 not handed over"
+    );
+}
+
+/// The GUI's half of the tools continuing: the edge the room built is
+/// checked in the GUI's own state, and its end node's edges counted.
+#[test]
+fn the_rooms_edge_is_checked_in_the_guis_state() {
+    let (lua, _script) = engine();
+    let results: Vec<String> = lua
+        .load(
+            "local toolchain = ug_require('tpf3mp_1::/scripts/tpf3mp/toolchain.lua')
+             local C = { BASE_EDGE = 'edge', BASE_EDGE_STREET = 'street', BASE_NODE = 'node' }
+             local comps = {
+                 edge = { [11] = { node0 = 2, node1 = 3 }, [12] = { node0 = 3, node1 = 4 },
+                          [13] = { node0 = 3, node1 = 5 } },
+                 street = { [11] = {}, [12] = {} },
+                 node = { [2] = { position = { x = 0, y = 0, z = 0 } },
+                          [3] = { position = { x = 1200.25, y = -340.5, z = 81.75 } } } }
+             local segments = { [3] = { 11 } }
+             local api = { type = { ComponentType = C }, engine = {
+                 getComponent = function(e, c) return comps[c][e] end,
+                 system = { streetSystem = {
+                     getNodeSegments = function(n) return segments[n] or {} end } } } }
+             local out = {}
+             local function say(...)
+                 local t = {}
+                 for i = 1, select('#', ...) do t[i] = tostring((select(i, ...))) end
+                 out[#out + 1] = table.concat(t, ' ')
+             end
+             -- The room's end 0.4 mm off; the new street alone at its node.
+             say(toolchain.check(api, 11, 2, 3, 1, 1200.2504, -340.5, 81.75))
+             -- Two streets and a track there.
+             segments[3] = { 11, 12, 13 }
+             say(toolchain.check(api, 11, 2, 3, 1, 1200.25, -340.5, 81.75))
+             -- Other nodes, no such edge, the node 2 cm away.
+             say(toolchain.check(api, 11, 3, 2, 0, 1200.25, -340.5, 81.75))
+             say(toolchain.check(api, 99, 2, 3, 1, 1200.25, -340.5, 81.75))
+             say(toolchain.check(api, 11, 2, 3, 1, 1200.27, -340.5, 81.75))
+             local seen = {}
+             local link = {
+                 chainPoll = function() return 11, 2, 3, 1, 1200.25, -340.5, 81.75 end,
+                 chainSeen = function(_, ...) seen[#seen + 1] = table.concat({ ... }, ' ') end }
+             toolchain.frame(link, api)
+             api.engine.getComponent = function() error('the game raised') end
+             toolchain.frame(link, api)
+             link.chainPoll = function() return nil end
+             toolchain.frame(link, api)
+             out[#out + 1] = table.concat(seen, ';')
+             return out",
+        )
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(
+        results,
+        ["1 0", "2 1", "nil", "nil", "nil", "11 2 1"],
+        "the edge as the room built it, with its end node's edges counted; another \
+         orientation, a missing edge or a node elsewhere is not; a frame that raises \
+         tells the hook nothing"
+    );
+}
+
 #[test]
 fn the_build_a_click_saw_goes_to_the_room_and_other_tools_stay_refused() {
     let (lua, _script) = engine();

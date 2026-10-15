@@ -60,6 +60,13 @@
 //!   call it keeps both refused.
 //! - `replaying(on)`: the game script begins or ends applying the room's
 //!   actions, whose builds the hook lets through ([`crate::builds`]).
+//! - `chainClick(n, ticket)`, `chainPoll()`, `chainSeen(edge, streets,
+//!   others)`: in the GUI: click `n` was handed to the room with `ticket`
+//!   (or not, nil); each frame, the edge the room built where the player's
+//!   last street or track click ended, to check in the GUI's state; and
+//!   that the GUI's state has it. The street and track tools then continue
+//!   from it ([`crate::toolchain`]). Optional in the contract: without
+//!   them the tools wait for a start point after each segment.
 //! - `terrain(t)`: in a game script's `postUpdate`, while the room's actions
 //!   run: arms the next build it sends with the terraform `t` (`{ x0 =, y0
 //!   =, width =, height =, cells = { ... } }`), which the hook fills in at
@@ -518,6 +525,7 @@ pub fn cancel_replay() {
 /// One of the player's actions will never happen: `results()` says so for
 /// its ticket.
 pub fn refused(ticket: u64, why: &str) {
+    crate::toolchain::refused(ticket);
     answer(Answer {
         ticket,
         ok: false,
@@ -846,6 +854,9 @@ pub unsafe fn register(api: &LuaApi, l: State) {
                 (b"clicks", native_clicks),
                 (b"built", native_built),
                 (b"replaying", native_replaying),
+                (b"chainClick", native_chain_click),
+                (b"chainPoll", native_chain_poll),
+                (b"chainSeen", native_chain_seen),
                 (b"terrain", native_terrain),
                 (b"applied", native_applied),
                 (b"results", native_results),
@@ -2681,6 +2692,80 @@ unsafe extern "C-unwind" fn native_replaying(l: State) -> c_int {
     0
 }
 
+/// `chainClick(click, ticket)`: in the GUI: the player's click `click`
+/// (the count before it) was handed to the room with `ticket`, or not
+/// (nil) ([`crate::toolchain`]).
+unsafe extern "C-unwind" fn native_chain_click(l: State) -> c_int {
+    let Some(api) = API.get() else {
+        return 0;
+    };
+    let whole = |n: f64| n.is_finite() && n >= 0.0 && n.fract() == 0.0 && n < 9.0e15;
+    // SAFETY: Lua calls this with its own state; its arguments are on it.
+    let (click, ticket) = unsafe { (number_arg(api, l, 1), number_arg(api, l, 2)) };
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    if let Some(click) = click.filter(|n| whole(*n)) {
+        crate::toolchain::bind(click as u64, ticket.filter(|n| whole(*n)).map(|n| n as u64));
+    }
+    0
+}
+
+/// `chainPoll()`: in the GUI, each frame: the edge the room built where the
+/// player's click ended, to check in the GUI's state: `edge, node0, node1,
+/// end, x, y, z` (`end` 0 or 1, the clicked end), or nothing.
+unsafe extern "C-unwind" fn native_chain_poll(l: State) -> c_int {
+    let Some(api) = API.get() else {
+        return 0;
+    };
+    let Some(found) = crate::toolchain::poll() else {
+        return 0;
+    };
+    // SAFETY: a C function's stack has LUA_MINSTACK (20) free slots.
+    unsafe {
+        for value in [
+            f64::from(found.edge),
+            f64::from(found.nodes[0]),
+            f64::from(found.nodes[1]),
+            found.end as f64,
+            f64::from(found.at[0]),
+            f64::from(found.at[1]),
+            f64::from(found.at[2]),
+        ] {
+            (api.pushnumber)(l, value);
+        }
+    }
+    7
+}
+
+/// `chainSeen(edge, streets, others)`: in the GUI: its state has `edge` as
+/// the room built it, its clicked end's node with `streets` street edges
+/// and `others` other edges.
+unsafe extern "C-unwind" fn native_chain_seen(l: State) -> c_int {
+    let Some(api) = API.get() else {
+        return 0;
+    };
+    // SAFETY: Lua calls this with its own state; its arguments are on it.
+    let (edge, streets, others) = unsafe {
+        (
+            number_arg(api, l, 1),
+            number_arg(api, l, 2),
+            number_arg(api, l, 3),
+        )
+    };
+    let count =
+        |n: Option<f64>| n.filter(|n| n.is_finite() && *n >= 0.0 && n.fract() == 0.0 && *n < 1.0e6);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    if let (Some(edge), Some(streets), Some(others)) = (
+        edge.filter(|n| {
+            n.is_finite() && *n >= 0.0 && n.fract() == 0.0 && *n <= f64::from(i32::MAX)
+        }),
+        count(streets),
+        count(others),
+    ) {
+        crate::toolchain::seen(edge as i32, streets as u32, others as u32);
+    }
+    0
+}
+
 /// The number at `index` of a C function's arguments, if it is one.
 ///
 /// # Safety
@@ -2760,17 +2845,22 @@ unsafe extern "C-unwind" fn native_applied(l: State) -> c_int {
         let mut s = shared();
         let i = index as usize - 1;
         if let Some(r) = s.replay.as_mut().filter(|r| r.taken && r.result.is_none()) {
-            let Some(reported) = r.applied.get_mut(i) else {
-                return 0;
-            };
-            if *reported {
-                return 0;
+            match r.applied.get_mut(i) {
+                Some(reported) if !*reported => {
+                    *reported = true;
+                    Some(r.tickets.get(i).copied().flatten())
+                }
+                _ => None,
             }
-            *reported = true;
-            r.tickets.get(i).copied().flatten()
         } else {
-            s.batch.tickets.get(i).copied().flatten()
+            Some(s.batch.tickets.get(i).copied().flatten())
         }
+    };
+    // What the action's builds made goes with it, whoever's it is
+    // (crate::toolchain); an action reported twice keeps nothing.
+    crate::toolchain::applied(ticket.flatten(), ok && ticket.is_some());
+    let Some(ticket) = ticket else {
+        return 0;
     };
     if let Some(ticket) = ticket {
         answer(Answer {

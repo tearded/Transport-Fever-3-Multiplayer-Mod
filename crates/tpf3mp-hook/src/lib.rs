@@ -80,6 +80,7 @@ pub mod stoptool;
 pub mod streettrace;
 pub mod terrain;
 pub mod ticks;
+pub mod toolchain;
 pub mod toolplayer;
 pub mod townfield;
 pub mod towntrace;

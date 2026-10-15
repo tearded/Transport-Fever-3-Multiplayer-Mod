@@ -83,8 +83,8 @@
 function data()
 	local MOD = "tpf3mp_1"
 	-- Per Lua state: tried once, then kept.
-	local tried, link, apply, lanes, capture, registry, companies, progression, modbuild, previews =
-		false, nil, nil, nil, nil, nil, nil, nil, nil, nil
+	local tried, link, apply, lanes, capture, registry, companies, progression, modbuild, previews, toolchain =
+		false, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
 	-- Whether this state is applying the room's actions (in postUpdate);
 	-- the scripts' follow-up builds in the GUI's state, and whether their
 	-- wrapper is on there (tpf3mp/modbuild.lua).
@@ -378,6 +378,10 @@ function data()
 				-- so a mod without them still builds through the room.
 				local okPreviews, previewsModule = pcall(ug_require, MOD .. "::/scripts/tpf3mp/previews.lua")
 				previews = okPreviews and type(previewsModule) == "table" and previewsModule or nil
+				-- The street and track tools continue from what the room
+				-- built (tpf3mp/toolchain.lua): optional too.
+				local okChain, chainModule = pcall(ug_require, MOD .. "::/scripts/tpf3mp/toolchain.lua")
+				toolchain = okChain and type(chainModule) == "table" and chainModule or nil
 				registry = registryModule
 				companies = companiesModule
 				progression = progressionModule
@@ -875,6 +879,7 @@ function data()
 			if previews and handled < clicks then previews.hidden(l) end
 			while handled < clicks do
 				local seen = snapshots[handled]
+				local ticket = nil
 				-- The module editor's click: its build as the hook read it,
 				-- whatever preview another tool showed before.
 				local native, whyNot = l:built(handled)
@@ -899,6 +904,7 @@ function data()
 				elseif seen and seen.action then
 					local ok, why = l:command(seen.action)
 					if ok then
+						ticket = why
 						l:log("handed the player's build to the room"
 							.. (seen.shape and (" [" .. seen.shape .. "]") or ""))
 						if seen.upgrade then l:log("upgrade handed to the room: " .. seen.upgrade) end
@@ -910,12 +916,19 @@ function data()
 						.. tostring(seen and seen.why or "no proposal seen (a tool that tells game scripts nothing)")
 						.. ((seen and seen.shape) and (" [" .. seen.shape .. "]") or ""))
 				end
+				-- The street or track tool continues from what the room
+				-- builds for this click, if it was handed over (the hook
+				-- knows whether it was that tool's).
+				l:chainClick(handled, ticket)
 				snapshots[handled] = nil
 				handled = handled + 1
 			end
 			for count in pairs(snapshots) do
 				if count < handled then snapshots[count] = nil end
 			end
+			-- The edge the room built for the last street or track click,
+			-- checked in this state each frame (tpf3mp/toolchain.lua).
+			if toolchain then toolchain.frame(l, api) end
 		end,
 
 		handleEvent = function(_params, state, _src, id, name, param)

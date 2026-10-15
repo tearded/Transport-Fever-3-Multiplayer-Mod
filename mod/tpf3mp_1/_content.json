@@ -60,6 +60,7 @@
         "scripts/tpf3mp/registry.lua",
         "scripts/tpf3mp/roads.lua",
         "scripts/tpf3mp/subsidies.lua",
+        "scripts/tpf3mp/toolchain.lua",
         "scripts/tpf3mp/worldload.lua",
         "mod.script.lua",
         "tpf3mp_sim/subsidies.script.lua",

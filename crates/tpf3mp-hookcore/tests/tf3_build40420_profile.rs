@@ -58,7 +58,7 @@ const SHA256: &str = "74861ac43b041aebc5179154345b3cf1ec83154c8e6cc58e0d9e02ff5f
 const SIZE: u64 = 69_755_832;
 const PE_TIMESTAMP: u32 = 0x6ac5_0427;
 
-/// All 153 profile targets, including optional targets, at their RVAs in the
+/// All 161 profile targets, including optional targets, at their RVAs in the
 /// public build 25754343 executable (image base 0x140000000).
 const TARGETS: &[(&str, u64)] = &[
     ("GameSim::Step", 0x1593d0),
@@ -76,6 +76,12 @@ const TARGETS: &[(&str, u64)] = &[
     ("ModuleBuilder::MousePressed/Add call", 0x542eb5),
     ("StreetTerminalBuilder::MousePressed/Add call", 0x5948d8),
     ("StreetTerminalBuilder::MousePressed/busy set", 0x5946f5),
+    ("StreetBuilder::UpdateEngine/Add call", 0x5891af),
+    ("StreetBuilder::UpdateEngine/capture", 0x588f65),
+    ("StreetBuilder::UpdateEngine callback/result scan", 0x56d949),
+    ("StreetBuilder::UpdateEngine callback/snap", 0x56dc02),
+    ("UI::StreetBuilder::StartAt", 0x570a30),
+    ("ecs::Engine::EntityExists", 0x4f7170),
     ("ProposalAction::DoApply/Add call", 0x548f75),
     ("luaB_print", 0x2fd4660),
     ("lua_checkstack", 0x2fc4fa0),
@@ -254,8 +260,8 @@ fn profile_pins_public_steam_build_40420_and_all_target_names() {
     assert_eq!(profile.build.size, Some(SIZE));
     assert_eq!(profile.build.pe_timestamp, Some(PE_TIMESTAMP));
     assert_eq!(profile.image_base, Some(0x0001_4000_0000));
-    assert_eq!(profile.targets.len(), 155);
-    assert_eq!(TARGETS.len(), 155);
+    assert_eq!(profile.targets.len(), 161);
+    assert_eq!(TARGETS.len(), 161);
     for &(name, _) in TARGETS {
         assert!(
             profile.targets.iter().any(|target| target.name == name),

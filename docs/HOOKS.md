@@ -3193,6 +3193,79 @@ construction's window its edits:
   the model name `modelRep` gives is the one `EdgeObject.model` takes, and
   that the tool's click is `playerInitiated`.
 
+**The street and track tools continue** from the segment the room built,
+as they do from the one just built in single player
+(`crates/tpf3mp-hook/src/toolchain.rs`, `scripts/tpf3mp/toolchain.lua`).
+Read on 40420 with tpfre (the same code, at the same places, on 40408 and
+40418): one click of either tool, `UI::StreetBuilder::UpdateEngine`
+(0x588c60), sets the tool's busy byte (`+0x9e0`), queues the build with a
+callback (`UpdateEngine::<lambda_1>`, inline in its `std::function`: the
+tool at `+8`, the start point the next segment takes at `+0x10`, the
+clicked end at `+0x1c`, and two settings bytes at `+0x28` and `+0x29`),
+then resets the tool's proposal, start point and all (`ResetProposal`,
+0x575650). The callback (0x56d7f0) clears the busy byte, and continues
+only when the command's result (`+0x30`, the apply's bool, 0x9e3473) is
+set: it finds, in the payload's vector of built edges (`+0x18`, 0x350
+bytes each: the edge, its two nodes, both ends and both tangents, real ids
+once applied: 0x25fc980, 0x25fe200), the edge whose end equals the clicked
+end, and calls the tool's "start here" (0x570a30) with a
+`SnapPointBaseEdge` there and, when the end node has exactly one edge of
+the tool's network, the edge's direction. In a room the click's build is
+refused at its apply, so the result is unset and the player picked a start
+point after every segment (reported 2026-10-15).
+
+The hook does the callback's part later, from what the room built, and
+never hands the callback a result of its own:
+1. At the click, the add's detour reads the callback as `UpdateEngine`
+   built it (busy byte 1, functor inline) and keeps that one click; a
+   later click of the street or track tool replaces it. A script's build
+   (a mod's follow-up, `playerInitiated` too) leaves it, and picking
+   another tool closes this one.
+2. The mod's `guiUpdate` tells the hook the ticket it handed the click to
+   the room with (`chainClick`), or that it handed nothing over.
+3. While the room's actions are applied, each build's edges are copied out
+   of its payload after the apply, and kept once that ticket's action is
+   reported applied (`applied`); a refused or failed one drops the click.
+4. Each GUI frame (`chainPoll`), the built edge that ends within 5 mm of
+   the clicked end (the room carries millimetres) is checked in the GUI's
+   own state: that edge, with those nodes, its end where the room put it,
+   which also shows that state has the room's build. Its end node's
+   street and other edges are counted (`getNodeSegments`, `chainSeen`).
+5. At the tool's next frame (the `UI::StreetBuilder::Step` pre-hook of
+   the tools' player), if the tool is not busy, has no start point of the
+   player's, keeps its settings and their continue byte, the edge exists in
+   the tool's engine (`ecs::Engine::EntityExists`, which `StartAt`'s
+   revision read asserts) and the GUI saw it a frame ago at most, the hook
+   calls the tool's "start here" with the start point and direction the
+   callback would have built.
+
+The click is dropped, and the tool left as the game left it, when the
+player starts a segment (even one let go again before the room built),
+the tool misses frames (closed), the room
+refuses or does not apply the build or applies it without such an edge,
+the game leaves the room, or 15 s pass. The direction rule is the
+game's, counted in the GUI's state as the game counts it, with one
+difference: the game counts the other network's edges that also have
+`BaseEdge`'s field `+0x90` clear, the hook all of them. (Whether the
+click's end snapped to something does not matter: a track snapped to a
+street beside it, as a guide, still goes on in its direction.)
+A right-click while the click waits does not cancel it: with no start
+point, the tool's own input handler passes a right-click on
+(`UI::StreetBuilder` vf2, 0x581479..0x5814d7), so the hook sees no
+abort; whatever the game then does with it, a tool it closes misses
+frames and drops the click. "Closed" is three GUI frames without the
+tool's frame, counted from the click's own; a tool closed and opened
+again faster than that is not seen.
+Profile targets, all optional: `StreetBuilder::UpdateEngine/Add call`,
+`/capture` (whose signature holds every offset of the tool and the
+callback read), `StreetBuilder::UpdateEngine callback/result scan` and
+`/snap` (the result's and the start point's layout),
+`UI::StreetBuilder::StartAt` and `ecs::Engine::EntityExists`; install
+checks each call between them. Without any of them, or without the
+`Step` pre-hook (`TPF3MP_HOOK_TOOL_COMPANY=0`), the tools wait for a
+start point after each segment, and hook.log says why once
+(`street tool: ...`).
+
 A refusal shows its reason in the tool, and the log has each new reason
 with the proposal's shape (`the room cannot carry this ... build`); every
 build handed to the room is logged with its shape too. The upgrade, bus

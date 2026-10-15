@@ -1002,6 +1002,12 @@ fn install_inner(profile: &Profile, link_name: &str) -> Result<u64, String> {
         _ => "the build tools stay refused: the profile has no build targets".to_owned(),
     };
     log_line(&builds);
+    // The street and track tools continue from the room's segment
+    // (docs/HOOKS.md, "The street and track tools continue"): without every
+    // target, they wait for a start point after each segment.
+    if let (Ok(add), Ok(_)) = (at(ADD_TARGET), at(BUILD_APPLY_TARGET)) {
+        log_line(&crate::toolchain::install(&at, add));
+    }
     // Loading the room's world from the main menu (docs/HOOKS.md, "Loading
     // from the main menu"): without it, a game needs a world up to take the
     // room's, as before.

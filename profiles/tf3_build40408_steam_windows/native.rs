@@ -25,6 +25,7 @@ pub mod probe;
 pub mod seeds;
 pub mod simperf;
 pub mod stoptool;
+pub mod toolchain;
 pub mod streettrace;
 pub mod terrain;
 pub mod ticks;

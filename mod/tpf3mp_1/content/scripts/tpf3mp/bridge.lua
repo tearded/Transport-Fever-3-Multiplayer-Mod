@@ -330,6 +330,32 @@ function Link:lanes(lanes)
 	return true
 end
 
+-- In the GUI: click `click` (the count before it) was handed to the room
+-- with `ticket`, or not (nil): the street and track tools continue from
+-- what the room built for it (tpf3mp/toolchain.lua). A hook without it
+-- leaves the tools as they are.
+function Link:chainClick(click, ticket)
+	if type(self.native.chainClick) ~= "function" then return end
+	pcall(self.native.chainClick, click, ticket)
+end
+
+-- In the GUI, each frame: the edge the room built where the player's last
+-- street or track click ended, to check in the GUI's state (edge, node0,
+-- node1, end, x, y, z), or nothing.
+function Link:chainPoll()
+	if type(self.native.chainPoll) ~= "function" then return nil end
+	local ok, edge, node0, node1, endIndex, x, y, z = pcall(self.native.chainPoll)
+	if not ok or type(edge) ~= "number" then return nil end
+	return edge, node0, node1, endIndex, x, y, z
+end
+
+-- In the GUI: its state has `edge` as the room built it, with `streets`
+-- street edges and `others` other edges at the clicked end's node.
+function Link:chainSeen(edge, streets, others)
+	if type(self.native.chainSeen) ~= "function" then return end
+	pcall(self.native.chainSeen, edge, streets, others)
+end
+
 -- The player's builds queued in the room's game so far, or nil where the
 -- hook cannot take them to the room (the tools then stay refused).
 function Link:clicks()
