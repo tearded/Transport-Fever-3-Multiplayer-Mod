@@ -211,6 +211,11 @@ local function segment(seg)
 		node0 = c.node0, node1 = c.node1,
 		network = networkOf(seg),
 		tangent0 = vec3(c.tangent0), tangent1 = vec3(c.tangent1),
+		-- Where the edge itself ends, which need not be its node: the track
+		-- tool starts a track laid onto a street's end on its tram lane
+		-- (roads.lua, BUILDING.md "Edge ends").
+		position0 = vec3(get(c, "position0")),
+		position1 = vec3(get(c, "position1")),
 		structure = "Ground",
 		template = resName(c.roadTemplate, "roadTemplate"),
 		style = styleName(c.roadStyle),
@@ -654,6 +659,18 @@ function engine.describe(proposal)
 			end
 			out[#out + 1] = "+o{" .. table.concat(fields, " ") .. "}"
 		end
+		-- Junction settings: each node's lanes and how many a tram's.
+		for _, n in ipairs(list(get(street, "nodeConfigsToAdd"))) do
+			local turns, trams = 0, 0
+			for _, t in ipairs(list(get(n.comp, "laneConnections"))) do
+				turns = turns + 1
+				if get(t, "withTram") == true then trams = trams + 1 end
+			end
+			out[#out + 1] = "+j" .. node(n.entity) .. "{lanes " .. turns .. " tram " .. trams .. "}"
+		end
+		for _, id in ipairs(list(get(street, "nodeConfigsToRemove"))) do
+			out[#out + 1] = "-j" .. node(id)
+		end
 		for _, c in ipairs(list(get(proposal, "toAdd"))) do
 			local con = get(c, "construction")
 			out[#out + 1] = "+c" .. tostring(get(c, "fileName")) .. "{frozen "
@@ -935,25 +952,14 @@ local function isTownBuilding(c)
 	return #list(c and get(c, "townBuildings")) > 0
 end
 
--- A stock airport demolition rebuilds its runway/taxiway signals as part of
--- removing the construction. Permit that batch only when the proposal removes
--- exactly every edge frozen into this construction and every removed object is
--- a unique SIGNAL carried by one of those edges; external edges, stops, and
--- unreadable carriers remain refused.
-local function airportRemovalSignals(construction, segments, removedObjects)
-	local file = get(construction, "fileName")
-	if file ~= "::/stations/air/airfield.con" and file ~= "::/stations/air/airport.con" then return false end
+-- Whether `removedObjects` (the proposal's edgeObjectsToRemove) are exactly
+-- the objects `segments` carry, each a SIGNAL (the engine's type for signals
+-- and waypoints alike) listed by one removed edge once: the signals the game
+-- removes with the edges under them, and no stop or other object.
+local function signalsOfRemovedEdges(segments, removedObjects)
 	local types = api.type.enum and api.type.enum.EdgeObjectType
 	local signal = types and types.SIGNAL
 	if type(signal) ~= "number" or #removedObjects == 0 then return false end
-	local frozen, frozenList = {}, list(get(construction, "frozenEdges"))
-	local frozenCount = #frozenList
-	if frozenCount == 0 or #segments ~= frozenCount then return false end
-	for i = 1, frozenCount do
-		local edge = get(frozenList, i)
-		if type(edge) ~= "number" or edge ~= math.floor(edge) or edge <= 0 or frozen[edge] then return false end
-		frozen[edge] = true
-	end
 	local removed, occurrences = {}, {}
 	for i = 1, #removedObjects do
 		local row = removedObjects[i]
@@ -963,15 +969,8 @@ local function airportRemovalSignals(construction, segments, removedObjects)
 		end
 		removed[entity] = true
 	end
-	local removedEdges = {}
 	for i = 1, #segments do
-		local segment = segments[i]
-		local edge, comp = get(segment, "entity"), get(segment, "comp")
-		if type(edge) ~= "number" or edge ~= math.floor(edge) or not frozen[edge] or removedEdges[edge] then
-			return false
-		end
-		removedEdges[edge] = true
-		local objects = list(get(comp, "objects"))
+		local objects = list(get(get(segments[i], "comp"), "objects"))
 		for k = 1, #objects do
 			local pair = objects[k]
 			local entity, kind = get(pair, 1), get(pair, 2)
@@ -981,9 +980,6 @@ local function airportRemovalSignals(construction, segments, removedObjects)
 			occurrences[entity] = (occurrences[entity] or 0) + 1
 			if occurrences[entity] ~= 1 then return false end
 		end
-	end
-	for edge in pairs(frozen) do
-		if not removedEdges[edge] then return false end
 	end
 	for entity in pairs(removed) do
 		if occurrences[entity] ~= 1 then return false end
@@ -1008,7 +1004,7 @@ local function joinsOnly(street)
 		if type(e) ~= "number" then return false end
 		gone[e] = true
 	end
-	local removed, used = list(get(street, "removedSegments")), {}
+	local removed, used, joinedAt = list(get(street, "removedSegments")), {}, {}
 	-- The end of a removed edge opposite node n, if it touches n.
 	local function across(seg, n)
 		local c = get(seg, "comp")
@@ -1016,10 +1012,34 @@ local function joinsOnly(street)
 		if get(c, "node1") == n then return get(c, "node0") end
 		return nil
 	end
+	-- A removed track is the crossing's bulldozed stub only when it touches
+	-- exactly one node already accounted for by a street join, both ends are
+	-- removed, and its other end has no other track in the live network map.
+	local function bulldozedStub(seg)
+		if networkOf(seg) ~= "Track" then return false end
+		local entity, comp = get(seg, "entity"), get(seg, "comp")
+		local a, b = get(comp, "node0"), get(comp, "node1")
+		if type(entity) ~= "number" or entity <= 0 or entity % 1 ~= 0
+			or type(a) ~= "number" or a % 1 ~= 0 or type(b) ~= "number" or b % 1 ~= 0
+			or a == b or not gone[a] or not gone[b] then return false end
+		local junction
+		if joinedAt[a] and not joinedAt[b] then junction = a
+		elseif joinedAt[b] and not joinedAt[a] then junction = b
+		else return false end
+		local tip = junction == a and b or a
+		local atJunction, atTip = nodeEdges(junction, "Track"), nodeEdges(tip, "Track")
+		if atJunction == nil or atTip == nil then return false end
+		atJunction, atTip = list(atJunction), list(atTip)
+		local present = false
+		for _, edge in ipairs(atJunction) do
+			if edge == entity then present = true break end
+		end
+		return present and #atTip == 1 and atTip[1] == entity
+	end
 	for _, seg in ipairs(list(get(street, "addedSegments"))) do
 		local comp = get(seg, "comp")
 		local a, b = get(comp, "node0"), get(comp, "node1")
-		local found
+		local found, foundAt
 		for i, s in ipairs(removed) do
 			for _, n in ipairs({ get(get(s, "comp"), "node0"), get(get(s, "comp"), "node1") }) do
 				if gone[n] and n ~= a and n ~= b and across(s, n) == a then
@@ -1027,6 +1047,7 @@ local function joinsOnly(street)
 						if j ~= i and across(t, n) == b then
 							if found ~= nil then return false end
 							found = { i, j }
+							foundAt = n
 						end
 					end
 				end
@@ -1037,8 +1058,56 @@ local function joinsOnly(street)
 			if get(removed[k], "type") ~= get(seg, "type") then return false end
 		end
 		used[found[1]], used[found[2]] = true, true
+		joinedAt[foundAt] = true
+	end
+	for i, seg in ipairs(removed) do
+		if not used[i] and not bulldozedStub(seg) then return false end
 	end
 	return true
+end
+
+-- A stock airport demolition rebuilds its runway/taxiway signals as part of
+-- removing the construction. Permit that batch only when the proposal removes
+-- exactly every edge frozen into this construction and every removed object is
+-- a unique SIGNAL carried by one of those edges; external edges, stops, and
+-- unreadable carriers remain refused.
+local function airportRemovalSignals(construction, segments, removedObjects)
+	local file = get(construction, "fileName")
+	if file ~= "::/stations/air/airfield.con" and file ~= "::/stations/air/airport.con" then return false end
+	local frozen, frozenList = {}, list(get(construction, "frozenEdges"))
+	local frozenCount = #frozenList
+	if frozenCount == 0 or #segments ~= frozenCount then return false end
+	for i = 1, frozenCount do
+		local edge = get(frozenList, i)
+		if type(edge) ~= "number" or edge ~= math.floor(edge) or edge <= 0 or frozen[edge] then return false end
+		frozen[edge] = true
+	end
+	local removedEdges = {}
+	for i = 1, #segments do
+		local edge = get(segments[i], "entity")
+		if type(edge) ~= "number" or edge ~= math.floor(edge) or not frozen[edge] or removedEdges[edge] then
+			return false
+		end
+		removedEdges[edge] = true
+	end
+	for edge in pairs(frozen) do
+		if not removedEdges[edge] then return false end
+	end
+	return signalsOfRemovedEdges(segments, removedObjects)
+end
+
+-- Tracks the bulldozer removes with the signals on them (build 40420,
+-- 2026-10-16: a track with one signal, "1 Signal Will Be Removed"): no
+-- construction, no object added, every removed edge a track, and the removed
+-- objects exactly its signals. Each game finds the same signals on the same
+-- tracks again before removing them (apply.lua, HANDLERS.Bulldoze).
+local function trackRemovalSignals(toRemove, segments, objectsToAdd, objectsToRemove)
+	if #toRemove > 0 or #objectsToAdd > 0 or #segments == 0 then return false end
+	for i = 1, #segments do
+		local ok, network = pcall(networkOf, segments[i])
+		if not ok or network ~= "Track" then return false end
+	end
+	return signalsOfRemovedEdges(segments, objectsToRemove)
 end
 
 -- The bulldozer's proposal as a Bulldoze action (tpf3mp_proto
@@ -1082,7 +1151,7 @@ function engine.bulldoze(proposal)
 		local segments = list(get(street, "removedSegments"))
 		local objectsToAdd = list(get(street, "edgeObjectsToAdd"))
 		local objectsToRemove = list(get(street, "edgeObjectsToRemove"))
-		local airportSignals = false
+		local airportSignals, trackSignals = false, false
 		for _, name in ipairs({ "edgeObjectsToAdd", "edgeObjectsToRemove" }) do
 			local v = get(street, name)
 			if v ~= nil and #list(v) > 0 then
@@ -1092,7 +1161,10 @@ function engine.bulldoze(proposal)
 						airportSignals = airportRemovalSignals(construction, segments, objectsToRemove)
 					end
 				end
-				if not airportSignals then error("removing a stop or signal", 0) end
+				if name == "edgeObjectsToRemove" then
+					trackSignals = trackRemovalSignals(toRemove, segments, objectsToAdd, objectsToRemove)
+				end
+				if not airportSignals and not trackSignals then error("removing a stop or signal", 0) end
 			end
 		end
 		-- The constructions it removes: town buildings, and any other.
@@ -1135,7 +1207,11 @@ function engine.bulldoze(proposal)
 			elseif n ~= network then
 				error("removing streets and tracks at once", 0)
 			end
-			if #objectEntities(seg.comp) > 0 then error("removing an edge with a stop or signal on it", 0) end
+			-- Signals go with their tracks, each proven above to be one the
+			-- game removes with them; any other object refuses it.
+			if not trackSignals and #objectEntities(seg.comp) > 0 then
+				error("removing an edge with a stop or signal on it", 0)
+			end
 			local a, b = nodePos(seg.comp.node0), nodePos(seg.comp.node1)
 			if a == nil or b == nil then error("removed edge " .. k .. " has no position here", 0) end
 			edges[k] = { a = { x = a[1], y = a[2], z = a[3] }, b = { x = b[1], y = b[2], z = b[3] } }
@@ -1361,33 +1437,79 @@ end
 -- edge object (action::Bulldoze::EdgeObject): the edge by its ends, where
 -- the stop stands and its construction, as its EDGE_OBJECT component says;
 -- or raises. INFERRED: the bulldozer proposes a stop's removal in the stop
--- tool's shape, less the stop (as TPF2's did).
+-- tool's shape, less the stop (as TPF2's did). Over a two-sided stop it
+-- takes both (build 40420, 2026-10-16: refused in a room before): a
+-- Bulldoze of both (action::Bulldoze::EdgeObjects), only for two stops of
+-- one construction, one on each side.
 function removeStop(street)
 	local old, new, network = rebuiltEdge(street)
 	local had = objectsOf(old)
 	local _, has = objectsOf(new)
-	local gone
+	local gone = {}
 	for _, o in ipairs(had) do
-		if has[o[1]] == nil then
-			if gone ~= nil then error("removing more than one stop at once", 0) end
-			gone = o[1]
-		end
+		if has[o[1]] == nil then gone[#gone + 1] = o end
 	end
-	if gone == nil or #had ~= #list(get(new, "objects")) + 1 then
+	if #gone == 0 or #had ~= #list(get(new, "objects")) + #gone then
 		error("a bulldozer proposal that rebuilds an edge", 0)
 	end
-	local c = api.engine.getComponent(gone, api.type.ComponentType.EDGE_OBJECT)
-	local t = c and get(c, "transf")
-	local x, y, z = get(t, 13), get(t, 14), get(t, 15)
-	if type(x) ~= "number" or type(y) ~= "number" or type(z) ~= "number" then
-		error("a stop with no place", 0)
+	if #gone > 2 then error("removing more than one stop at once", 0) end
+	local objects = {}
+	for i, o in ipairs(gone) do
+		local c = api.engine.getComponent(o[1], api.type.ComponentType.EDGE_OBJECT)
+		local t = c and get(c, "transf")
+		local x, y, z = get(t, 13), get(t, 14), get(t, 15)
+		if type(x) ~= "number" or type(y) ~= "number" or type(z) ~= "number" then
+			error("a stop with no place", 0)
+		end
+		objects[i] = {
+			at = { x = x, y = y, z = z },
+			model = resName(get(c, "edgeObjectConstruction"), "the stop's construction"),
+		}
 	end
-	local ref = edgeRef(old, network)
-	return { Bulldoze = { EdgeObject = {
-		edge = ref,
-		at = { x = x, y = y, z = z },
-		model = resName(get(c, "edgeObjectConstruction"), "the stop's construction"),
-	} } }
+	local ref, curve = edgeRef(old, network)
+	if #gone == 1 then
+		return { Bulldoze = { EdgeObject = { edge = ref, at = objects[1].at, model = objects[1].model } } }
+	end
+	local types = enum("EdgeObjectType")
+	local sides = { [types.STOP_LEFT] = "left", [types.STOP_RIGHT] = "right" }
+	if gone[1][1] == gone[2][1] or sides[gone[1][2]] == nil or sides[gone[2][2]] == nil
+		or gone[1][2] == gone[2][2]
+		or objects[1].model ~= objects[2].model then
+		error("removing more than one stop at once", 0)
+	end
+	local function stationGroup(entity)
+		local ok, group = pcall(function()
+			return api.engine.system.stationGroupSystem.getStationGroup(entity)
+		end)
+		if not ok or type(group) ~= "number" or group < 0 then
+			error("a two-sided stop without a readable station group", 0)
+		end
+		local componentType = api.type.ComponentType.STATION_GROUP
+		if type(componentType) ~= "number" then
+			error("the station group component cannot be read", 0)
+		end
+		local component = api.engine.getComponent(group, componentType)
+		if component == nil then error("a two-sided stop with no station group component", 0) end
+		local count = 0
+		for _, member in ipairs(list(get(component, "stations"))) do
+			if member == entity then count = count + 1 end
+		end
+		if count ~= 1 then error("a two-sided stop not listed once in its station group", 0) end
+		return group
+	end
+	if stationGroup(gone[1][1]) ~= stationGroup(gone[2][1]) then
+		error("the two stops are not one two-sided stop", 0)
+	end
+	local function center(at)
+		local u = geom.parameterAt(curve.a, curve.ta, curve.b, curve.tb, at.x, at.y)
+		return geom.hermitePos(curve.a, curve.ta, curve.b, curve.tb, u)
+	end
+	local a, b = center(objects[1].at), center(objects[2].at)
+	local dx, dy, dz = a[1] - b[1], a[2] - b[2], a[3] - b[3]
+	if dx * dx + dy * dy + dz * dz > 0.25 then
+		error("the two stops are at different places on the edge", 0)
+	end
+	return { Bulldoze = { EdgeObjects = { edge = ref, objects = objects } } }
 end
 
 -- A stop's or signal's construction parameters (a table of key = value, as

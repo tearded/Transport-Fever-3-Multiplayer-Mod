@@ -911,7 +911,7 @@ fn in_a_room_the_window_shows_it_but_its_buttons_are_in_the_game() {
     };
     // In the lobby here, the same room has them.
     let here = window_sized(state.clone(), 1200.0, Place::Launcher);
-    for there in ["Remove", "Send", "Leave room", "Not ready", "Copy invite"] {
+    for there in ["Remove", "Send", "Leave room", "Ready", "Copy invite"] {
         assert!(
             here.query_by_role_and_label(Role::Button, there).is_some(),
             "{there}"

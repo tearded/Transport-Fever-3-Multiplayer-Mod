@@ -7,6 +7,7 @@ pub const STEAM_BUILD_ID: u64 = 25754343;
 pub const GAME_BUILD: u32 = 40420;
 
 pub mod builds;
+pub mod crossings;
 pub mod drawing;
 pub mod edgewatch;
 pub mod emission;
@@ -27,6 +28,7 @@ pub mod stoptool;
 pub mod streettrace;
 pub mod terrain;
 pub mod ticks;
+pub mod toolchain;
 pub mod toolplayer;
 pub mod townfield;
 pub mod towntrace;

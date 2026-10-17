@@ -58,7 +58,7 @@ const SHA256: &str = "74861ac43b041aebc5179154345b3cf1ec83154c8e6cc58e0d9e02ff5f
 const SIZE: u64 = 69_755_832;
 const PE_TIMESTAMP: u32 = 0x6ac5_0427;
 
-/// All 153 profile targets, including optional targets, at their RVAs in the
+/// All 164 profile targets, including optional targets, at their RVAs in the
 /// public build 25754343 executable (image base 0x140000000).
 const TARGETS: &[(&str, u64)] = &[
     ("GameSim::Step", 0x1593d0),
@@ -76,6 +76,18 @@ const TARGETS: &[(&str, u64)] = &[
     ("ModuleBuilder::MousePressed/Add call", 0x542eb5),
     ("StreetTerminalBuilder::MousePressed/Add call", 0x5948d8),
     ("StreetTerminalBuilder::MousePressed/busy set", 0x5946f5),
+    ("StreetBuilder::UpdateEngine/Add call", 0x5891af),
+    ("StreetBuilder::UpdateEngine/capture", 0x588f65),
+    ("StreetBuilder::UpdateEngine callback/result scan", 0x56d949),
+    ("StreetBuilder::UpdateEngine callback/snap", 0x56dc02),
+    ("UI::StreetBuilder::StartAt", 0x570a30),
+    ("ecs::Engine::EntityExists", 0x4f7170),
+    ("RailroadCrossingComp/type selection Add call", 0x28a386c),
+    ("StreetProposal/level crossing maps", 0x4c7ce6),
+    (
+        "UpdateRailRoadCrossingProposal/crossing map insert",
+        0x28a42cf,
+    ),
     ("ProposalAction::DoApply/Add call", 0x548f75),
     ("luaB_print", 0x2fd4660),
     ("lua_checkstack", 0x2fc4fa0),
@@ -254,8 +266,8 @@ fn profile_pins_public_steam_build_40420_and_all_target_names() {
     assert_eq!(profile.build.size, Some(SIZE));
     assert_eq!(profile.build.pe_timestamp, Some(PE_TIMESTAMP));
     assert_eq!(profile.image_base, Some(0x0001_4000_0000));
-    assert_eq!(profile.targets.len(), 155);
-    assert_eq!(TARGETS.len(), 155);
+    assert_eq!(profile.targets.len(), 164);
+    assert_eq!(TARGETS.len(), 164);
     for &(name, _) in TARGETS {
         assert!(
             profile.targets.iter().any(|target| target.name == name),
@@ -319,6 +331,11 @@ fn assert_netread_data(image: &[u8], pe: &PeHeaders) {
             0x22a7f0,
         ),
         ("Construction", layout::CONSTRUCTION_POOL_VTABLE, 0x22acf0),
+        (
+            "RailroadCrossing",
+            layout::RAILROAD_CROSSING_POOL_VTABLE,
+            0x22b770,
+        ),
     ] {
         assert_eq!(
             rva_u64(image, pe, vtable as u64),
@@ -326,7 +343,7 @@ fn assert_netread_data(image: &[u8], pe: &PeHeaders) {
             "CompVec<{name}> vtable"
         );
     }
-    let code: [(u64, &[u8], &str); 11] = [
+    let code: [(u64, &[u8], &str); 14] = [
         (
             0x9553b,
             &[0x48, 0x69, 0xc0, 0x18, 0x01, 0x00, 0x00],
@@ -382,6 +399,29 @@ fn assert_netread_data(image: &[u8], pe: &PeHeaders) {
             &[0xc4, 0x41, 0x7a, 0x10, 0xa5, 0x8c, 0x00, 0x00, 0x00],
             "vmovss xmm12, [r13+0x8c] (transf y)",
         ),
+        // The RailroadCrossing store's copy (sub_17ee70): its 0x40 stride,
+        // and its type index at +0x30.
+        (
+            0x17ef0d,
+            &[0x48, 0xc1, 0xe3, 0x06],
+            "shl rbx, 6 (RailroadCrossing size)",
+        ),
+        (
+            0x17ef5a,
+            &[0x8b, 0x46, 0x30, 0x89, 0x43, 0x30],
+            "mov eax, [rsi+0x30]; mov [rbx+0x30], eax (a crossing's type index)",
+        ),
+        // Its Lua binding's field offsets (sub_1885d30): stateTime 0x38,
+        // state 0x34, typeIndex 0x30, edges 0x18, then nodes (r15d, 0).
+        (
+            0x1887a4e,
+            &[
+                0xc7, 0x45, 0x80, 0x38, 0x00, 0x00, 0x00, 0xc7, 0x45, 0x84, 0x34, 0x00, 0x00, 0x00,
+                0xc7, 0x45, 0x88, 0x30, 0x00, 0x00, 0x00, 0xc7, 0x45, 0x8c, 0x18, 0x00, 0x00, 0x00,
+                0x44, 0x89, 0x7d, 0x90,
+            ],
+            "RailroadCrossing's Lua field offsets",
+        ),
     ];
     for (rva, bytes, what) in code {
         assert_eq!(
@@ -411,6 +451,14 @@ fn assert_netread_data(image: &[u8], pe: &PeHeaders) {
     assert_eq!(
         (layout::CONSTRUCTION_X, layout::CONSTRUCTION_Y),
         (0x88, 0x8c)
+    );
+    assert_eq!(
+        (
+            layout::RAILROAD_CROSSING_SIZE,
+            layout::CROSSING_NODES,
+            layout::CROSSING_TYPE_INDEX
+        ),
+        (0x40, 0x00, 0x30)
     );
 }
 

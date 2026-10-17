@@ -961,13 +961,38 @@ fn install_inner(profile: &Profile, link_name: &str) -> Result<u64, String> {
             let stop = at(crate::stoptool::STOP_ADD_CALL)
                 .ok()
                 .filter(|_| at(crate::stoptool::STOP_BUSY_SET).is_ok());
+            // The crossing window's type change, read only where its maps
+            // were found too (crates/tpf3mp-hook/src/crossings.rs).
+            let crossing = at(crate::crossings::CROSSING_ADD_CALL)
+                .ok()
+                .map(|call| (call, at(crate::crossings::MAPS_LAYOUT).is_ok()));
+            // The game's insert into a crossing map, which the room's replay
+            // fills its carrier with: through the window's own call of it.
+            let read = |at: u64, len: usize| {
+                usize::try_from(at)
+                    .ok()
+                    .and_then(|at| crate::modules::Memory::read(&crate::modules::Process, at, len))
+            };
+            let insert = at(crate::crossings::MAP_INSERT_CALL)
+                .ok()
+                .and_then(|call| crate::persons::call_target(call as u64, &read))
+                .filter(|insert| {
+                    read(*insert, crate::crossings::INSERT_HEAD.len()).as_deref()
+                        == Some(crate::crossings::INSERT_HEAD)
+                })
+                .and_then(|insert| usize::try_from(insert).ok());
+            if let Some(insert) = insert {
+                crate::crossings::set_insert(insert);
+            }
             crate::junctions::enable(
                 at(crate::junctions::CONFIG_LAYOUT).is_ok()
                     && at(crate::junctions::PROPOSAL_LAYOUT).is_ok()
                     && at(crate::junctions::CROSSWALK_LAYOUT).is_ok(),
             );
             // SAFETY: as above.
-            unsafe { crate::builds::install(add, apply, module, terrain, stop, detour_forever) }
+            unsafe {
+                crate::builds::install(add, apply, module, terrain, stop, crossing, detour_forever)
+            }
                 .map(|()| {
                     let module = match module {
                         Some(call) => format!(
@@ -995,13 +1020,37 @@ fn install_inner(profile: &Profile, link_name: &str) -> Result<u64, String> {
                                  click's answer"
                             .to_owned(),
                     };
-                    format!("the build tools build through the room; {module}; {terrain}; {stop}")
+                    let crossing = match crossing {
+                        Some((call, true)) => format!(
+                            "the level crossing window's where it returns to {:#x}, its \
+                             replay {}",
+                            call + 5,
+                            if insert.is_some() {
+                                "through the game's crossing map insert"
+                            } else {
+                                "refused: the profile does not lead to the crossing map's insert"
+                            }
+                        ),
+                        Some((_, false)) => "the profile does not find the crossing maps, so the crossing window stays refused"
+                            .to_owned(),
+                        None => "the profile has no crossing window call, so it stays refused"
+                            .to_owned(),
+                    };
+                    format!(
+                        "the build tools build through the room; {module}; {terrain}; {stop}; {crossing}"
+                    )
                 })
                 .unwrap_or_else(|error| format!("the build tools stay refused: {error}"))
         }
         _ => "the build tools stay refused: the profile has no build targets".to_owned(),
     };
     log_line(&builds);
+    // The street and track tools continue from the room's segment
+    // (docs/HOOKS.md, "The street and track tools continue"): without every
+    // target, they wait for a start point after each segment.
+    if let (Ok(add), Ok(_)) = (at(ADD_TARGET), at(BUILD_APPLY_TARGET)) {
+        log_line(&crate::toolchain::install(&at, add));
+    }
     // Loading the room's world from the main menu (docs/HOOKS.md, "Loading
     // from the main menu"): without it, a game needs a world up to take the
     // room's, as before.
@@ -1736,7 +1785,7 @@ mod tests {
         let results = unsafe { print_detour(state.state()) };
         assert_eq!(results, 0);
         assert_eq!(PRINTED.load(Ordering::SeqCst), 1, "the game's print ran");
-        assert_eq!(state.run("return tpf3mp_native.version"), Ok("14".into()));
+        assert_eq!(state.run("return tpf3mp_native.version"), Ok("15".into()));
         PRINT_ORIGINAL.store(0, Ordering::Release);
     }
 }

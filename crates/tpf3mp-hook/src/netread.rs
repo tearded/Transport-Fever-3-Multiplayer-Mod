@@ -391,6 +391,20 @@ fn type_id(
     vtable: usize,
     what: &str,
 ) -> Result<(usize, usize), String> {
+    find_type(memory, engine, vtable, what, false)?.ok_or_else(|| format!("no pool of {what}"))
+}
+
+/// [`type_id`], or `None` where the engine has no pool of that type: one
+/// it registers at the type's first component, so a world with none of
+/// them may have no pool. `strict`, a pool whose head does not read fails
+/// the search instead of being passed over: an absence is then certain.
+fn find_type(
+    memory: &dyn Memory,
+    engine: usize,
+    vtable: usize,
+    what: &str,
+    strict: bool,
+) -> Result<Option<(usize, usize)>, String> {
     let head = read(memory, engine + layout::POOLS, 16, "the engine's pools")?;
     let (begin, count) = vector(&head, 0, 8, MAX_POOLS, "the engine's pools")?;
     let pools = read(memory, begin, count * 8, "the engine's pools")?;
@@ -401,6 +415,9 @@ fn type_id(
             continue;
         }
         let Some(head) = memory.read(pool, 16) else {
+            if strict {
+                return Err(format!("pool {i} does not read, looking for {what}"));
+            }
             continue;
         };
         if usize::try_from(u64_at(&head, 0)).ok() == Some(vtable) {
@@ -410,11 +427,13 @@ fn type_id(
             found = Some((i, pool));
         }
     }
-    let (id, pool) = found.ok_or_else(|| format!("no pool of {what}"))?;
+    let Some((id, pool)) = found else {
+        return Ok(None);
+    };
     if id >= MAX_TYPE {
         return Err(format!("{what}'s type id {id} is past the component bits"));
     }
-    Ok((id, pool))
+    Ok(Some((id, pool)))
 }
 
 /// Entities a scan reads the component bits of at once: 16 KiB, which
@@ -469,6 +488,22 @@ impl<'m> Store<'m> {
         let (id, pool) = type_id(self.memory, self.engine, self.image + vtable, name)?;
         let pool = Pool::read(self.memory, pool, size, name)?;
         Ok(Kind { id, pool, name })
+    }
+
+    /// [`Store::kind`], or `None` where the engine has no pool of it yet.
+    fn kind_if_any(
+        &self,
+        vtable: usize,
+        size: usize,
+        name: &'static str,
+    ) -> Result<Option<Kind>, String> {
+        let Some((id, pool)) =
+            find_type(self.memory, self.engine, self.image + vtable, name, true)?
+        else {
+            return Ok(None);
+        };
+        let pool = Pool::read(self.memory, pool, size, name)?;
+        Ok(Some(Kind { id, pool, name }))
     }
 
     /// The data index of `kind` in `entity`'s component list: `None` for a
@@ -963,11 +998,36 @@ pub struct Part {
     /// ([`read_junctions`]), by node entity.
     pub deferred: Vec<usize>,
     pub constructions: Vec<String>,
+    /// The part's level crossings, read with its junctions.
+    pub crossings: Vec<Crossing>,
     /// Entity slots whose component bits were examined to find this part's
     /// objects. This is the whole entity table for every part read.
     pub component_bit_entity_slots_scanned: usize,
     /// What the read found and took, for the log.
     pub timing: String,
+}
+
+/// A level crossing of a part: its row but for its type's name, which only
+/// the game's Lua gives (tpf3mp/crossings.lua, `row`): `crossing:` and its
+/// nodes' places in whole millimetres, sorted; and its type's index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Crossing {
+    pub head: String,
+    pub type_index: i32,
+}
+
+/// Most nodes one level crossing has before its read is a misread
+/// (tpf3mp_proto action::MAX_CROSSING_NODES).
+const MAX_CROSSING_NODES: usize = 8;
+
+/// `floor(v * 1000 + 0.5)`: a value's whole millimetres, as crossings.lua's
+/// `mm` rounds it (half up; a junction's `pointKey` rounds ties to even).
+fn crossing_mm(v: f32) -> Result<i64, String> {
+    let t = (f64::from(v) * 1000.0 + 0.5).floor();
+    if !t.is_finite() || t.abs() >= 1e15 {
+        return Err(format!("a place that is not on a map ({v})"));
+    }
+    Ok(t as i64)
 }
 
 /// Reads each of `located` (entity and data index) element of `kind`, its
@@ -1069,6 +1129,17 @@ pub fn read_part(
             )
         })
         .transpose()?;
+    // Level crossings go with the junctions; a world that never had one has
+    // no pool of them, and so none.
+    let crossing_kind = if kinds.junctions {
+        store.kind_if_any(
+            layout::RAILROAD_CROSSING_POOL_VTABLE,
+            layout::RAILROAD_CROSSING_SIZE,
+            "RailroadCrossing",
+        )?
+    } else {
+        None
+    };
     // One pass over the bits for the kinds read.
     let mut wanted: Vec<&Kind> = Vec::new();
     if let Some(kind) = edge_kind.as_ref() {
@@ -1078,6 +1149,9 @@ pub fn read_part(
         wanted.push(kind);
     }
     if let Some(kind) = cons.as_ref() {
+        wanted.push(kind);
+    }
+    if let Some(kind) = crossing_kind.as_ref() {
         wanted.push(kind);
     }
     let (lists, component_bit_entity_slots_scanned) = store.with_all(&wanted)?;
@@ -1092,6 +1166,7 @@ pub fn read_part(
     let edge_ids = next(kinds.network());
     let config_ids = next(kinds.junctions);
     let cons_ids = next(kinds.constructions);
+    let crossing_ids = next(crossing_kind.is_some());
     let t1 = std::time::Instant::now();
     let mut memo = Memo::default();
     let mut edges = Vec::new();
@@ -1143,6 +1218,8 @@ pub fn read_part(
     let mut junctions = Vec::new();
     let mut deferred = Vec::new();
     let mut nodes_seen = 0;
+    let mut crossings = Vec::new();
+    let mut crossings_seen = 0;
     if kinds.junctions {
         let config_kind = config_kind
             .as_ref()
@@ -1185,6 +1262,11 @@ pub fn read_part(
                 None => {}
             }
         }
+        if let Some(kind) = crossing_kind.as_ref() {
+            let found = located(&store, kind, &crossing_ids)?;
+            crossings_seen = found.len();
+            crossings = read_crossings(&store, &mut j, kind, &found, n, k)?;
+        }
     }
     let t3 = std::time::Instant::now();
     let mut constructions = Vec::new();
@@ -1216,7 +1298,7 @@ pub fn read_part(
     }
     let t4 = std::time::Instant::now();
     let timing = format!(
-        "part {k}/{n}: component bits {component_bit_entity_slots_scanned}/{} entity slots {:.2} ms, {} of {} edges {:.2} ms, {}+{} of {} junctions {:.2} ms, {} of {} constructions {:.2} ms",
+        "part {k}/{n}: component bits {component_bit_entity_slots_scanned}/{} entity slots {:.2} ms, {} of {} edges {:.2} ms, {}+{} of {} junctions and {} of {} crossings {:.2} ms, {} of {} constructions {:.2} ms",
         store.entities,
         ms(t0, t1),
         edges.len(),
@@ -1225,6 +1307,8 @@ pub fn read_part(
         junctions.len(),
         deferred.len(),
         nodes_seen,
+        crossings.len(),
+        crossings_seen,
         ms(t2, t3),
         constructions.len(),
         cons_seen,
@@ -1239,9 +1323,83 @@ pub fn read_part(
         junctions,
         deferred,
         constructions,
+        crossings,
         component_bit_entity_slots_scanned,
         timing,
     })
+}
+
+/// The crossings of `found` (entity and data index of `kind`) in part `k`
+/// of `n`, by their first node's place as lanes.lua's `rowPart` puts a
+/// crossing row: each crossing's nodes (a `std::vector` of entities at
+/// `CROSSING_NODES`, at most [`MAX_CROSSING_NODES`]), their places from
+/// `j` in whole millimetres ([`crossing_mm`]), sorted, none twice; and its
+/// type's index. Fails as crossings.lua's `places` does: a crossing with no
+/// node, a node whose place does not read, two nodes in one place.
+fn read_crossings(
+    store: &Store,
+    j: &mut Junctions<'_, '_>,
+    kind: &Kind,
+    found: &[(usize, i32)],
+    n: u32,
+    k: u32,
+) -> Result<Vec<Crossing>, String> {
+    let mut heads = Vec::with_capacity(found.len());
+    each_element::<{ layout::CROSSING_TYPE_INDEX + 4 }>(store, kind, found, |entity, _, raw| {
+        let (begin, count) = vector(
+            raw,
+            layout::CROSSING_NODES,
+            4,
+            MAX_CROSSING_NODES,
+            "a level crossing's nodes",
+        )
+        .map_err(|why| format!("level crossing {entity}: {why}"))?;
+        // A std::vector of 4-byte entities: aligned, and its capacity past
+        // its end.
+        let end = u64_at(raw, layout::CROSSING_NODES + 8);
+        let capacity = u64_at(raw, layout::CROSSING_NODES + 16);
+        if begin % 4 != 0 || capacity < end {
+            return Err(format!("level crossing {entity}: its nodes are no vector"));
+        }
+        let index = &raw[layout::CROSSING_TYPE_INDEX..layout::CROSSING_TYPE_INDEX + 4];
+        let type_index = i32::from_le_bytes([index[0], index[1], index[2], index[3]]);
+        heads.push((entity, begin, count, type_index));
+        Ok(())
+    })?;
+    let mut out = Vec::new();
+    for (entity, begin, count, type_index) in heads {
+        if count == 0 {
+            return Err(format!("level crossing {entity} has no node"));
+        }
+        let ids = read(store.memory, begin, count * 4, "a level crossing's nodes")?;
+        let mut places = Vec::with_capacity(count);
+        for i in 0..count {
+            let node =
+                i32::from_le_bytes([ids[i * 4], ids[i * 4 + 1], ids[i * 4 + 2], ids[i * 4 + 3]]);
+            let node = usize::try_from(node)
+                .map_err(|_| format!("level crossing {entity} names node {node}"))?;
+            let p = j.position(node)?;
+            places.push([crossing_mm(p[0])?, crossing_mm(p[1])?, crossing_mm(p[2])?]);
+        }
+        places.sort_unstable();
+        if places.windows(2).any(|w| w[0] == w[1]) {
+            return Err(format!(
+                "level crossing {entity} has two nodes in one place"
+            ));
+        }
+        if part_of(places[0][0], places[0][1], CELL_MM, n) != k {
+            continue;
+        }
+        let keys: Vec<String> = places
+            .iter()
+            .map(|[x, y, z]| format!("{x},{y},{z}"))
+            .collect();
+        out.push(Crossing {
+            head: format!("crossing:{}", keys.join(";")),
+            type_index,
+        });
+    }
+    Ok(out)
 }
 
 /// Part `k` of `n` of the world the game's step is running now.
@@ -1277,6 +1435,7 @@ pub fn part_texts(
     preferences: &HashMap<i32, String>,
     lights: &HashMap<i32, String>,
     deferred: &[String],
+    crossing_types: &HashMap<i32, String>,
     rows: bool,
 ) -> Result<PartTexts, String> {
     let part = LAST_PART
@@ -1307,10 +1466,31 @@ pub fn part_texts(
             crate::lanehash::hash(rows.join("\x1e").as_bytes())
         )
     };
+    // The level crossings, each with its type's name, which only the game's
+    // Lua gives: after the network's own text, as lanes.lua sums them up
+    // (`|crossings count:hash`), on a turn that reads the junctions.
+    let mut crossings = Vec::with_capacity(part.crossings.len());
+    for c in &part.crossings {
+        let name = crossing_types
+            .get(&c.type_index)
+            .filter(|name| !name.is_empty())
+            .ok_or("unknown level crossing type")?;
+        crossings.push(format!("{}|{name}", c.head));
+    }
+    crossings.sort_unstable();
+    let network_text = kinds.network().then(|| {
+        if kinds.junctions {
+            format!("{}|crossings {}", text(&network), text(&crossings))
+        } else {
+            text(&network)
+        }
+    });
+    network.extend(crossings);
+    network.sort_unstable();
     // Only the lanes it read: an edges part says nothing of junctions'
     // rows or of constructions, and their lanes are not touched.
     Ok(PartTexts {
-        network: kinds.network().then(|| text(&network)),
+        network: network_text,
         constructions: kinds.constructions.then(|| text(&constructions)),
         rows: rows.then_some((network, constructions)),
     })
@@ -2915,6 +3095,262 @@ mod tests {
             .eval()
             .unwrap();
         (lua, row_part, part_of)
+    }
+
+    /// Nodes (entity and place) and level crossings (entity, nodes in the
+    /// order the component holds them, type index) of a crossing world:
+    /// places that round half up where ties go to even (0.0625 m, -0.1875 m),
+    /// one at a cell's edge, nodes stored out of order.
+    type Crossings = (Vec<(usize, [f32; 3])>, Vec<(usize, Vec<i32>, i32)>);
+
+    fn crossing_world() -> Crossings {
+        (
+            vec![
+                (10, [0.0625, 20.0, 1.0]),
+                (11, [8.0, 20.0, 1.0]),
+                (12, [-0.1875, -300.5, 0.0004]),
+                (13, [-8.1875, -300.5, -0.0004]),
+                (14, [255.9995, 7.0, 0.0]),
+                (15, [263.9995, 7.0, 0.0]),
+            ],
+            vec![
+                (30, vec![11, 10], 3),
+                (31, vec![12, 13], 5),
+                (32, vec![15, 14], 3),
+            ],
+        )
+    }
+
+    /// An engine of `world`: its nodes, its crossings (unless `no_pool`),
+    /// and empty edge and junction pools.
+    fn crossing_engine(fake: &mut Fake, world: &Crossings, no_pool: bool) -> usize {
+        let (nodes, crossings) = world;
+        let node_elements = nodes
+            .iter()
+            .map(|(entity, p)| {
+                let mut b = vec![0u8; layout::BASE_NODE_SIZE];
+                for (k, v) in p.iter().enumerate() {
+                    put_f32(&mut b, layout::NODE_POSITION + 4 * k, *v);
+                }
+                (*entity, b)
+            })
+            .collect();
+        let mut crossing_elements = Vec::new();
+        for (entity, ids, type_index) in crossings {
+            let mut b = vec![0u8; layout::RAILROAD_CROSSING_SIZE];
+            vector_of(
+                fake,
+                &mut b,
+                layout::CROSSING_NODES,
+                ids.iter().flat_map(|n| n.to_le_bytes()).collect(),
+            );
+            b[layout::CROSSING_TYPE_INDEX..][..4].copy_from_slice(&type_index.to_le_bytes());
+            crossing_elements.push((*entity, b));
+        }
+        let mut specs = vec![
+            Spec {
+                vtable: layout::BASE_EDGE_POOL_VTABLE,
+                id: 3,
+                size: layout::BASE_EDGE_SIZE,
+                elements: Vec::new(),
+            },
+            Spec {
+                vtable: layout::BASE_NODE_POOL_VTABLE,
+                id: 9,
+                size: layout::BASE_NODE_SIZE,
+                elements: node_elements,
+            },
+            Spec {
+                vtable: layout::BASE_NODE_CONFIG_POOL_VTABLE,
+                id: 70,
+                size: layout::BASE_NODE_CONFIG_SIZE,
+                elements: Vec::new(),
+            },
+        ];
+        if !no_pool {
+            specs.push(Spec {
+                vtable: layout::RAILROAD_CROSSING_POOL_VTABLE,
+                id: 71,
+                size: layout::RAILROAD_CROSSING_SIZE,
+                elements: crossing_elements,
+            });
+        }
+        build(fake, &specs, 40)
+    }
+
+    /// crossings.lua's rows of `world`, in a real Lua, its types named
+    /// `type/<index>.rcr`; and lanes.lua's `rowPart`.
+    fn lua_crossings(world: &Crossings) -> (Vec<String>, mlua::Lua, mlua::Function) {
+        let (lua, row_part, _) = lua_parts();
+        let (nodes, crossings) = world;
+        let places = lua.create_table().unwrap();
+        for (entity, p) in nodes {
+            let t = lua.create_table().unwrap();
+            t.set("x", f64::from(p[0])).unwrap();
+            t.set("y", f64::from(p[1])).unwrap();
+            t.set("z", f64::from(p[2])).unwrap();
+            places.set(*entity, t).unwrap();
+        }
+        let list = lua.create_table().unwrap();
+        for (entity, ids, type_index) in crossings {
+            let c = lua.create_table().unwrap();
+            c.set("nodes", ids.clone()).unwrap();
+            c.set("typeIndex", *type_index).unwrap();
+            list.set(*entity, c).unwrap();
+        }
+        lua.globals().set("PLACES", places).unwrap();
+        lua.globals().set("CROSSINGS", list).unwrap();
+        let rows: Vec<String> = lua
+            .load(
+                "api = { type = { ComponentType = { BASE_NODE = 1, RAILROAD_CROSSING = 2 } },
+                   engine = {
+                     getComponent = function(e, kind)
+                       if kind == 1 then return PLACES[e] and { position = PLACES[e] } end
+                       if kind == 2 then return CROSSINGS[e] end
+                     end,
+                     getEntitiesWithComponent = function(kind)
+                       local out = {} for e in pairs(CROSSINGS) do out[#out + 1] = e end return out
+                     end,
+                     system = { railRoadCrossingSystem = {} } },
+                   res = { railroadCrossingTypeRep = { getName = function(i) return 'type/' .. i .. '.rcr' end } } }
+                 return (require('tpf3mp.crossings').rows(api))",
+            )
+            .eval()
+            .unwrap();
+        (rows, lua, row_part)
+    }
+
+    /// The hook reads each level crossing of a part as crossings.lua makes
+    /// its row (its nodes' places in whole millimetres rounded half up,
+    /// sorted; its type named by the game's Lua), in the part lanes.lua's
+    /// `rowPart` puts that row in, every crossing in exactly one part.
+    #[test]
+    fn crossing_rows_read_as_the_mods_lua_makes_them_in_its_parts() {
+        let world = crossing_world();
+        let (lua_rows, _lua, row_part) = lua_crossings(&world);
+        assert_eq!(lua_rows.len(), 3);
+        let names: HashMap<i32, String> = [3, 5]
+            .into_iter()
+            .map(|i| (i, format!("type/{i}.rcr")))
+            .collect();
+        let mut fake = Fake::new();
+        let engine = crossing_engine(&mut fake, &world, false);
+        let junctions = Kinds {
+            edges: false,
+            junctions: true,
+            constructions: false,
+        };
+        for n in [1u32, 2, 3, 10] {
+            let mut all = Vec::new();
+            for k in 0..n {
+                let part = read_part(&fake, engine, IMAGE, n, k, junctions).unwrap();
+                for c in &part.crossings {
+                    let row = format!("{}|{}", c.head, names[&c.type_index]);
+                    let placed: u32 = row_part.call((0, row.clone(), n)).unwrap();
+                    assert_eq!(placed, k, "{row} in part {k} of {n}");
+                    all.push(row);
+                }
+            }
+            all.sort();
+            assert_eq!(
+                all, lua_rows,
+                "every crossing once, as the mod's Lua makes it ({n} parts)"
+            );
+        }
+        // The same world numbered otherwise, its nodes stored the other way
+        // round, a type of the same file under another index: the same rows.
+        let (places, crossings) = world.clone();
+        let shift = |e: usize| e + 5;
+        let renumbered: Crossings = (
+            places.iter().map(|(e, p)| (shift(*e), *p)).collect(),
+            crossings
+                .iter()
+                .map(|(e, ids, t)| {
+                    let mut ids: Vec<i32> = ids.iter().map(|n| *n + 5).collect();
+                    ids.reverse();
+                    (shift(*e), ids, if *t == 5 { 8 } else { *t })
+                })
+                .collect(),
+        );
+        let mut names = names.clone();
+        names.insert(8, "type/5.rcr".into());
+        let mut other = Fake::new();
+        let engine2 = crossing_engine(&mut other, &renumbered, false);
+        let mut again = Vec::new();
+        for c in read_part(&other, engine2, IMAGE, 1, 0, junctions)
+            .unwrap()
+            .crossings
+        {
+            again.push(format!("{}|{}", c.head, names[&c.type_index]));
+        }
+        again.sort();
+        assert_eq!(again, lua_rows, "no entity id and no index is in a row");
+        // An edges turn reads no crossing pool, and keeps none.
+        let part = read_part(
+            &fake,
+            engine,
+            IMAGE,
+            1,
+            0,
+            Kinds {
+                edges: true,
+                junctions: false,
+                constructions: false,
+            },
+        )
+        .unwrap();
+        assert!(part.crossings.is_empty());
+    }
+
+    /// A world that never had a crossing has no pool of them: none, not a
+    /// failure. A crossing that does not read fails the part.
+    #[test]
+    fn crossings_fail_closed_but_a_world_without_them_has_none() {
+        let junctions = Kinds {
+            edges: false,
+            junctions: true,
+            constructions: false,
+        };
+        let mut fake = Fake::new();
+        let engine = crossing_engine(&mut fake, &crossing_world(), true);
+        assert!(
+            read_part(&fake, engine, IMAGE, 1, 0, junctions)
+                .unwrap()
+                .crossings
+                .is_empty()
+        );
+        // A pool whose head does not read is no absence of crossings: here
+        // the pool table's first slot, empty in this world, names one.
+        let mut fake = Fake::new();
+        let engine = crossing_engine(&mut fake, &crossing_world(), true);
+        let pools = u64::from_le_bytes(
+            fake.read(engine + layout::POOLS, 8)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let table = fake.blocks.get_mut(&pools).unwrap();
+        table[0..8].copy_from_slice(&8u64.to_le_bytes());
+        let Err(err) = read_part(&fake, engine, IMAGE, 1, 0, junctions) else {
+            panic!("an unreadable pool passed for no crossings");
+        };
+        assert!(err.contains("does not read"), "{err}");
+        for (nodes, why) in [
+            (vec![], "has no node"),
+            (vec![10, 10], "two nodes in one place"),
+            (vec![10, 39], "node 39 has no position"),
+            (vec![10, -1], "names node -1"),
+            (vec![10; 9], "a level crossing's nodes"),
+        ] {
+            let (places, _) = crossing_world();
+            let world = (places, vec![(30, nodes, 3)]);
+            let mut fake = Fake::new();
+            let engine = crossing_engine(&mut fake, &world, false);
+            let Err(err) = read_part(&fake, engine, IMAGE, 1, 0, junctions) else {
+                panic!("{why}: the part read");
+            };
+            assert!(err.contains(why), "{why}: {err}");
+        }
     }
 
     /// Every row of the two static lanes is in exactly one of `n` parts,

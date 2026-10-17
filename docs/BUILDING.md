@@ -36,9 +36,9 @@ The shape tells the tool apart (measured unless noted):
 | construction placement | `toAdd[0]` plus the template's own street pieces (a one-track modular rail station: 25 track nodes, 24 edges); `toRemove` empty |
 | module edit | `toRemove[0]` the old construction, `toAdd[0]` the new `ConstructionEntity` (same file, new params); a modular station re-adds its internal track |
 | stop, signal, waypoint placement | the edge removed and re-added, plus one edge-object record |
-| stop or signal bulldoze | the edge removed and re-added without the object |
+| stop or signal bulldoze | the edge removed and re-added without the object; a two-sided stop's two objects together (build 40420) |
 | construction bulldoze | `toRemove` populated, nothing added |
-| road or track bulldoze | removed nodes and segments, nothing added; on TPF3 a town street's also lists the town buildings along it in `toRemove` (seen on build 40408); a street's branch, or a track's stub ending on a street, removed also removes the junction node and its two street edges and adds one edge joining their far ends, carried as a `BuildRoad` (seen on build 40420) |
+| road or track bulldoze | removed nodes and segments, nothing added; on TPF3 a town street also lists the town buildings along it in `toRemove` (seen on build 40408), and a track bulldoze lists its signals in `edgeObjectsToRemove` (build 40420); a street's branch or a track stub ending on a street also removes the junction node and its two street edges and adds one edge joining their far ends, carried as a `BuildRoad` only when every removal pairs with a join or is the known stub (seen on build 40420) |
 | tree or asset bulldoze (TPF3) | the asset group in `toRemove`, and `toAdd` one construction of no file, its desc `autoRemovable`: the group rebuilt without the assets removed, thin instances then full ones (`CreateProposalAddAsset`, decompiled; the shape seen on build 40408); nothing added when the last assets of a group go |
 | terraform | no nodes or segments; a `Grid<{height, base}>` of 4 m cells |
 | paint | no nodes or segments; the material index grid and its mask |
@@ -536,8 +536,20 @@ bulldozer removes, the same way (HOOKS.md, "The build tools"): a
 edge named by its ends within 0.5 m, horizontally and in height, the stop's place by the point of the
 edge's centreline where it stands, and the stop's construction, which the
 GUI notes from the construction menu (TF3's proposal does not name it). A
-two-sided stop goes as one `PlaceStop` built on both sides. A stop that
-replaces another stays refused. Signals and waypoints go the same way, with
+two-sided stop goes as one `PlaceStop` built on both sides, and the
+bulldozer's removal of it, both its stops at once, as one
+`Bulldoze::EdgeObjects` (schema 27): every game finds each of the two by
+its construction within 2 m of where it stood, checks they are opposite
+`STOP_LEFT`/`STOP_RIGHT` objects in the same station group at the same
+place along that edge, and rebuilds it once without them. An incomplete,
+ambiguous or unrelated pair removes neither; each resolved stop must also
+be one the acting company may touch. A stop that replaces another stays
+refused. A track bulldozed with signals on it goes as `Bulldoze::Edges`:
+every game finds the same tracks, refuses the removal if any of them
+carries a stop or another company's signal, and removes the tracks with
+exactly the signals on them, listed in the proposal's
+`edgeObjectsToRemove` (an edge removed with objects left on it crashed
+TPF2's games). Signals and waypoints go the same way, with
 the settings the signal tool builds them with (its
 `EdgeObjectBuilder.params`, which every game sets on the signal it builds:
 a mod's settings, Auto Signals' spacing among them). Signals a mod's script
@@ -583,9 +595,12 @@ then places along the track (Auto Signals) go as one `PlaceSignals`
 - **Paint** is the material index and mask grids on the same path. The
   material texels are simulation data, not a graphics setting: a paint applied
   in the right place with the two games at different texture resolutions.
-- **The asset brush** commits asset-group records. Lua cannot create asset
-  groups, so the replay is again a native fill of an empty carrier; removed
-  groups travel by position and count. The cost of not replicating it was
+- **The asset brush** commits asset-group records. On TF3, Lua can build
+  an asset group (`Proposal.ConstructionEntity` with an autoRemovable desc
+  and one subconstruction of the models, as the bulldozer's replay does),
+  so the hook only reads the stroke and every game builds its groups in
+  Lua (`PlantAssets`, schema 27); removed groups travel by their first
+  asset and count. The cost of not replicating it was
   measured: 104 trees on one game, every replicated command on-step, and six
   hundred steps later the town-building and road lanes diverged in three
   towns 9 km apart, because town growth reads the assets. A desync minutes
@@ -608,9 +623,12 @@ then places along the track (Auto Signals) go as one `PlaceSignals`
 
 What an intent's payload carries: `tpf3mp_proto::action`, version
 `ACTION_SCHEMA_VERSION` (**27**; combines station access, company perks
-and preservation, plus named stops and gated asset removal; 26 adds a
-signal's settings to `PlaceStop` and `PlaceSignals`; 27 adds the signals
-a link keeps from a track the build cuts, `Link::kept`). This
+and preservation, plus named stops and gated asset removal. Schema 26 adds a
+signal's settings to `PlaceStop` and `PlaceSignals`; the unreleased schema
+27 combines `Paint`, `PlantAssets`, `Bulldoze::EdgeObjects`, `SetCrossingType`,
+and link fields after `precedence`: edge-end positions, then signals kept
+from a cut track (`position0`, `position1`, and `kept`; see "Edge ends"
+below). This is one combined layout and has not been released. This
 integration combines the existing
 junction schema with the selected vehicle, depot, demolition, precedence
 and gated action additions described in [COVERAGE.md](COVERAGE.md).
@@ -658,7 +676,7 @@ appended.
 |---|---|
 | `BuildRoad` | street type (TF3: its road template), road style (TF3), bus lane, tram track (none, plain, electric), a polyline whose links may each name their own kind, decorations, the towns' lock and the company's ownership (the road modifiers) |
 | `BuildTrack` | track type (TF3: its road template), road style (TF3), catenary, a polyline |
-| `Bulldoze` | edges of one network by their ends, with the town buildings the game removes along them, each by file and position; or a construction (a town building among them) by file and position; or a stop, signal or waypoint by its edge, position and model |
+| `Bulldoze` | edges of one network by their ends, with the town buildings the game removes along them, each by file and position; or a construction (a town building among them) by file and position; or a stop, signal or waypoint by its edge, position and model; or both stops of a two-sided stop, each by position and model, on one edge (schema 27) |
 | `BuildConstruction` | file, transform, every parameter (`seed` included), name, the construction it replaces for a module edit, and its connection: the streets and tracks its tool built with it, as a polyline whose every link names its kind |
 | `BuyVehicle` | the depot by its construction's file and position and its index among the construction's depots (its `depots`, then its subconstructions that are depots: an airfield's or airport's hangar; an airport's second hangar), the consist front to back (each part's model, facing, each compartment's load, colour), its groups and multiple units |
 | `SellVehicle` | vehicles |
@@ -676,7 +694,15 @@ appended.
 | `ApplyRank` | a company rank to take, as the company window sends the game's growth script (`applyLevel`); the acting player's company takes it ([HOOKS.md](HOOKS.md), "Company ranks") |
 | `Perk` | a company perk from the construction menu: Industry Greenification (the industry by its canonical id, `IndustryId`, which every game binds by its construction, and the permit), or a marketing campaign (the town, the campaign's duration and line cost factor, the permit, and the price the tool charged). Gated off (`acceptance.lua`, `perks`) ([HOOKS.md](HOOKS.md), "Company perks") |
 | `Preserve` | a town building's Historic Preservation checkbox: the construction it stands in, by file and position, its index in that construction's town buildings, and whether it is preserved. Gated off (`acceptance.lua`, `preservation`) |
+| `Paint` | a terrain paint stroke: the materials grid (first texel, columns, rows, run-length values, 255 unchanged) and its mask grid, the same way; a large stroke goes as several, a band of whole rows each. Behind `acceptance.lua`'s `paint` (schema 27) |
+| `PlantAssets` | an asset brush stroke: the model files it uses, the groups it replaces (first asset and count) and the groups it builds, each asset its model's index and its matrix (`Transform`). Behind `acceptance.lua`'s `assets` (schema 27) |
+| `SetCrossingType` | preparatory type-only replay for a level crossing picked in its window: the crossing by the places of all its nodes (sorted, each once), the type by its resource file. The mechanics path finds the one crossing on exactly those nodes, checks ownership, fills the crossing map through an empty build and reads the type back. `acceptance.lua` keeps `crossings` off pending ordinary-start two-player acceptance. Window rebuilds that map nodes while changing segments or junction settings are refused; this action cannot prove or reproduce those changes. |
 | `PlaceSignals` | signals a mod's script places along existing tracks after its player's signal (Auto Signals): each track by its ends (node 0 first), each new signal's place along it from that end and side, each removed signal's place and construction; the new signals' construction, one-way and settings once. Every game rebuilds all the tracks in one proposal, or none. Behind `acceptance.lua`'s `signals` |
+
+The ordinary crossing window may emit a rebuild even for a plain type swap.
+The normal UI flow is therefore not carried unless the native proposal has
+the separate type-only map shape; matching segment counts does not establish
+that its geometry or junction settings are unchanged.
 
 **Polylines.** A road or track build is a polyline: the tool's proposal by
 positions, the originator's decisions included:
@@ -691,11 +717,14 @@ positions, the originator's decisions included:
   that is not the build's own street or track, its kind: network, road
   template and style. A piece of a street the build joins, rebuilt through
   the new junction, keeps that street's kind; so does a street a track
-  crosses. And the signals it keeps from a track the build cuts (`kept`,
-  schema 27): each by its removal's number, its place along that edge
-  from the removal's `a` end, and its construction. A track started or
-  ended between a track's signals cuts that track in two, and each signal
-  goes with the piece the tool put it on: the piece that goes on from one
+  crosses. A link also names where the edge itself ends, at either end,
+  when that is not its vertex (`position0`, `position1`, schema 27; see
+  "Edge ends" below). It can also name the signals it keeps from a track
+  the build cuts (`kept`, schema 27): each by its removal's number, its
+  place along that edge from the removal's `a` end, and its construction.
+  A track started or ended between a track's signals cuts that track in
+  two; each signal goes with the piece the tool put it on, the piece that
+  goes on from one
   of its old track's ends. Near a node the tool moves that node onto the
   cut and redraws the track through it, and may keep a signal on the piece
   before the cut that now stands past it (seen on build 40420,
@@ -712,9 +741,9 @@ positions, the originator's decisions included:
   the build each kept signal must still exist (else the room's replay
   stops), and how far it moved is said in the log. A cut where the tool
   adds a new signal itself (`edgeObjectsToAdd`, seen where it redraws the
-  track around a moved node) stays refused. Behind `acceptance.lua`'s
-  `splitSignals` until a two-player game shows every game puts the signal
-  alike;
+  track around a moved node) stays refused. The kept-signal behavior passed
+  local two-player acceptance on build 40420, 2026-10-17; `acceptance.lua`'s
+  `splitSignals` gate is enabled for that accepted case.
 - `removals`: existing edges the build removes, of either network, by their
   ends: an upgrade's, a span the build passes under, the stretch the tool
   rebuilds around a new junction or crossing. A split parent is no removal;
@@ -791,10 +820,50 @@ which takes its own along and may not be named for both. The replay now
 adds preserved configurations back with references to the replacement
 edges (`tpf3mp/junctions.lua`). A split matches the unique replacement
 with the old edge's tangent at that endpoint, including curved roads.
+
+To keep a junction's settings the replay reads the position of every node
+of both networks, but reads an edge only where a setting names a place at
+one of its ends: every edge is listed at both its nodes, so the edges at
+the nodes there are every edge the whole world could match, and two that
+match are still refused. Reading every edge of the world for this cost
+about 600 ms of every road build that rebuilt an edge in a late game
+(2026-10-16), a street upgrade included; with the nodes looked up by the
+metre square they are in, 40-65 ms, and the whole build 80-130 ms.
+
+A preview of another player's road (docs/HOOKS.md, "Build previews"), which
+nothing of reaches the world, finds its nodes near the places it names
+through the engine's octree: the edges whose boxes reach a column 2 m
+wider than the tolerance there, and their end nodes, each read afresh.
+Where the octree has none near enough, or the game has none, it reads the
+whole network. Reading it whole cost 130-150 ms of each preview in the
+GUI, several a second. A build the room applies never asks the octree:
+nothing shows that it holds every edge, or one built earlier in the same
+update, and one it missed could make two games resolve a vertex apart.
 Missing lanes or an ambiguous replacement refuse the build instead of
 resetting the player's settings. Before sending, the replay asks
 the game's verdict (`makeProposalData`) and refuses a build it calls
 critical, with its reasons.
+
+**Edge ends.** An edge's own ends (`BaseEdge.position0`, `position1`)
+need not be its nodes' positions. The track tool, laying a track onto the
+free end of a street with tram tracks, starts the track on the street's
+incoming tram lane, 2 m beside the end node (seen on build 40420 in a
+single-player game: node at (-1737.13, -611.14), track start at
+(-1737.44, -613.11)). Only there does the game join the two: the street's
+tram lane and the track then share one transport-network node, and trams
+drive from the street onto the track. A track that starts on the node's
+centre, everything else the same, gets a network node of its own and ends
+in a buffer stop. A script proposal shows the same, so it is the edge's
+end, not the native tool, that joins them. The capture therefore carries
+each link's own end where it lies a millimetre or more off its vertex
+(`position0`, `position1`, at most 32 m off on each axis), and the replay
+builds the edge to end there. Before schema 27 the replay put every end on
+its node, and such a track ended in a buffer stop in every game of the
+room (2026-10-15). With schema 27, checked in a two-game room the same
+day: a tram street built and upgraded in one game, then two tracks laid
+onto its free end; in both games the street's tram lanes and the tracks
+share the end node's transport-network nodes (four, as in single player).
+A split still builds each half from the split edge's node positions.
 The tests `tpf3mp-proto/tests/lua_capture.rs` (a junction rebuilt around a
 new street, a level crossing, a bridge, a tunnel, an upgrade, the TF3
 proposal's shape) and `lua_mod.rs` (the replay) run it in Lua and decode
@@ -821,7 +890,29 @@ The schema caps an edit at 64 junctions, each with 256 connections,
 Standalone edits are behind `strict_junctions` in `junctions.lua`, **off
 by default** under PLAN.md Part 3. For the acceptance test, set it true
 in matching mod copies on both test games and use the new hook/profile.
-The capture and replay both refuse edits with it off. Tests cover native
+With it off, the capture and replay both let one edit through and refuse
+the rest (`junctions.requireNarrow`), each comparing the configuration
+put in with the one its own game has at the node, entity by entity: the
+junction window's double slip switch turned on or off, as the window was
+seen to send it on build 40420. Nothing else at the node may change:
+lane connections, crosswalks, light, phases (compared in whole
+milliseconds, as the wire carries them) and the custom-phase mark stay
+exactly as they are. The one side effect seen with the switch, the
+preference from Auto to No, may come with it, and only at a node no
+street joins, where a light has nothing to stop. A reset, a node with no
+configuration yet and an edit that leaves the switch as it is are
+refused. The crossing tool's tram lanes stay refused until the tool is
+seen in the game. The refusal names what it saw, after the
+`strict_junctions` reason, with the old and new light settings and the
+lanes' count. Road and track builds carry their junction settings as
+before, unchecked by this; the log's `handed the player's build` and
+`building` lines name each node's settings they carry (`+j<node>{lanes
+N tram M}`) and take out (`-j<node>`).
+
+Seen in two games on the local server on 2026-10-15 (Steam Windows
+40420): a double slip switch turned on at a track crossing in one game
+was carried as `EditJunctions` and applied in both, with matching
+checkpoints. Tests cover native
 memory decoding, portable round trips into replicas with different IDs,
 curved-edge preservation, refusal cases and checkpoint differences. This
 is adapter evidence, not a completed real-game playtest. Follow the

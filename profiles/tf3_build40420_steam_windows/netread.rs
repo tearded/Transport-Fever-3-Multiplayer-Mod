@@ -106,3 +106,16 @@ pub const CONSTRUCTION_SIZE: usize = 0x288;
 pub const CONSTRUCTION_FILE: usize = 0x00;
 pub const CONSTRUCTION_X: usize = 0x88;
 pub const CONSTRUCTION_Y: usize = 0x8c;
+
+/// `ecs::ComponentManager::CompVec<ecs::component::RailroadCrossing>`'s
+/// vtable (its pool's first word; vf0 0x22b770, RTTI-unique), and the
+/// component's size: `shl 6` in the store's copy (sub_17ee70) and in
+/// `RailroadCrossingSystem::vf12` (0xaf07f0).
+pub const RAILROAD_CROSSING_POOL_VTABLE: usize = 0x3689128;
+pub const RAILROAD_CROSSING_SIZE: usize = 0x40;
+/// Its nodes (`std::vector<Entity>`, 4-byte entities) and its type's index
+/// in `railroadCrossingTypeRep`: the Lua binding's offsets (sub_1885d30 at
+/// 0x1887a4e: nodes 0, edges 0x18, typeIndex 0x30, state 0x34, stateTime
+/// 0x38), the store's copy of each field (0x17ef48..0x17ef6a).
+pub const CROSSING_NODES: usize = 0x00;
+pub const CROSSING_TYPE_INDEX: usize = 0x30;

@@ -1568,3 +1568,24 @@ Touches: D29 (plugins become allowed while built-in features stay), the
 server-index amendment (where packages come from), D4 (trust in servers,
 now for code), D11 (the hook loads only launcher-enabled plugins).
 PLAN.md, Part 3, the D29 item.
+
+## D30 (2026-10-17, owner-approved): carry only the observed double-slip switch before full junction acceptance
+
+The owner approved the narrow exception proposed in PR #156. With
+`strict_junctions` off, a standalone junction edit may carry the junction
+window's double-slip switch toggling on or off at an existing node. Capture
+and replay must compare that node's configurations and refuse any change to
+lane connections, crosswalks, light type, phases or the custom-phase mark.
+The only accompanying preference change allowed is Auto to No at a node
+with track and no street, the side effect observed in the two-game test on
+build 40420. A reset, an edit with no switch change, or a new configuration
+is refused.
+
+This exception does not enable the crossing tool's tram-lane edits or any
+other standalone junction action. Those remain behind Part 3's full
+acceptance gate, including custom phases, reset and geometry preservation.
+The two-game double-slip observation and the `double_slip` regression
+scenario support this one exception; they do not complete the broader
+junction acceptance.
+
+Touches: PLAN.md, Part 3, the junction item; `strict_junctions` remains off.

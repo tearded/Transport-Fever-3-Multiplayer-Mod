@@ -917,6 +917,111 @@ function capture.terraform(built)
 	return actions
 end
 
+-- A Paint action (tpf3mp_proto action::TerrainPaint, as the hook made it
+-- from the painter's stroke) in one line for the log: its texels, how many
+-- it paints (255 leaves one as it is), and its mask.
+function capture.paintSummary(t)
+	local m = type(t) == "table" and t.materials
+	if type(m) ~= "table" or type(m.runs) ~= "table" then return "an unreadable paint stroke" end
+	local painted = 0
+	for _, r in ipairs(m.runs) do
+		if r.value ~= 255 then painted = painted + r.count end
+	end
+	local mask = "no mask"
+	if type(t.mask) == "table" and type(t.mask.runs) == "table" then
+		local set = 0
+		for _, r in ipairs(t.mask.runs) do
+			if r.value ~= 0 then set = set + r.count end
+		end
+		mask = string.format("a mask with %d set", set)
+	end
+	return string.format("%d by %d texels from (%d, %d), %d painted, %s",
+		m.columns, m.rows, m.x0, m.y0, painted, mask)
+end
+
+-- Most assets one PlantAssets action carries: about 40 bytes each, well
+-- inside the room's 48 KiB payload. A stroke of more goes in several, each
+-- a run of whole groups.
+capture.STROKE_ASSETS = 800
+-- Most groups one PlantAssets action adds (action::MAX_STROKE_GROUPS), and
+-- most assets one group holds (action::MAX_GROUP_ASSETS).
+capture.STROKE_GROUPS = 256
+capture.GROUP_ASSETS = 512
+
+-- An asset brush stroke, as the hook read it at the click (tpf3mp_native.built:
+-- `{ assets = { removed = { entity, ... }, groups = { { { model =, m = { 16
+-- numbers } }, ... }, ... } } }`, crates/tpf3mp-hook/src/terrain.rs), as
+-- PlantAssets actions (tpf3mp_proto action::AssetStroke): each group the
+-- stroke replaces named by its first asset and how many it holds, as the
+-- asset bulldozer names one (the groups still stand: the click was stopped),
+-- and each group it builds, every asset its model's index in the action's
+-- models and its matrix. The replaced groups go with the first action.
+-- Returns the list of actions, or nil and why.
+function capture.assetStroke(assets)
+	if type(assets) ~= "table" or type(assets.groups) ~= "table" or type(assets.removed) ~= "table" then
+		return nil, "an asset stroke it cannot read"
+	end
+	local engine = module("engine")
+	local removed = {}
+	for _, id in ipairs(assets.removed) do
+		local ok, list = pcall(engine.assetsOf, id)
+		if not ok then return nil, "a group the stroke replaces does not read: " .. tostring(list) end
+		local first = list[1]
+		if first == nil then return nil, "a group the stroke replaces holds nothing" end
+		removed[#removed + 1] = { first = { model = first.model, at = { x = first.x, y = first.y, z = first.z } },
+			count = #list }
+	end
+	local actions, current, assetsIn = {}, nil, 0
+	local function open()
+		current = { models = {}, removed = #actions == 0 and removed or {}, groups = {}, index = {} }
+		actions[#actions + 1] = current
+		assetsIn = 0
+	end
+	for g, group in ipairs(assets.groups) do
+		if type(group) ~= "table" or #group == 0 then return nil, "group " .. g .. " of the stroke holds nothing" end
+		if #group > capture.GROUP_ASSETS then
+			return nil, "a group of " .. #group .. " assets, more than the room carries (" .. capture.GROUP_ASSETS .. ")"
+		end
+		if current == nil or assetsIn + #group > capture.STROKE_ASSETS or #current.groups >= capture.STROKE_GROUPS then
+			open()
+		end
+		local placed = {}
+		for _, a in ipairs(group) do
+			local file = engine.modelFile(a.model)
+			if file == nil then return nil, "an asset of no model in group " .. g end
+			local index = current.index[file]
+			if index == nil then
+				if #current.models >= 64 then return nil, "a stroke of more than 64 kinds of asset" end
+				current.models[#current.models + 1] = file
+				index = #current.models - 1
+				current.index[file] = index
+			end
+			local ok, transform = pcall(capture.transform, a.m)
+			if not ok then return nil, "an asset whose matrix does not read: " .. tostring(transform) end
+			placed[#placed + 1] = { model = index, transform = transform }
+		end
+		current.groups[#current.groups + 1] = placed
+		assetsIn = assetsIn + #group
+	end
+	if #actions == 0 then
+		if #removed == 0 then return nil, "an asset stroke that changes nothing" end
+		open()
+	end
+	local out = {}
+	for i, a in ipairs(actions) do
+		out[i] = { PlantAssets = { models = a.models, removed = a.removed, groups = a.groups } }
+	end
+	return out
+end
+
+-- A PlantAssets action in one line for the log.
+function capture.assetSummary(t)
+	if type(t) ~= "table" or type(t.groups) ~= "table" then return "an unreadable asset stroke" end
+	local n = 0
+	for _, g in ipairs(t.groups) do n = n + #g end
+	return string.format("%d group(s) of %d asset(s), replacing %d group(s)", #t.groups, n, #(t.removed or {}))
+end
+
 -- A Terraform action in one line for the log.
 function capture.terraformSummary(t)
 	if type(t) ~= "table" or type(t.cells) ~= "table" or type(t.columns) ~= "number" or t.columns < 1 then

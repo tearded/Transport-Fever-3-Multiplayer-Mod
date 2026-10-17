@@ -19,13 +19,34 @@
 -- investigation/TPF3_SUBSIDIES_2026-10-07.md.
 -- Line waypoints passed local two-game acceptance on build 40420, 2026-10-16:
 -- a line edited with waypoints in a room, both games' rolling world checks alike.
-local acceptance = { subsidies = true, rename = true, waypoints = true, terraform = true, bridges = true, perks = false, preservation = false, signals = true,
-    splitSignals = true }
+-- Terrain paint and the asset brush (action schema 27) passed local two-game
+-- acceptance on build 40420, 2026-10-16: paint strokes of several sizes, the
+-- large ones in bands, and tree strokes of 78 and 124 trees, alike in both.
+-- The crossing type-only path has staged Japan_2 runs, but not ordinary-start
+-- two-player acceptance yet; keep it refused until that run is recorded.
+local acceptance = {
+    subsidies = true,
+    rename = true,
+    waypoints = true,
+    terraform = true,
+    bridges = true,
+    perks = false,
+    preservation = false,
+    signals = true,
+    splitSignals = true,
+    paint = true,
+    assets = true,
+    crossings = false,
+}
 
 function acceptance.check(action)
     local feature
     if action.Subsidy then feature = "subsidies" end
     if action.Terraform then feature = "terraform" end
+    -- Terrain paint (action::TerrainPaint, schema 27).
+    if action.Paint then feature = "paint" end
+    -- The asset brush (action::AssetStroke, schema 27).
+    if action.PlantAssets then feature = "assets" end
     if action.Perk then feature = "perks" end
     -- A town building's Historic Preservation (action::Preservation).
     if action.Preserve then feature = "preservation" end
@@ -37,6 +58,8 @@ function acceptance.check(action)
     for _, link in ipairs(polyline and polyline.links or {}) do
         if link.kept and #link.kept > 0 then feature = "splitSignals" end
     end
+    -- A level crossing's type from its window (action::CrossingType).
+    if action.SetCrossingType then feature = "crossings" end
     if action.Rename or (action.VehicleOp and type(action.VehicleOp.change) == "table"
         and action.VehicleOp.change.Recolor) then feature = "rename" end
     local line = action.CreateLine and action.CreateLine.line

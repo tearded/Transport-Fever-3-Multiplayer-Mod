@@ -95,6 +95,8 @@ pub fn polyline(vertices: Vec<Vertex>, structure: &Structure) -> Polyline {
             };
             Link {
                 precedence: None,
+                position0: None,
+                position1: None,
                 kept: BoundedVec::default(),
 
                 from: u16::try_from(i).expect("few vertices"),
@@ -1265,12 +1267,69 @@ fn junctions_scenario() -> Scenario {
         )
 }
 
+/// The junction edit a room carries before the junction acceptance: the
+/// junction window's double slip switch where two tracks cross, turned on
+/// and off again, the preference set to No with it as the window does.
+fn double_slip_scenario() -> Scenario {
+    use tpf3mp_proto::action::{
+        JunctionChange, JunctionConfig, JunctionEdit, NodeRef, TrafficPreference,
+    };
+    let (west, crossing, east) = (at(0, 0), at(1000, 0), at(2000, 0));
+    let (south, north) = (at(1000, -1000), at(1000, 1000));
+    let switch = |double_slip| {
+        Action::EditJunctions(JunctionEdit {
+            changes: list(vec![JunctionChange {
+                node: NodeRef {
+                    network: Network::Track,
+                    at: crossing,
+                },
+                config: Some(JunctionConfig {
+                    connections: list(vec![]),
+                    crosswalks: list(vec![]),
+                    preference: TrafficPreference::No,
+                    light: None,
+                    phases: list(vec![]),
+                    double_slip,
+                    custom_phases: false,
+                }),
+            }]),
+        })
+    };
+    Script::default()
+        .act(
+            0,
+            track(
+                vec![new(west), new(crossing), new(east)],
+                &Structure::Ground,
+            ),
+        )
+        .act(
+            0,
+            track(
+                vec![new(south), node(crossing, Network::Track), new(north)],
+                &Structure::Ground,
+            ),
+        )
+        .expect(Check::TrackEdges(4))
+        .act(0, switch(true))
+        .expect_all([Check::Junctions(1), Check::Ignored(0)])
+        .act(0, switch(false))
+        .expect_all([Check::Junctions(1), Check::Ignored(0)])
+        .scenario(
+            "double_slip",
+            "a double slip switch where two tracks cross, turned on and off again",
+            true,
+            2,
+        )
+}
+
 /// Every scenario, the quick ones first.
 pub fn scenarios() -> Vec<Arc<Scenario>> {
     let mut all = vec![
         bus_line_scenario(),
         rail_line_scenario(),
         junctions_scenario(),
+        double_slip_scenario(),
         two_companies_scenario(),
         airport_support_scenario(),
         refusals_scenario(),

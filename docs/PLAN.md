@@ -300,7 +300,12 @@ the hook):
   demonstrated crosswalk toggles, a lane-connection change and traffic
   lights with matching network checkpoints. Custom phases/reset,
   geometry preservation and the remaining HOOKS.md acceptance checks
-  are still required before enabling it.
+  are still required before enabling it. *Added (D30, owner-approved
+  2026-10-17):* with the switch off, one edit goes already:
+  the junction window's double slip switch, exactly as seen in a
+  two-game room on build 40420 (BUILDING.md, "Junction edits"), with a
+  regression scenario `double_slip`. The crossing tool's tram lanes
+  stay refused until the tool is seen in the game.
 - [ ] Line priority per line; loading rules per station or line.
 - [ ] The new click-to-assign line creation: a new UI flow, captured from
   scratch.
@@ -412,6 +417,22 @@ Dev C:
 
 - [ ] Roads with lane connections, tram lanes and ramps; track types and
   underground segments.
+- [ ] *Added, proposed (for the owner):* level crossing types. A type
+  picked in a crossing's window was dropped in a room without a word
+  (2026-10-16). Built: the hook reads the window's type-only map shape, and
+  its preparatory path forms `SetCrossingType` (action schema 27): the
+  crossing by its nodes' places, the type by its file; the player is told
+  when it is refused; the network lane reads every crossing's type. The PR
+  author reported staged Japan_2 two-player runs on 2026-10-17, but ordinary-
+  start acceptance is not established here, so `acceptance.lua`'s `crossings`
+  gate remains off. The ordinary window may emit a Rebuild even for a plain
+  type swap; the normal UI flow remains unimplemented and refused unless the
+  native proposal has the type-only map shape. Window rebuilds that map nodes
+  while changing segments or junctions are refused because the type-only
+  action cannot prove or reproduce those changes. Open: ordinary-start
+  two-player acceptance and the type the road and track tools pick for a new
+  crossing (`rcType`), not carried ([HOOKS.md](HOOKS.md), "Level crossing
+  types").
 - [ ] Landmarks, built once: the second on the same turn is refused and
   pays nothing.
 - [ ] Warehouses, specialised terminals, maintenance facilities, noise
