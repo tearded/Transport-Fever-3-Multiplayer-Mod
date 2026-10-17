@@ -38,7 +38,7 @@ The shape tells the tool apart (measured unless noted):
 | stop, signal, waypoint placement | the edge removed and re-added, plus one edge-object record |
 | stop or signal bulldoze | the edge removed and re-added without the object |
 | construction bulldoze | `toRemove` populated, nothing added |
-| road or track bulldoze | removed nodes and segments, nothing added; on TPF3 a town street's also lists the town buildings along it in `toRemove` (seen on build 40408) |
+| road or track bulldoze | removed nodes and segments, nothing added; on TPF3 a town street's also lists the town buildings along it in `toRemove` (seen on build 40408); a street's branch, or a track's stub ending on a street, removed also removes the junction node and its two street edges and adds one edge joining their far ends, carried as a `BuildRoad` (seen on build 40420) |
 | tree or asset bulldoze (TPF3) | the asset group in `toRemove`, and `toAdd` one construction of no file, its desc `autoRemovable`: the group rebuilt without the assets removed, thin instances then full ones (`CreateProposalAddAsset`, decompiled; the shape seen on build 40408); nothing added when the last assets of a group go |
 | terraform | no nodes or segments; a `Grid<{height, base}>` of 4 m cells |
 | paint | no nodes or segments; the material index grid and its mask |
@@ -108,10 +108,13 @@ Each instance resolves every vertex against its own world, in this order
 (measured; the older `mp_bridge` mod had found the same rule and called it
 "the road intersection bug"):
 
-1. a node of the same network within 1.5 m, compared **horizontally only**
-   (the engine settles nodes at heights other than the requested ones on
-   embankments and smoothed terrain, so a 3D tolerance fails on every slope):
-   reuse it;
+1. a node of the same network within 1.5 m horizontally and 0.5 m in
+   height, the nearest: reuse it. The engine settles nodes at heights other
+   than the requested ones on embankments and smoothed terrain, so a vertex
+   naming an existing node carries that node's own position as it stands,
+   its settled height included, never the height the tool asked for. A node
+   0.5 m or more above or below it (a track or road stacked over another)
+   is not it, and two nodes exactly as near refuse the build;
 2. else an edge underneath (track snaps within 2.0 m, roads within 5.0 m):
    **split** it, removing the edge and re-adding both halves around a new
    node with Hermite tangents scaled by the parameter interval so the curve
@@ -528,7 +531,7 @@ recorded separately in the validation report.
 On TF3 the mod carries a stop placed with the stop tool, and a stop the
 bulldozer removes, the same way (HOOKS.md, "The build tools"): a
 `PlaceStop` or `Bulldoze::EdgeObject` read off the tool's proposal, the
-edge named by its ends within 0.5 m, the stop's place by the point of the
+edge named by its ends within 0.5 m, horizontally and in height, the stop's place by the point of the
 edge's centreline where it stands, and the stop's construction, which the
 GUI notes from the construction menu (TF3's proposal does not name it). A
 two-sided stop goes as one `PlaceStop` built on both sides. A stop that
@@ -746,9 +749,13 @@ a link, every removed edge and node a removal. A node, tangent or removal it
 cannot place, a stop or signal on an edge it moves or removes, or a
 construction in the proposal fails the whole capture, and the tool shows
 why. The replay (`tpf3mp/apply.lua`) finds existing nodes within 1.5 m
-horizontally, the nearest, and edges and removed nodes by their ends within
-0.5 m, in the world before the build; one that is not there, or an edge to
-remove with a stop or signal on it, fails the build in every game alike.
+horizontally, and edges and removed nodes by their ends within 0.5 m
+horizontally, each node also within 0.5 m in height, the nearest, in the
+world before the build. The ends are the nodes' own positions, so an
+elevated track over an older one along the same line is named apart from
+it (until 2026-10-16 the match ignored height and took the lower). One that
+is not there, two nodes exactly as near, or an edge to remove with a stop or
+signal on it, fails the build in every game alike.
 A node's lane configuration (`BASE_NODE_CONFIG`) names the edges at it, and
 on build 40408 the game cannot read a script proposal that removes an edge
 a configuration still names (`makeProposalData` raises "Unknown exception"

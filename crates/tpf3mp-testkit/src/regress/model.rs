@@ -80,6 +80,8 @@ pub const MAX_RANK: u8 = 15;
 
 /// Tolerances of `docs/BUILDING.md`, in millimetres.
 const NODE_TOLERANCE: i64 = 1_500;
+/// How far above or below its node a vertex naming it may be.
+const HEIGHT_TOLERANCE: i64 = 500;
 const EDGE_TOLERANCE: i64 = 1_000;
 const CONSTRUCTION_TOLERANCE: i64 = 2_000;
 
@@ -1258,13 +1260,17 @@ impl State {
         self.charge(company, cells.saturating_mul(TERRAFORM_COST_PER_CELL))
     }
 
-    /// The node of `network` nearest `pos`, within the node tolerance.
+    /// The node of `network` nearest `pos`, within the node tolerance
+    /// horizontally and the height tolerance in height.
     fn find_node(&self, network: u8, pos: P) -> Option<P> {
         self.edges
             .keys()
             .filter(|(n, _, _)| *n == network)
             .flat_map(|(_, a, b)| [*a, *b])
-            .filter(|end| within_horizontally(*end, pos, NODE_TOLERANCE))
+            .filter(|end| {
+                within_horizontally(*end, pos, NODE_TOLERANCE)
+                    && (i64::from(end[2]) - i64::from(pos[2])).abs() <= HEIGHT_TOLERANCE
+            })
             .min_by_key(|end| (dist2(*end, pos), *end))
     }
 

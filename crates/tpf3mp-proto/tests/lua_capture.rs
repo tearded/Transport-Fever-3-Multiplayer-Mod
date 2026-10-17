@@ -653,6 +653,86 @@ fn a_stop_moves_with_a_road_only_on_the_edge_rebuilt_in_place() {
     assert!(why.contains("adds a stop or signal"), "{why}");
 }
 
+/// The bulldozer over a track's stub that ends on the country street 8-9-10
+/// at its node 9 (a level crossing), as build 40420 proposed it in a room
+/// (2026-10-16): the stub 120 (9-32) and its far node 32 go, the crossing
+/// node 9 goes, and its street edges 100 and 101 are joined into one edge
+/// 8-10. `JOIN` names the added edge's ends, `OBJECTS` the objects on the
+/// street edge 100, `TO_REMOVE` the constructions the bulldozer takes.
+const STUB_PROPOSAL: &str = "{ toAdd = {}, toRemove = TO_REMOVE, proposal = {
+    addedNodes = {},
+    addedSegments = {
+        { entity = -1, type = 0, comp = { node0 = 8, node1 = JOIN, tangent0 = v(0, 80, 0), tangent1 = v(0, 80, 0),
+          type = 0, typeIndex = -1, roadTemplate = 'street/country.street_template', roadStyle = '',
+          objects = {} } },
+    },
+    removedSegments = { { entity = 120, type = 1, comp = { node0 = 9, node1 = 32, objects = {} } },
+                        { entity = 100, type = 0, comp = { node0 = 8, node1 = 9, objects = OBJECTS } },
+                        { entity = 101, type = 0, comp = { node0 = 9, node1 = 10, objects = {} } } },
+    removedNodes = { { entity = 9, comp = { position = v(50, 1, 0) } },
+                     { entity = 32, comp = { position = v(10, 1, 0) } } },
+} }";
+
+/// The bulldozer's capture of [`STUB_PROPOSAL`], the stub on node 9.
+fn capture_stub(join: &str, objects: &str, to_remove: &str) -> Result<LuaValue, String> {
+    let proposal = STUB_PROPOSAL
+        .replace("JOIN", join)
+        .replace("OBJECTS", objects)
+        .replace("TO_REMOVE", to_remove);
+    capture_with(
+        "nil",
+        &format!(
+            "(function() NODES[32] = v(10, 1, 0) TRACKS[9] = {{ 120 }} TRACKS[32] = {{ 120 }} \
+             return engine.bulldoze({proposal}) end)()"
+        ),
+    )
+}
+
+/// The game's own removal of such a stub joins nothing, and the game
+/// refused it ("Construction Not Possible", a room on build 40420): the
+/// stub travels with the join, as the build the bulldozer proposes, its
+/// stub removed in its own network.
+#[test]
+fn a_stub_bulldozed_off_a_street_travels_with_the_street_joined() {
+    let action = decode(capture_stub("10", "{}", "{}").unwrap());
+    let Action::BuildRoad(road) = action else {
+        panic!("{action:?}")
+    };
+    assert_eq!(road.street.as_str(), "street/country.street_template");
+    let polyline = &road.polyline;
+    assert_eq!(polyline.links.len(), 1);
+    assert_eq!(polyline.vertices.len(), 2);
+    assert!(
+        polyline
+            .vertices
+            .iter()
+            .all(|v| matches!(v.resolve, Resolve::Node(Network::Street)))
+    );
+    let networks: Vec<_> = polyline.removals.iter().map(|r| r.network).collect();
+    assert_eq!(networks, [Network::Track, Network::Street, Network::Street]);
+    let nodes: Vec<_> = polyline.removed_nodes.iter().map(|n| n.network).collect();
+    assert_eq!(nodes, [Network::Street, Network::Track]);
+}
+
+#[test]
+fn a_bulldozer_join_the_room_cannot_account_for_is_refused() {
+    // An added edge that joins no two removed edges at a removed node.
+    let why = capture_stub("32", "{}", "{}").unwrap_err();
+    assert_eq!(why, "a bulldozer proposal that builds");
+    // A signal on a street edge it joins: it would move onto the new edge.
+    let why = capture_stub("10", "{ { 555, 1 } }", "{}").unwrap_err();
+    assert!(
+        why.contains("removes an edge with a stop or signal"),
+        "{why}"
+    );
+    // Town buildings along a street it removes.
+    let why = capture_stub("10", "{}", "{ 900 }").unwrap_err();
+    assert_eq!(
+        why,
+        "removing a street with town buildings where the bulldozer joins the streets left"
+    );
+}
+
 /// A road the tool draws through a town's house: the house goes with the
 /// build, which every game's build clears again; a station in the way does
 /// not.

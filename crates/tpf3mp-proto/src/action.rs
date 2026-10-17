@@ -203,7 +203,7 @@ pub struct EdgeRef {
 }
 
 /// An existing node, named by its position, in a given network: matched
-/// within 1.5 m horizontally, the nearest.
+/// within 0.5 m horizontally and in height, the nearest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeRef {
     pub network: Network,
@@ -277,8 +277,9 @@ pub struct ConstructionRef {
 pub enum Resolve {
     /// A new node, attached to nothing that already existed.
     New,
-    /// The existing node of this network at the vertex (within 1.5 m,
-    /// horizontally). A track vertex on a street node is a level crossing.
+    /// The existing node of this network at the vertex (within 1.5 m
+    /// horizontally and 0.5 m in height, the nearest). A track vertex on a
+    /// street node is a level crossing.
     Node(Network),
     /// A new node splitting this existing edge at the vertex. The halves
     /// keep the split edge's own type and flags.
@@ -504,8 +505,8 @@ pub struct TrackBuild {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Bulldoze {
-    /// Edges of one network, matched by their ends within 1 m. Nodes left
-    /// with no edge go with them.
+    /// Edges of one network, matched by their ends within 0.5 m,
+    /// horizontally and in height. Nodes left with no edge go with them.
     Edges {
         network: Network,
         edges: BoundedVec<EdgeEnds, MAX_EDGES>,

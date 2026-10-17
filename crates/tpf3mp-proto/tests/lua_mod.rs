@@ -7949,6 +7949,105 @@ fn the_bulldozer_removes_a_construction_or_edges_in_every_game() {
     assert_eq!(why, "removing an edge with a stop or signal on it");
 }
 
+/// Two tracks stacked over each other along the same line, the older one
+/// on the ground (nodes 20 and 21, edge 200) and an elevated one 10 m above
+/// it (nodes 30 and 31, edge 300); the street 8-9 (edge 100) with a street
+/// 10 m above it (nodes 40 and 41, edge 102). The lower ones have the lower
+/// entity ids, which a match by horizontal place alone used to choose.
+const STACKED: &str = "
+NODES[20] = { x = 0, y = 0, z = 0 } NODES[21] = { x = 100, y = 0, z = 0 }
+NODES[30] = { x = 0, y = 0, z = 10 } NODES[31] = { x = 100, y = 0, z = 10 }
+EDGES[200] = { node0 = 20, node1 = 21, tangent0 = { x = 100, y = 0, z = 0 },
+               tangent1 = { x = 100, y = 0, z = 0 }, objects = {} }
+EDGES[300] = { node0 = 30, node1 = 31, tangent0 = { x = 100, y = 0, z = 0 },
+               tangent1 = { x = 100, y = 0, z = 0 }, objects = {} }
+TRACKS = { [20] = { 200 }, [21] = { 200 }, [30] = { 300 }, [31] = { 300 } }
+local streets = api.engine.system.streetSystem
+streets.getNode2TrackEdgeMap = function()
+    local m = {}
+    for node, edges in pairs(TRACKS) do m[node] = edges end
+    return m
+end
+streets.getNodeTrackSegments = function(node) return TRACKS[node] or {} end
+NODES[40] = { x = 50, y = -40, z = 10 } NODES[41] = { x = 50, y = 40, z = 10 }
+EDGES[102] = { node0 = 40, node1 = 41, tangent0 = { x = 0, y = 80, z = 0 }, tangent1 = { x = 0, y = 80, z = 0 },
+               objects = {}, roadTemplate = '::/street/country.street_template', laneConfigs = { 'country lanes' } }
+STREETS[40] = { 102 } STREETS[41] = { 102 }
+api.engine.util.proposal = {
+    makeSegmentsRemoveProposal = function(ids) return { removesEdges = table.concat(ids, ',') } end }
+";
+
+/// A track or street named by its ends is the one at their height: with an
+/// elevated track over an older one along the same line, a bulldoze or a
+/// split of either is of that one in every game, never of the one above or
+/// below it (2026-10-16: a match by horizontal place alone took the lower,
+/// the lower entity id). Ends at neither height name nothing, and two
+/// nodes as near refuse the action rather than choosing between them.
+#[test]
+fn a_track_over_another_is_named_by_its_height() {
+    let (lua, _script) = engine();
+    lua.load(FAKE_NETWORK).exec().unwrap();
+    lua.load(STACKED).exec().unwrap();
+    // A bulldoze of the ends at `z`, as every game applies it: the edges it
+    // removes, or why it removes none.
+    let bulldoze = |setup: &str, z: &str| -> String {
+        lua.load(format!(
+            "{setup} SENT = {{}} HOOK.logged = {{}} \
+             HOOK.batch = {{ {{ Bulldoze = {{ Edges = {{ network = 'Track', buildings = {{}}, \
+                 edges = {{ {{ a = {{ x = 100, y = 0, z = {z} }}, b = {{ x = 0, y = 0, z = {z} }} }} }} }} }} }} }} \
+             UPDATE({{}}, STATE, 0.2)"
+        ))
+        .exec()
+        .unwrap_or_else(|error| panic!("{error}"));
+        lua.load(
+            "if #SENT > 0 then return SENT[1].proposal.removesEdges end \
+             return 'refused: ' .. table.concat(HOOK.logged, '|')",
+        )
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}"))
+    };
+    assert_eq!(bulldoze("", "10"), "300", "the elevated track");
+    assert_eq!(bulldoze("", "0"), "200", "the track on the ground");
+    let between = bulldoze("", "5");
+    assert!(
+        between.starts_with("refused") && between.contains("no Track edge to remove (1)"),
+        "{between}"
+    );
+    let twice = bulldoze(
+        "NODES[32] = { x = 0, y = 0, z = 10 } TRACKS[32] = { 300 }",
+        "10",
+    );
+    assert!(
+        twice.starts_with("refused") && twice.contains("two nodes as near (0.000, 0.000, 10.000)"),
+        "{twice}"
+    );
+
+    // A road split onto the street 10 m up splits that street, not the one
+    // below it; onto the street below, that one.
+    let split = |z: &str| -> String {
+        let road = ROAD
+            .replace(
+                "{ pos = { x = 50, y = 0, z = 0 }",
+                &format!("{{ pos = {{ x = 50, y = 0, z = {z} }}"),
+            )
+            .replace(
+                "a = { x = 50, y = 40, z = 0 }, b = { x = 50, y = -40, z = 0 }",
+                &format!("a = {{ x = 50, y = 40, z = {z} }}, b = {{ x = 50, y = -40, z = {z} }}"),
+            );
+        lua.load(format!(
+            "NODES[32] = nil TRACKS[32] = nil \
+             local apply = ug_require('tpf3mp_1::/scripts/tpf3mp/apply.lua') \
+             local p, why = apply.proposalOf({road}, {{}}) \
+             if p == nil then return 'refused: ' .. tostring(why) end \
+             return table.concat(p.streetProposal.edgesToRemove, ',')"
+        ))
+        .eval()
+        .unwrap_or_else(|error| panic!("{error}"))
+    };
+    assert_eq!(split("10"), "102", "the street above");
+    assert_eq!(split("0"), "100", "the street below");
+}
+
 #[test]
 fn the_bulldozer_removes_only_a_stock_airports_frozen_runway_signals() {
     let (lua, _script) = engine();
@@ -14686,8 +14785,6 @@ fn unaccepted_ports_cannot_be_sent_or_replayed() {
         local link = assert(bridge.attach(bridge.find()))
         local actions = {
             { Preserve = { building = { file = 'b.con', at = { x = 0, y = 0, z = 0 } }, index = 0, preserved = true } },
-            { CreateLine = { line = { stops = { { waypoints = { {} } } } } } },
-            { EditLine = { line = 1, change = { Update = { stops = { { waypoints = { {} } } } } } } },
             { Perk = { Greenify = { industry = 0 } } },
             { Perk = { Marketing = { town = 0, duration_ms = 1, line_cost_factor = 0.5, cost = 1 } } },
         }
@@ -14698,11 +14795,13 @@ fn unaccepted_ports_cannot_be_sent_or_replayed() {
             assert(not applied and why:find('awaits two%-player game acceptance'), tostring(why))
         end
         assert(#HOOK.commands == 0)
-        -- Renaming and recolouring (investigation/TPF3_RENAME_2026-10-07.md)
-        -- and subsidies (investigation/TPF3_SUBSIDIES_2026-10-07.md) passed
-        -- two-player game acceptance: neither port refuses them for it any
-        -- more, whatever else it finds wrong.
+        -- Renaming and recolouring (investigation/TPF3_RENAME_2026-10-07.md),
+        -- subsidies (investigation/TPF3_SUBSIDIES_2026-10-07.md) and line
+        -- waypoints (2026-10-16) passed two-player game acceptance: neither
+        -- port refuses them for it any more, whatever else it finds wrong.
         local accepted = {
+            { CreateLine = { line = { stops = { { waypoints = { {} } } } } } },
+            { EditLine = { line = 1, change = { Update = { stops = { { waypoints = { {} } } } } } } },
             { Rename = { what = { Vehicle = 1 }, name = 'x' } },
             { VehicleOp = { vehicle = 1, change = { Recolor = { r = 1, g = 0, b = 0 } } } },
             { Subsidy = { Accept = { uid = 1, kind = 'x' } } },

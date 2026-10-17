@@ -880,6 +880,56 @@ local function airportRemovalSignals(construction, segments, removedObjects)
 	return true
 end
 
+-- Whether every edge a bulldozer's street proposal adds joins two of the
+-- edges it removes where they meet at a node it removes, between their
+-- other ends. A street's branch removed, or a track's stub ending on a
+-- street, takes the junction or crossing node with it, and the bulldozer
+-- joins the two street edges left there into one (a room, build 40420,
+-- 2026-10-16: [-n39316 +e-1/0:159842>76648 -e39330:39316>39317
+-- -e39328:159842>39316 -e39329:39316>76648], e39330 the track's stub); a
+-- track's switch stays. The game's own removal of the branch alone
+-- (makeSegmentsRemoveProposal) joins nothing and was refused there
+-- ("Construction Not Possible"), so the join travels with it.
+local function joinsOnly(street)
+	local gone = {}
+	for _, n in ipairs(list(get(street, "removedNodes"))) do
+		local e = get(n, "entity")
+		if type(e) ~= "number" then return false end
+		gone[e] = true
+	end
+	local removed, used = list(get(street, "removedSegments")), {}
+	-- The end of a removed edge opposite node n, if it touches n.
+	local function across(seg, n)
+		local c = get(seg, "comp")
+		if get(c, "node0") == n then return get(c, "node1") end
+		if get(c, "node1") == n then return get(c, "node0") end
+		return nil
+	end
+	for _, seg in ipairs(list(get(street, "addedSegments"))) do
+		local comp = get(seg, "comp")
+		local a, b = get(comp, "node0"), get(comp, "node1")
+		local found
+		for i, s in ipairs(removed) do
+			for _, n in ipairs({ get(get(s, "comp"), "node0"), get(get(s, "comp"), "node1") }) do
+				if gone[n] and n ~= a and n ~= b and across(s, n) == a then
+					for j, t in ipairs(removed) do
+						if j ~= i and across(t, n) == b then
+							if found ~= nil then return false end
+							found = { i, j }
+						end
+					end
+				end
+			end
+		end
+		if found == nil or used[found[1]] or used[found[2]] then return false end
+		for _, k in ipairs(found) do
+			if get(removed[k], "type") ~= get(seg, "type") then return false end
+		end
+		used[found[1]], used[found[2]] = true, true
+	end
+	return true
+end
+
 -- The bulldozer's proposal as a Bulldoze action (tpf3mp_proto
 -- action::Bulldoze): one construction, by its file and position, whose own
 -- entrance edge and node the game removes with it; or edges of one network,
@@ -892,10 +942,26 @@ function engine.bulldoze(proposal)
 	local ok, action = pcall(function()
 		local street = get(proposal, "proposal")
 		if street == nil then error("a proposal with no street proposal", 0) end
-		-- A stop removed: its edge rebuilt without it, nothing else.
+		-- A stop removed: its edge rebuilt without it, nothing else (no
+		-- node goes; a junction removed with a branch does, below).
 		if #list(get(proposal, "toAdd")) == 0 and #list(get(proposal, "toRemove")) == 0
-			and #list(get(street, "addedSegments")) == 1 and #list(get(street, "addedNodes")) == 0 then
+			and #list(get(street, "addedSegments")) == 1 and #list(get(street, "addedNodes")) == 0
+			and #list(get(street, "removedNodes")) == 0 then
 			return removeStop(street)
+		end
+		-- A branch removed where the bulldozer joins the two edges left at
+		-- its junction: carried as the build it is, a BuildRoad or
+		-- BuildTrack that removes the edges and nodes and adds the joining
+		-- edge, as a road modifier's build is (engine.captureModify).
+		if #list(get(proposal, "toAdd")) == 0 and #list(get(street, "addedNodes")) == 0
+			and #list(get(street, "addedSegments")) > 0 and joinsOnly(street) then
+			if #list(get(proposal, "toRemove")) > 0 then
+				error("removing a street with town buildings where the bulldozer joins the streets left", 0)
+			end
+			local capture = engine.fromProposal(proposal, nil, false)
+			local built, why = roads.capture(capture, engine.world())
+			if built == nil then error(tostring(why), 0) end
+			return built
 		end
 		if #list(get(proposal, "toAdd")) > 0 or #list(get(street, "addedSegments")) > 0
 			or #list(get(street, "addedNodes")) > 0 then

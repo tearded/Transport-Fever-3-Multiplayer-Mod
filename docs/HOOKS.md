@@ -1,8 +1,7 @@
 # The native hook
 
-Acceptance status: waypoint mechanics described below are implemented but
-disabled by `tpf3mp/acceptance.lua`. They are refused on submission and
-replay until ordinary two-player game acceptance. Entity rename/recolour
+Acceptance status: line waypoints passed ordinary two-player game
+acceptance on 2026-10-16 and are enabled. Entity rename/recolour
 ([investigation/TPF3_RENAME_2026-10-07.md](../investigation/TPF3_RENAME_2026-10-07.md))
 and subsidies
 ([investigation/TPF3_SUBSIDIES_2026-10-07.md](../investigation/TPF3_SUBSIDIES_2026-10-07.md))
@@ -3011,6 +3010,19 @@ construction's window its edits:
   itself, `createProposalRemove` for the construction and
   `makeSegmentsRemoveProposal` for the edges (on build 40408 the first
   gave exactly the bulldozer's proposal), and the player's company pays.
+  A street's branch removed, or a track's stub ending on a street (a
+  level crossing), takes the junction or crossing node with it, and the
+  bulldozer joins the two street edges left there into one new edge
+  between their far ends (seen in a room on build 40420, 2026-10-16; until
+  then refused as "a stop build that adds or removes nodes"). The game's
+  own `makeSegmentsRemoveProposal` of the stub alone joins nothing, and
+  the game refused that removal ("Construction Not Possible"). So such a
+  proposal, every edge it adds such a join, travels as the build it is: a
+  `BuildRoad` or `BuildTrack` of the joining edge between the existing
+  far nodes, with the removed edges (each in its own network) and nodes
+  as its removals, as a road modifier's build travels. A stop or signal
+  on a joined edge, or town buildings the bulldozer takes with it, are
+  refused.
   A town building is a construction like any (one that lists its
   `townBuildings`) and goes the same way. A town street's proposal lists
   the town buildings along it in `toRemove` too; they travel beside the

@@ -34,9 +34,9 @@ load gating and save setup. This is not a fresh two-player game playthrough.
 
 ## Implemented, refused pending game acceptance
 
-Line waypoints have capture, schema and replay code, but
-`content/scripts/tpf3mp/acceptance.lua` disables them. Both command
-submission and replay refuse this channel. Entity renaming and vehicle
+Line waypoints passed local two-player acceptance on build 40420 on
+2026-10-16 (a line edited with waypoints in a room, both games' rolling
+world checks alike) and are enabled. Entity renaming and vehicle
 recolouring
 ([the validation record](../investigation/TPF3_RENAME_2026-10-07.md)) and
 subsidies, with their settlement between companies

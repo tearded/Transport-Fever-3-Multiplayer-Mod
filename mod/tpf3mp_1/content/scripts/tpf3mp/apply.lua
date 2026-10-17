@@ -850,7 +850,7 @@ end
 -- (mission/tasks/auto_builder/track_builder.tl): new nodes and edges with
 -- negative ids, existing nodes by their own. A vertex resolves as the
 -- originator's tool resolved it: New; the existing node of its network
--- within 1.5 m horizontally, the nearest; or a split of the existing edge
+-- within 1.5 m horizontally and 0.5 m in height, the nearest; or a split of the existing edge
 -- between the nodes at its ends, cut in two at the vertex into halves that
 -- keep the edge's own component, their tangents scaled to the part of the
 -- curve each covers. The edges and nodes a build removes are found the same
@@ -876,6 +876,11 @@ local NODE_TOLERANCE = 1.5
 -- How near its node each end of a named edge is: the ends are the node's own
 -- positions, rounded to the millimetre.
 local END_TOLERANCE = 0.5
+-- How far above or below its node a vertex or an end naming it is. Each is
+-- the node's own position, rounded to the millimetre, so its height is the
+-- node's; a track or road stacked over another stands metres apart from it,
+-- and without the height a bulldoze of the upper one removed the lower.
+local HEIGHT_TOLERANCE = 0.5
 
 local function arr(v) return { v.x or v[1], v.y or v[2], v.z or v[3] } end
 local function vec(p) return api.type.Vec3f.new(p[1], p[2], p[3]) end
@@ -1008,21 +1013,32 @@ local function nodesOfNetwork(network)
 	end
 end
 
--- The node of `nodes` nearest `p` horizontally within `tol`, the lower id
--- on a tie; nil when none is. `nodes` is a list, or a network's nodes as
--- nodesOfNetwork answers them.
+-- The node of `list` at `p`: within `tol` horizontally and
+-- HEIGHT_TOLERANCE in height, the nearest in three dimensions; nil when none
+-- is. Two as near refuse it, never chosen between by this game's own
+-- entities (D8).
 local function nearestIn(list, p, tol)
-	local best, bestD
+	local best, bestD, tie
 	for _, n in ipairs(list) do
-		local dx, dy = n.pos[1] - p[1], n.pos[2] - p[2]
-		local d = dx * dx + dy * dy
-		if d <= tol * tol and (bestD == nil or d < bestD or (d == bestD and n.id < best.id)) then
-			best, bestD = n, d
+		local dx, dy, dz = n.pos[1] - p[1], n.pos[2] - p[2], n.pos[3] - p[3]
+		local h = dx * dx + dy * dy
+		if h <= tol * tol and math.abs(dz) <= HEIGHT_TOLERANCE then
+			local d = h + dz * dz
+			if bestD == nil or d < bestD then
+				best, bestD, tie = n, d, false
+			elseif d == bestD then
+				tie = true
+			end
 		end
+	end
+	if tie then
+		error(string.format("two nodes as near (%.3f, %.3f, %.3f)", p[1], p[2], p[3]), 0)
 	end
 	return best
 end
 
+-- As nearestIn, where `nodes` is a list, or a network's nodes as
+-- nodesOfNetwork answers them.
 local function nearest(nodes, p, tol)
 	if type(nodes) ~= "function" then return nearestIn(nodes, p, tol) end
 	return nearestIn(nodes(p, tol), p, tol) or nearestIn(nodes(p, tol, true), p, tol)
