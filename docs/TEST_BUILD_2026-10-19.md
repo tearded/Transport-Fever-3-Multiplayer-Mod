@@ -36,6 +36,8 @@ both hook logs; the rolling world checks stayed equal throughout.
 | 15 | asset brush and tree bulldozing (#160) | passed, but a second tree click within the same second on the same group is dropped (below) |
 | 16 | line waypoints (#159) | passed |
 | 17 | stops clicked while a new line is created (#160) | passed |
+| 18 | other players' builds without stutter (#163) | felt "a bit": the watching game drew the builder's previews at up to 243 ms a frame (10 previews drawn in 1925 ms within 10 s) and applied each build in 300 to 500 ms (junctions, verdict, commands) |
+| 19 | rolling world checks without stutter (#111) | stutter felt, but not from the checks (at most 25 ms): at fast speed the game's own step took 79 % of the time (41 ms an update, 4 and more updates a frame), the hook under 1 %, two games on one 8-core PC |
 
 ### Findings
 
