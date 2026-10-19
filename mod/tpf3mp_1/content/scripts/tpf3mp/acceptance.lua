@@ -54,8 +54,8 @@ local acceptance = {
     refitSignals = true,
     paint = true,
     assets = true,
-    crossings = false,
-    crossingTypes = false,
+    crossings = true,
+    crossingTypes = true,
     rejoinConstruction = false,
 }
 
