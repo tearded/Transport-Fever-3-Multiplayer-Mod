@@ -34,6 +34,8 @@ both hook logs; the rolling world checks stayed equal throughout.
 | 13 | rail station snapped onto track ends (#155, #138, #171) | passed: a modular station snapped and built in both |
 | 14 | terrain paint (#160) | passed |
 | 15 | asset brush and tree bulldozing (#160) | passed, but a second tree click within the same second on the same group is dropped (below) |
+| 16 | line waypoints (#159) | passed |
+| 17 | stops clicked while a new line is created (#160) | passed |
 
 ### Findings
 
@@ -73,3 +75,13 @@ both hook logs; the rolling world checks stayed equal throughout.
   Follow-up, low priority: name the group by what is left after the
   room's pending removals, or let the replay find the group without the
   tree already removed.
+- **A street started near a node beside a bus stop is refused** (seen
+  while building in points 16/17, three times at two stops). The street
+  tool removes the node, lays the pieces on either side again and puts the
+  stop back on its new piece (`-o73131 … +o{resultEntity=-400000000 …}`),
+  as the track tool does with a signal (#168). The room refuses it with
+  "Not in multiplayer yet: a build with a stop or signal" (streetBuilder);
+  single player builds it. Workaround: start the street farther from the
+  node. Follow-up: carry a stop the street tool puts back the way #168
+  carries a signal (the stop found by its construction where it stood,
+  kept on the piece that holds its place).
