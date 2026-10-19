@@ -54,7 +54,8 @@ both hook logs; the rolling world checks stayed equal throughout.
   game): the window's rebuild carried 128 junction settings
   (`nodeConfigsToAdd` of the rebuilt track), over the action's
   `MAX_JUNCTIONS` = 64 (`tpf3mp-proto` action.rs), so the hook refused the
-  action before it was sent. Nothing diverged. The 2026-10-11 acceptance
+  action before it was sent; the bridge was a very long track bridge.
+  Nothing diverged. The 2026-10-11 acceptance
   ran on short bridges; a longer track bridge exceeds the bound. Follow-up:
   check whether the window lists each node's settings once, and whether
   unchanged settings can be left out, before raising the bound (a protocol
