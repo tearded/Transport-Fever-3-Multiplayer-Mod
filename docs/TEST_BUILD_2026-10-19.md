@@ -27,6 +27,10 @@ both hook logs; the rolling world checks stayed equal throughout.
 | 6 | stacked tracks: bulldoze the upper, the lower, split the lower (#161) | passed |
 | 7 | bulldoze a track stub on a street and a street branch (#162) | passed |
 | 8 | bulldoze a track with signals, a two-sided stop (#164) | passed |
+| 9 | new track between two signals (#165) | passed: "kept 2 signal(s) … moved 0.00 m" in both |
+| 10 | signal the track tool puts back near a node (#168) | passed: "kept 1 signal(s) … moved 0.00 m" in both |
+| 11 | Signal Distance signals (#144) | passed: every signal of points 8–10 was one |
+| 12 | bridge and tunnel type from the window (#143) | tunnel passed; **bridge refused**: "BuildTrack.polyline.junctions: invalid length 128, expected a list of at most 64 items" |
 
 ### Findings
 
@@ -46,3 +50,12 @@ both hook logs; the rolling world checks stayed equal throughout.
   Follow-up: carry it like a track with signals, as `Bulldoze::Edges` whose
   stops every game resolves and removes with their street (the two-sided
   pair check of `Bulldoze::EdgeObjects` included).
+- **A bridge's type change from its window was refused** (point 12, Max2's
+  game): the window's rebuild carried 128 junction settings
+  (`nodeConfigsToAdd` of the rebuilt track), over the action's
+  `MAX_JUNCTIONS` = 64 (`tpf3mp-proto` action.rs), so the hook refused the
+  action before it was sent. Nothing diverged. The 2026-10-11 acceptance
+  ran on short bridges; a longer track bridge exceeds the bound. Follow-up:
+  check whether the window lists each node's settings once, and whether
+  unchanged settings can be left out, before raising the bound (a protocol
+  change).
