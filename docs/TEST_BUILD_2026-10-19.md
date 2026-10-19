@@ -22,6 +22,7 @@ both hook logs; the rolling world checks stayed equal throughout.
 |---|---|---|
 | 1 | toolbar crossing type (#169), road over track and track over road | passed: both games laid `jp_double_rht` and `jp_gantry_single_lht` |
 | 2 | crossing window type (#166) | refused as dev intends: every click was the rebuild shape ("a crossing rebuild with segments or junctions is not carried", 701fda20); nothing diverged |
+| 3 | street and track tools continue from the room's segment (#157, opt-in `TPF3MP_TOOL_CONTINUE=1`) | **failed**: on, but "street tool: does not continue from the clicked segment: the tool's proposal was reset" |
 | 4 | track onto a tram street's end (#158) | passed |
 | 5 | double slip switch (#156) | partly: works at an older crossing that has junction settings (EditJunctions applied in both); **refused at a newly built crossing**: "junction tools await the two-player acceptance test (strict_junctions): a junction with no settings yet (lanes ->0)" (`junctions.lua` narrowWhyNot, `old == nil`) |
 | 6 | stacked tracks: bulldoze the upper, the lower, split the lower (#161) | passed |
@@ -90,3 +91,22 @@ both hook logs; the rolling world checks stayed equal throughout.
   node. Follow-up: carry a stop the street tool puts back the way #168
   carries a signal (the stop found by its construction where it stood,
   kept on the piece that holds its place).
+- **Tool continuation never continues in an ordinary room start** (point
+  3). With `TPF3MP_TOOL_CONTINUE=1` the hook installed continuation ("the
+  street and track tools continue from the room's segment …"), but after
+  the first street segment: "does not continue from the clicked segment:
+  the tool's proposal was reset". `toolchain::proposal_reset` (called by
+  `previewcancel`'s reset detour) drops a kept click on any reset after its
+  `Add`, assuming the build's own reset comes before; in a room a reset
+  follows the click too, so every continuation is dropped. #157 was
+  game-tested before this guard was added (2026-10-17 integration).
+  Follow-up: tell the game's own post-click reset from a player's abort
+  (or the room's preview withdrawal) before dropping the click.
+- **Other players' previews cost the watching game frames** (point 18):
+  drawing them took up to 243 ms a frame; applying a build 300 to 500 ms.
+
+## Open after this run
+
+- point 2, the crossing window's rebuild shape: the owner's decision
+  (an equivalence proof first, 701fda20);
+- point 19: compare on two PCs before reading anything into it.
