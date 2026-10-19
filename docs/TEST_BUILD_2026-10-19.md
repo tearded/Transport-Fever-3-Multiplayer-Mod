@@ -31,6 +31,9 @@ both hook logs; the rolling world checks stayed equal throughout.
 | 10 | signal the track tool puts back near a node (#168) | passed: "kept 1 signal(s) … moved 0.00 m" in both |
 | 11 | Signal Distance signals (#144) | passed: every signal of points 8–10 was one |
 | 12 | bridge and tunnel type from the window (#143) | tunnel and a 28-piece track bridge passed; **a very long track bridge refused**: "BuildTrack.polyline.junctions: invalid length 128, expected a list of at most 64 items" |
+| 13 | rail station snapped onto track ends (#155, #138, #171) | passed: a modular station snapped and built in both |
+| 14 | terrain paint (#160) | passed |
+| 15 | asset brush and tree bulldozing (#160) | passed, but a second tree click within the same second on the same group is dropped (below) |
 
 ### Findings
 
@@ -62,3 +65,11 @@ both hook logs; the rolling world checks stayed equal throughout.
   check whether the window lists each node's settings once, and whether
   unchanged settings can be left out, before raising the bound (a protocol
   change).
+- **A fast second tree bulldoze in one group is dropped** (point 15,
+  minor). Two clicks within a second on trees of the same asset group were
+  both captured against the group of 19; the first applied (rebuilt with
+  18), the second was refused in both games alike: "no asset group of 19
+  assets with those trees here". The tree stays and needs another click.
+  Follow-up, low priority: name the group by what is left after the
+  room's pending removals, or let the replay find the group without the
+  tree already removed.
