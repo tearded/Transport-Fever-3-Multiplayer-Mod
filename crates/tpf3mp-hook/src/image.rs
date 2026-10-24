@@ -671,7 +671,8 @@ mod tests {
     #[test]
     fn a_freed_page_is_refused_once_the_cache_is_invalidated() {
         use windows_sys::Win32::System::Memory::{
-            MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc, VirtualFree,
+            MEM_COMMIT, MEM_DECOMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc,
+            VirtualFree,
         };
         // SAFETY: a fresh page of our own.
         let page = unsafe {
@@ -685,11 +686,18 @@ mod tests {
         assert_ne!(page, 0);
         assert!(readable_cached(page, 8));
         assert!(readable_cached(page + 8, 8));
+        // Freed but still reserved: a release would let another test's
+        // allocation land on the page before the reads below.
         // SAFETY: the page is ours and nothing refers to it any more.
-        assert_ne!(unsafe { VirtualFree(page as *mut _, 0, MEM_RELEASE) }, 0);
+        assert_ne!(
+            unsafe { VirtualFree(page as *mut _, 0x1000, MEM_DECOMMIT) },
+            0
+        );
         invalidate();
         assert!(!readable_cached(page, 8), "freed, and the cache forgot it");
         assert_eq!(Readable::new().read::<u64>(page as u64), None);
+        // SAFETY: the reservation is ours.
+        assert_ne!(unsafe { VirtualFree(page as *mut _, 0, MEM_RELEASE) }, 0);
     }
 
     #[test]

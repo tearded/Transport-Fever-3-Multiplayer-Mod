@@ -491,8 +491,9 @@ mod tests {
 mod windows_tests {
     use super::*;
     use windows_sys::Win32::System::Memory::{
-        MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, MEMORY_BASIC_INFORMATION, PAGE_GUARD, PAGE_NOACCESS,
-        PAGE_READONLY, PAGE_READWRITE, VirtualAlloc, VirtualFree, VirtualProtect, VirtualQuery,
+        MEM_COMMIT, MEM_DECOMMIT, MEM_RELEASE, MEM_RESERVE, MEMORY_BASIC_INFORMATION, PAGE_GUARD,
+        PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, VirtualAlloc, VirtualFree, VirtualProtect,
+        VirtualQuery,
     };
 
     const PAGE: usize = 0x1000;
@@ -534,6 +535,21 @@ mod windows_tests {
                     PAGE,
                     protection,
                     &mut old,
+                )
+            };
+            assert_ne!(done, 0);
+        }
+
+        /// Frees `count` pages from `page` on but keeps them reserved, so
+        /// no other test's allocation can be placed there while this one
+        /// still reads them (a release would let it).
+        fn decommit(&self, page: usize, count: usize) {
+            // SAFETY: pages of our reservation; nothing refers to them any more.
+            let done = unsafe {
+                VirtualFree(
+                    (self.base + page * PAGE) as *mut _,
+                    count * PAGE,
+                    MEM_DECOMMIT,
                 )
             };
             assert_ne!(done, 0);
@@ -598,10 +614,10 @@ mod windows_tests {
         assert!(probe(pages.base, 8), "the page before it is still fine");
         pages.protect(1, PAGE_READONLY);
         assert_eq!(read::<u64>(pages.base + PAGE), Some(0), "read-only reads");
-        let freed = pages.base;
-        drop(pages);
-        assert!(!probe(freed, 8), "freed");
-        assert_eq!(read::<u64>(freed), None);
+        pages.decommit(0, 2);
+        assert!(!probe(pages.base, 8), "freed");
+        assert_eq!(read::<u64>(pages.base), None);
+        assert_eq!(read::<u64>(pages.base + PAGE), None);
     }
 
     #[test]
